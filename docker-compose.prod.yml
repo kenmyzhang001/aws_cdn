@@ -1,0 +1,31 @@
+version: '3.8'
+
+# 生产环境覆盖配置
+services:
+  backend:
+    restart: always
+    environment:
+      SERVER_MODE: release
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command: postgres -c shared_buffers=256MB -c max_connections=200
+

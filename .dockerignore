@@ -1,0 +1,32 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Frontend
+frontend/node_modules
+frontend/dist
+frontend/.vite
+
+# Backend
+bin/
+*.test
+*.out
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+

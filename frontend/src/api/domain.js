@@ -1,0 +1,39 @@
+import request from './request'
+
+export const domainApi = {
+  // 转入域名
+  transferDomain(data) {
+    return request.post('/domains', data)
+  },
+
+  // 获取域名列表
+  getDomainList(params) {
+    return request.get('/domains', { params })
+  },
+
+  // 获取域名详情
+  getDomain(id) {
+    return request.get(`/domains/${id}`)
+  },
+
+  // 获取 NS 服务器
+  getNServers(id) {
+    return request.get(`/domains/${id}/ns-servers`)
+  },
+
+  // 获取域名状态
+  getDomainStatus(id) {
+    return request.get(`/domains/${id}/status`)
+  },
+
+  // 生成证书
+  generateCertificate(id) {
+    return request.post(`/domains/${id}/certificate`)
+  },
+
+  // 获取证书状态
+  getCertificateStatus(id) {
+    return request.get(`/domains/${id}/certificate/status`)
+  },
+}
+

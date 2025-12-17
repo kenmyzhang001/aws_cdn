@@ -1,0 +1,37 @@
+package models
+
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
+
+// DomainStatus 域名状态
+type DomainStatus string
+
+const (
+	DomainStatusPending    DomainStatus = "pending"     // 待转入
+	DomainStatusInProgress DomainStatus = "in_progress" // 转入中
+	DomainStatusCompleted  DomainStatus = "completed"   // 已完成
+	DomainStatusFailed     DomainStatus = "failed"      // 失败
+)
+
+// Domain 域名模型
+type Domain struct {
+	ID                uint           `json:"id" gorm:"primaryKey"`
+	DomainName        string         `json:"domain_name" gorm:"uniqueIndex;not null"`
+	Registrar         string         `json:"registrar"` // 原注册商
+	Status            DomainStatus   `json:"status" gorm:"default:'pending'"`
+	NServers          string         `json:"n_servers" gorm:"type:text"`                  // NS 服务器配置，JSON 格式
+	CertificateStatus string         `json:"certificate_status" gorm:"default:'pending'"` // 证书状态: pending, issued, failed
+	CertificateARN    string         `json:"certificate_arn"`                             // ACM 证书 ARN
+	HostedZoneID      string         `json:"hosted_zone_id"`                              // Route53 Hosted Zone ID
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	DeletedAt         gorm.DeletedAt `json:"-" gorm:"index"`
+}
+
+// TableName 指定表名
+func (Domain) TableName() string {
+	return "domains"
+}
