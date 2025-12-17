@@ -92,6 +92,22 @@ func (s *CloudFrontService) CreateDistribution(domainName string, certificateARN
 	return *result.Distribution.Id, nil
 }
 
+// ListDistributions 列出所有 CloudFront 分发
+func (s *CloudFrontService) ListDistributions() (*cloudfront.DistributionList, error) {
+	input := &cloudfront.ListDistributionsInput{}
+
+	result, err := s.client.ListDistributions(input)
+	if err != nil {
+		return nil, fmt.Errorf("列出 CloudFront 分发失败: %w", err)
+	}
+
+	if result.DistributionList == nil {
+		return &cloudfront.DistributionList{}, nil
+	}
+
+	return result.DistributionList, nil
+}
+
 // GetDistribution 获取分发信息
 func (s *CloudFrontService) GetDistribution(distributionID string) (*cloudfront.Distribution, error) {
 	input := &cloudfront.GetDistributionInput{
@@ -104,6 +120,62 @@ func (s *CloudFrontService) GetDistribution(distributionID string) (*cloudfront.
 	}
 
 	return result.Distribution, nil
+}
+
+// UpdateDistribution 更新分发配置（域名别名、证书、启用状态）
+func (s *CloudFrontService) UpdateDistribution(distributionID string, aliases []string, certificateARN string, enabled *bool) error {
+	// 获取当前配置
+	getInput := &cloudfront.GetDistributionInput{
+		Id: aws.String(distributionID),
+	}
+	getResult, err := s.client.GetDistribution(getInput)
+	if err != nil {
+		return fmt.Errorf("获取分发配置失败: %w", err)
+	}
+
+	config := getResult.Distribution.DistributionConfig
+
+	// 更新别名
+	if aliases != nil {
+		if len(aliases) == 0 {
+			config.Aliases = &cloudfront.Aliases{
+				Quantity: aws.Int64(0),
+			}
+		} else {
+			config.Aliases = &cloudfront.Aliases{
+				Quantity: aws.Int64(int64(len(aliases))),
+				Items:    aws.StringSlice(aliases),
+			}
+		}
+	}
+
+	// 更新证书
+	if certificateARN != "" {
+		if config.ViewerCertificate == nil {
+			config.ViewerCertificate = &cloudfront.ViewerCertificate{}
+		}
+		config.ViewerCertificate.ACMCertificateArn = aws.String(certificateARN)
+		config.ViewerCertificate.SSLSupportMethod = aws.String("sni-only")
+		config.ViewerCertificate.MinimumProtocolVersion = aws.String("TLSv1.2_2021")
+	}
+
+	// 更新启用状态
+	if enabled != nil {
+		config.Enabled = aws.Bool(*enabled)
+	}
+
+	updateInput := &cloudfront.UpdateDistributionInput{
+		Id:                 aws.String(distributionID),
+		DistributionConfig: config,
+		IfMatch:            getResult.ETag,
+	}
+
+	_, err = s.client.UpdateDistribution(updateInput)
+	if err != nil {
+		return fmt.Errorf("更新分发配置失败: %w", err)
+	}
+
+	return nil
 }
 
 // UpdateDistributionAliases 更新分发的域名别名
@@ -132,6 +204,34 @@ func (s *CloudFrontService) UpdateDistributionAliases(distributionID string, ali
 	_, err = s.client.UpdateDistribution(updateInput)
 	if err != nil {
 		return fmt.Errorf("更新分发配置失败: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteDistribution 删除 CloudFront 分发（需先禁用）
+func (s *CloudFrontService) DeleteDistribution(distributionID string) error {
+	getInput := &cloudfront.GetDistributionInput{
+		Id: aws.String(distributionID),
+	}
+	getResult, err := s.client.GetDistribution(getInput)
+	if err != nil {
+		return fmt.Errorf("获取分发配置失败: %w", err)
+	}
+
+	if getResult.Distribution != nil && getResult.Distribution.DistributionConfig != nil &&
+		aws.BoolValue(getResult.Distribution.DistributionConfig.Enabled) {
+		return fmt.Errorf("删除前请先禁用该 CloudFront 分发")
+	}
+
+	deleteInput := &cloudfront.DeleteDistributionInput{
+		Id:      aws.String(distributionID),
+		IfMatch: getResult.ETag,
+	}
+
+	_, err = s.client.DeleteDistribution(deleteInput)
+	if err != nil {
+		return fmt.Errorf("删除 CloudFront 分发失败: %w", err)
 	}
 
 	return nil

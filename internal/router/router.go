@@ -33,15 +33,22 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	cloudFrontSvc, _ := aws.NewCloudFrontService(&cfg.AWS)
 	s3Svc, _ := aws.NewS3Service(&cfg.AWS)
 
+	var s3Origin string
+	if cfg.AWS.S3BucketName != "" {
+		s3Origin = s3Svc.GetBucketDomain(cfg.AWS.S3BucketName)
+	}
+
 	// 初始化服务
 	domainService := services.NewDomainService(db, route53Svc, acmSvc, cloudFrontSvc, s3Svc)
 	redirectService := services.NewRedirectService(db, cloudFrontSvc)
 	authService := services.NewAuthService(db, &cfg.JWT)
+	cloudFrontService := services.NewCloudFrontService(cloudFrontSvc, s3Origin)
 
 	// 初始化处理器
 	domainHandler := handlers.NewDomainHandler(domainService)
 	redirectHandler := handlers.NewRedirectHandler(redirectService)
 	authHandler := handlers.NewAuthHandler(authService)
+	cloudFrontHandler := handlers.NewCloudFrontHandler(cloudFrontService)
 
 	// API 路由
 	api := r.Group("/api/v1")
@@ -75,6 +82,16 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			redirects.POST("/:id/targets", redirectHandler.AddTarget)
 			redirects.DELETE("/targets/:id", redirectHandler.RemoveTarget)
 			redirects.POST("/:id/bind-cloudfront", redirectHandler.BindDomainToCloudFront)
+		}
+
+		// CloudFront 管理
+		cloudfront := protected.Group("/cloudfront")
+		{
+			cloudfront.GET("/distributions", cloudFrontHandler.ListDistributions)
+			cloudfront.GET("/distributions/:id", cloudFrontHandler.GetDistribution)
+			cloudfront.POST("/distributions", cloudFrontHandler.CreateDistribution)
+			cloudfront.PUT("/distributions/:id", cloudFrontHandler.UpdateDistribution)
+			cloudfront.DELETE("/distributions/:id", cloudFrontHandler.DeleteDistribution)
 		}
 	}
 
