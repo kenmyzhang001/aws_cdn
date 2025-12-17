@@ -3,6 +3,7 @@ package router
 import (
 	"aws_cdn/internal/config"
 	"aws_cdn/internal/handlers"
+	"aws_cdn/internal/middleware"
 	"aws_cdn/internal/services"
 	"aws_cdn/internal/services/aws"
 
@@ -35,16 +36,25 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	// 初始化服务
 	domainService := services.NewDomainService(db, route53Svc, acmSvc, cloudFrontSvc, s3Svc)
 	redirectService := services.NewRedirectService(db, cloudFrontSvc)
+	authService := services.NewAuthService(db, &cfg.JWT)
 
 	// 初始化处理器
 	domainHandler := handlers.NewDomainHandler(domainService)
 	redirectHandler := handlers.NewRedirectHandler(redirectService)
+	authHandler := handlers.NewAuthHandler(authService)
 
 	// API 路由
 	api := r.Group("/api/v1")
+
+	// 公共路由（无需登录）
+	api.POST("/auth/login", authHandler.Login)
+
+	// 需要登录的受保护路由
+	protected := api.Group("")
+	protected.Use(middleware.JWTAuth(cfg.JWT.Secret))
 	{
 		// 域名管理
-		domains := api.Group("/domains")
+		domains := protected.Group("/domains")
 		{
 			domains.POST("", domainHandler.TransferDomain)
 			domains.GET("", domainHandler.ListDomains)
@@ -56,7 +66,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		}
 
 		// 重定向管理
-		redirects := api.Group("/redirects")
+		redirects := protected.Group("/redirects")
 		{
 			redirects.POST("", redirectHandler.CreateRedirectRule)
 			redirects.GET("", redirectHandler.ListRedirectRules)
@@ -75,4 +85,5 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	return r
 }
+
 

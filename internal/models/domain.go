@@ -35,3 +35,4 @@ type Domain struct {
 func (Domain) TableName() string {
 	return "domains"
 }
+

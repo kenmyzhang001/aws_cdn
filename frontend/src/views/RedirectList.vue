@@ -349,3 +349,4 @@ const deleteRule = async (row) => {
 }
 </style>
 
+

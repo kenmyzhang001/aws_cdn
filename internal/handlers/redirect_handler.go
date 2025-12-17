@@ -156,3 +156,4 @@ func (h *RedirectHandler) DeleteRule(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "规则删除成功"})
 }
 
+
