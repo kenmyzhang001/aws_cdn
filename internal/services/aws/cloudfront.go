@@ -60,9 +60,9 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 	origin := &cloudfront.Origin{
 		Id:         aws.String(originId),
 		DomainName: aws.String(s3Origin),
-		S3OriginConfig: &cloudfront.S3OriginConfig{
-			OriginAccessIdentity: aws.String(""),
-		},
+		// 不使用 S3OriginConfig，直接访问 S3（需要 S3 bucket policy 允许公开访问）
+		// 如果 S3 bucket 通过 bucket policy 允许公开访问，CloudFront 可以直接访问
+		// 如果 bucket 不支持 ACL，文件上传时也不会设置 ACL，需要依赖 bucket policy
 	}
 
 	// 如果指定了路径，设置 OriginPath
