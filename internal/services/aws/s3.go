@@ -61,6 +61,10 @@ func (s *S3Service) UploadFile(bucketName, key string, body io.ReadSeeker, conte
 
 	_, err := s.client.PutObject(input)
 	if err != nil {
+		// 检查是否是权限错误
+		if strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "Access Denied") || strings.Contains(err.Error(), "403") {
+			return fmt.Errorf("S3访问被拒绝，请检查AWS凭证权限。需要s3:PutObject权限。错误详情: %w", err)
+		}
 		return fmt.Errorf("上传文件失败: %w", err)
 	}
 
@@ -148,6 +152,10 @@ func (s *S3Service) ObjectExists(bucketName, key string) (bool, error) {
 		// 检查是否是404错误（对象不存在）
 		if strings.Contains(err.Error(), "NoSuchKey") || strings.Contains(err.Error(), "404") {
 			return false, nil
+		}
+		// 检查是否是权限错误
+		if strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "Access Denied") || strings.Contains(err.Error(), "403") {
+			return false, fmt.Errorf("S3访问被拒绝，请检查AWS凭证权限。需要s3:GetObject权限。错误详情: %w", err)
 		}
 		return false, fmt.Errorf("检查对象是否存在失败: %w", err)
 	}
