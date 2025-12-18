@@ -49,27 +49,36 @@
     </el-card>
 
     <!-- 创建重定向规则对话框 -->
-    <el-dialog v-model="showCreateDialog" title="创建重定向规则" width="600px">
-      <el-form :model="createForm" label-width="100px">
+    <el-dialog v-model="showCreateDialog" title="创建重定向规则" width="700px" @close="resetCreateForm">
+      <el-form :model="createForm" label-width="120px">
         <el-form-item label="源域名" required>
           <el-input v-model="createForm.source_domain" placeholder="例如: example.com" />
         </el-form-item>
         <el-form-item label="目标 URL" required>
           <el-input
+            type="textarea"
             v-model="targetUrlInput"
-            placeholder="输入目标 URL，按回车添加"
-            @keyup.enter="addTargetUrl"
+            :rows="6"
+            placeholder="请输入目标 URL，每行一个，或使用逗号分隔&#10;例如：&#10;https://target1.com&#10;https://target2.com&#10;或者：&#10;https://target1.com, https://target2.com"
+            @blur="parseTargetUrls"
+            @paste="handlePaste"
           />
           <div style="margin-top: 10px">
+            <div style="margin-bottom: 5px; color: #909399; font-size: 12px">
+              已添加 {{ createForm.target_urls.length }} 个目标 URL
+            </div>
             <el-tag
               v-for="(url, index) in createForm.target_urls"
               :key="index"
               closable
               @close="removeTargetUrl(index)"
-              style="margin-right: 5px; margin-top: 5px"
+              style="margin-right: 5px; margin-bottom: 5px"
             >
               {{ url }}
             </el-tag>
+            <div v-if="createForm.target_urls.length === 0" style="color: #c0c4cc; font-size: 12px; margin-top: 5px">
+              提示：输入URL后，点击输入框外部或粘贴内容会自动解析添加
+            </div>
           </div>
         </el-form-item>
       </el-form>
@@ -169,6 +178,7 @@ const createLoading = ref(false)
 const createForm = ref({
   source_domain: '',
   target_urls: [],
+  certificate_arn: '',
 })
 const targetUrlInput = ref('')
 
@@ -210,30 +220,100 @@ const loadRedirects = async () => {
   }
 }
 
-const addTargetUrl = () => {
-  if (targetUrlInput.value.trim()) {
-    createForm.value.target_urls.push(targetUrlInput.value.trim())
-    targetUrlInput.value = ''
+// 解析目标URL（支持换行和逗号分隔）
+const parseTargetUrls = () => {
+  if (!targetUrlInput.value.trim()) {
+    return
   }
+
+  // 支持换行分隔
+  let urls = targetUrlInput.value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+
+  // 如果只有一行，尝试用逗号分隔
+  if (urls.length === 1 && urls[0].includes(',')) {
+    urls = urls[0]
+      .split(',')
+      .map((url) => url.trim())
+      .filter((url) => url.length > 0)
+  }
+
+  // 验证URL格式并添加到列表（去重）
+  urls.forEach((url) => {
+    // 简单的URL验证
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+      // 检查是否已存在
+      if (!createForm.value.target_urls.includes(url)) {
+        createForm.value.target_urls.push(url)
+      }
+    }
+  })
+
+  // 清空输入框
+  targetUrlInput.value = ''
+}
+
+// 处理粘贴事件
+const handlePaste = (event) => {
+  // 延迟解析，等待粘贴内容写入
+  setTimeout(() => {
+    parseTargetUrls()
+  }, 10)
+}
+
+// 添加单个URL（保留原有功能，用于兼容）
+const addTargetUrl = () => {
+  parseTargetUrls()
 }
 
 const removeTargetUrl = (index) => {
   createForm.value.target_urls.splice(index, 1)
 }
 
+// 重置创建表单
+const resetCreateForm = () => {
+  createForm.value = {
+    source_domain: '',
+    target_urls: [],
+    certificate_arn: '',
+  }
+  targetUrlInput.value = ''
+}
+
 const handleCreate = async () => {
   if (!createForm.value.source_domain || createForm.value.target_urls.length === 0) {
-    ElMessage.warning('请填写完整信息')
+    ElMessage.warning('请填写源域名和至少一个目标 URL')
+    return
+  }
+
+  // 如果输入框还有内容，先解析
+  if (targetUrlInput.value.trim()) {
+    parseTargetUrls()
+  }
+
+  // 再次检查
+  if (createForm.value.target_urls.length === 0) {
+    ElMessage.warning('请至少添加一个有效的目标 URL')
     return
   }
 
   createLoading.value = true
   try {
-    await redirectApi.createRedirectRule(createForm.value)
+    // 构建请求数据（如果证书ARN为空，则不发送该字段）
+    const requestData = {
+      source_domain: createForm.value.source_domain,
+      target_urls: createForm.value.target_urls,
+    }
+    if (createForm.value.certificate_arn) {
+      requestData.certificate_arn = createForm.value.certificate_arn
+    }
+
+    await redirectApi.createRedirectRule(requestData)
     ElMessage.success('重定向规则创建成功')
     showCreateDialog.value = false
-    createForm.value = { source_domain: '', target_urls: [] }
-    targetUrlInput.value = ''
+    resetCreateForm()
     loadRedirects()
   } catch (error) {
     // 错误已在拦截器中处理
