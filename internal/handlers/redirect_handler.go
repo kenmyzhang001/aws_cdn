@@ -71,8 +71,31 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 		return
 	}
 
+	// 为每个规则添加 CloudFront 状态
+	rulesWithStatus := make([]gin.H, len(rules))
+	for i, rule := range rules {
+		ruleMap := gin.H{
+			"id":             rule.ID,
+			"source_domain":  rule.SourceDomain,
+			"cloudfront_id":  rule.CloudFrontID,
+			"targets":        rule.Targets,
+			"created_at":     rule.CreatedAt,
+			"updated_at":     rule.UpdatedAt,
+		}
+		
+		// 查询 CloudFront 状态
+		if rule.CloudFrontID != "" {
+			status, err := h.service.GetCloudFrontStatus(rule.CloudFrontID)
+			if err == nil {
+				ruleMap["cloudfront_status"] = status
+			}
+		}
+		
+		rulesWithStatus[i] = ruleMap
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"data":  rules,
+		"data":  rulesWithStatus,
 		"total": total,
 		"page":  page,
 		"size":  pageSize,

@@ -313,6 +313,24 @@ func (s *RedirectService) ListRedirectRules(page, pageSize int) ([]models.Redire
 	return rules, total, nil
 }
 
+// GetCloudFrontStatus 获取 CloudFront 分发状态
+func (s *RedirectService) GetCloudFrontStatus(cloudFrontID string) (string, error) {
+	if cloudFrontID == "" {
+		return "", nil
+	}
+
+	dist, err := s.cloudFrontSvc.GetDistribution(cloudFrontID)
+	if err != nil {
+		return "", err
+	}
+
+	if dist == nil || dist.Status == nil {
+		return "", nil
+	}
+
+	return *dist.Status, nil
+}
+
 // AddTarget 添加重定向目标并重新部署
 func (s *RedirectService) AddTarget(ruleID uint, targetURL string) error {
 	target := &models.RedirectTarget{
