@@ -737,9 +737,9 @@ func (s *RedirectService) BindDomainToCloudFront(ruleID uint, distributionID str
 
 // CheckRedirectRuleStatus 检查重定向规则的状态
 type RedirectRuleStatus struct {
-	RuleExists            bool     `json:"rule_exists"`
-	HTMLUploaded          bool     `json:"html_uploaded"`
-	HTMLUploadError       string   `json:"html_upload_error,omitempty"`
+	RuleExists           bool     `json:"rule_exists"`
+	HTMLUploaded         bool     `json:"html_uploaded"`
+	HTMLUploadError      string   `json:"html_upload_error,omitempty"`
 	CloudFrontExists     bool     `json:"cloudfront_exists"`
 	CloudFrontError      string   `json:"cloudfront_error,omitempty"`
 	Route53DNSConfigured bool     `json:"route53_dns_configured"`

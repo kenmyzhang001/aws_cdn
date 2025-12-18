@@ -294,8 +294,8 @@ func (s *Route53Service) CheckWWWCNAMERecord(hostedZoneID, rootDomain string) (b
 	// 查找匹配的 CNAME 记录
 	for _, record := range result.ResourceRecordSets {
 		if record.Name != nil && *record.Name == recordName && record.Type != nil && *record.Type == "CNAME" {
-		// 检查 ResourceRecords
-		if len(record.ResourceRecords) > 0 {
+			// 检查 ResourceRecords
+			if len(record.ResourceRecords) > 0 {
 				actualValue := *record.ResourceRecords[0].Value
 				// 比较值是否匹配（去掉末尾的点进行比较）
 				actualValueTrimmed := actualValue

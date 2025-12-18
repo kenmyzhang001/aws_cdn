@@ -20,9 +20,9 @@ func NewRedirectHandler(service *services.RedirectService) *RedirectHandler {
 // CreateRedirectRule 创建重定向规则
 func (h *RedirectHandler) CreateRedirectRule(c *gin.Context) {
 	var req struct {
-		SourceDomain  string   `json:"source_domain" binding:"required"`
-		TargetURLs    []string `json:"target_urls" binding:"required,min=1"`
-		CertificateARN string  `json:"certificate_arn"` // 可选，用于创建CloudFront分发
+		SourceDomain   string   `json:"source_domain" binding:"required"`
+		TargetURLs     []string `json:"target_urls" binding:"required,min=1"`
+		CertificateARN string   `json:"certificate_arn"` // 可选，用于创建CloudFront分发
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -76,14 +76,14 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 	rulesWithStatus := make([]gin.H, len(rules))
 	for i, rule := range rules {
 		ruleMap := gin.H{
-			"id":             rule.ID,
-			"source_domain":  rule.SourceDomain,
-			"cloudfront_id":  rule.CloudFrontID,
-			"targets":        rule.Targets,
-			"created_at":     rule.CreatedAt,
-			"updated_at":     rule.UpdatedAt,
+			"id":            rule.ID,
+			"source_domain": rule.SourceDomain,
+			"cloudfront_id": rule.CloudFrontID,
+			"targets":       rule.Targets,
+			"created_at":    rule.CreatedAt,
+			"updated_at":    rule.UpdatedAt,
 		}
-		
+
 		// 查询 CloudFront 状态
 		if rule.CloudFrontID != "" {
 			status, err := h.service.GetCloudFrontStatus(rule.CloudFrontID)
@@ -91,7 +91,7 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 				ruleMap["cloudfront_status"] = status
 			}
 		}
-		
+
 		// 查询域名状态和证书状态
 		domainStatus, certStatus := h.service.GetDomainInfoByDomainName(rule.SourceDomain)
 		if domainStatus != "" {
@@ -100,19 +100,19 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 		if certStatus != "" {
 			ruleMap["certificate_status"] = certStatus
 		}
-		
+
 		// 查询 Route 53 DNS 记录状态（验证是否指向正确的 CloudFront）
 		if rule.CloudFrontID != "" {
 			dnsStatus := h.service.CheckRoute53RecordStatus(rule.SourceDomain, rule.CloudFrontID)
 			ruleMap["route53_dns_status"] = dnsStatus
-			
+
 			// 检查 www CNAME 记录状态（仅对根域名检查，不包括 www 子域名）
 			if !strings.HasPrefix(rule.SourceDomain, "www.") {
 				wwwCNAMEStatus := h.service.CheckWWWCNAMERecordStatus(rule.SourceDomain)
 				ruleMap["www_cname_status"] = wwwCNAMEStatus
 			}
 		}
-		
+
 		// 检查目标URL状态
 		targetsWithStatus := make([]gin.H, len(rule.Targets))
 		for j, target := range rule.Targets {
@@ -128,7 +128,7 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 			targetsWithStatus[j] = targetMap
 		}
 		ruleMap["targets"] = targetsWithStatus
-		
+
 		rulesWithStatus[i] = ruleMap
 	}
 
@@ -261,5 +261,3 @@ func (h *RedirectHandler) FixRedirectRule(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, response)
 }
-
-
