@@ -105,7 +105,10 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 						aws.String("HEAD"),
 					},
 				},
-				Compress: aws.Bool(true),
+				Compress:   aws.Bool(true),
+				MinTTL:     aws.Int64(0),        // 最小缓存时间（秒）
+				DefaultTTL: aws.Int64(86400),    // 默认缓存时间（24小时）
+				MaxTTL:     aws.Int64(31536000), // 最大缓存时间（1年）
 			},
 			ViewerCertificate: &cloudfront.ViewerCertificate{
 				ACMCertificateArn:      aws.String(certificateARN),
