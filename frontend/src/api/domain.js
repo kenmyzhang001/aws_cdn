@@ -35,6 +35,11 @@ export const domainApi = {
   getCertificateStatus(id) {
     return request.get(`/domains/${id}/certificate/status`)
   },
+
+  // 删除域名
+  deleteDomain(id) {
+    return request.delete(`/domains/${id}`)
+  },
 }
 
 

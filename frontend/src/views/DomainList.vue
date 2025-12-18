@@ -29,7 +29,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300">
+        <el-table-column label="操作" width="350">
           <template #default="{ row }">
             <el-button size="small" @click="viewNServers(row)">查看 NS</el-button>
             <el-button
@@ -41,6 +41,13 @@
               生成证书
             </el-button>
             <el-button size="small" @click="refreshStatus(row)">刷新状态</el-button>
+            <el-button
+              size="small"
+              type="danger"
+              @click="handleDelete(row)"
+            >
+              删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -98,7 +105,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { domainApi } from '@/api/domain'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 
 const loading = ref(false)
@@ -200,6 +207,30 @@ const refreshStatus = async (row) => {
   } catch (error) {
     ElMessage.error('刷新状态失败')
   }
+}
+
+const handleDelete = (row) => {
+  ElMessageBox.confirm(
+    `确定要删除域名 "${row.domain_name}" 吗？此操作将同时删除相关的 AWS 资源（Route53 Hosted Zone 和 ACM 证书），且无法恢复。`,
+    '确认删除',
+    {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    }
+  )
+    .then(async () => {
+      try {
+        await domainApi.deleteDomain(row.id)
+        ElMessage.success('域名删除成功')
+        loadDomains()
+      } catch (error) {
+        // 错误已在拦截器中处理
+      }
+    })
+    .catch(() => {
+      // 用户取消删除
+    })
 }
 
 const getStatusType = (status) => {
