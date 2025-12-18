@@ -175,8 +175,14 @@ func (s *RedirectService) findCertificateARN(domainName string) string {
 	return ""
 }
 
+// CreateRedirectRuleResult 创建重定向规则的结果
+type CreateRedirectRuleResult struct {
+	Rule     *models.RedirectRule
+	Warnings []string
+}
+
 // CreateRedirectRule 创建重定向规则并自动部署
-func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []string, certificateARN string) (*models.RedirectRule, error) {
+func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []string, certificateARN string) (*CreateRedirectRuleResult, error) {
 	// 检查源域名是否已存在（排除软删除的记录）
 	var existingRule models.RedirectRule
 	if err := s.db.Where("source_domain = ?", sourceDomain).First(&existingRule).Error; err == nil {
@@ -246,24 +252,38 @@ func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []s
 		certificateARN = s.findCertificateARN(sourceDomain)
 	}
 
+	// 收集部署警告信息
+	var deploymentWarnings []string
+
 	// 自动部署到S3和CloudFront
 	// 如果找到了证书ARN，创建CloudFront分发
 	if certificateARN != "" {
 		if err := s.deployRedirectRule(rule, certificateARN); err != nil {
 			// 如果部署失败，记录错误但不阻止规则创建
 			// 可以后续通过更新接口重新部署
-			fmt.Printf("警告: 部署重定向规则失败: %v\n", err)
+			warningMsg := fmt.Sprintf("部署重定向规则失败: %v", err)
+			deploymentWarnings = append(deploymentWarnings, warningMsg)
+			fmt.Printf("警告: %s\n", warningMsg)
 		}
 	} else {
 		// 如果没有找到证书，先上传HTML文件到S3
 		// 系统会自动尝试从domain表中查找证书，如果找到会自动创建CloudFront
 		// 如果确实没有证书，可以后续通过BindDomainToCloudFront接口手动绑定CloudFront
 		if err := s.uploadHTMLOnly(rule); err != nil {
-			fmt.Printf("警告: 上传HTML文件失败: %v\n", err)
+			warningMsg := fmt.Sprintf("上传HTML文件失败: %v", err)
+			deploymentWarnings = append(deploymentWarnings, warningMsg)
+			fmt.Printf("警告: %s\n", warningMsg)
+		} else {
+			// 上传成功但没有证书，提示用户
+			deploymentWarnings = append(deploymentWarnings, "未找到证书，已上传HTML文件到S3，但未创建CloudFront分发")
 		}
 	}
 
-	return rule, nil
+	// 返回规则和警告信息
+	return &CreateRedirectRuleResult{
+		Rule:     rule,
+		Warnings: deploymentWarnings,
+	}, nil
 }
 
 // GetRedirectRule 获取重定向规则

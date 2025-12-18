@@ -29,13 +29,18 @@ func (h *RedirectHandler) CreateRedirectRule(c *gin.Context) {
 		return
 	}
 
-	rule, err := h.service.CreateRedirectRule(req.SourceDomain, req.TargetURLs, req.CertificateARN)
+	result, err := h.service.CreateRedirectRule(req.SourceDomain, req.TargetURLs, req.CertificateARN)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, rule)
+	// 返回规则和警告信息
+	response := gin.H{
+		"rule":     result.Rule,
+		"warnings": result.Warnings,
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // GetRedirectRule 获取重定向规则
