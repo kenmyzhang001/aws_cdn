@@ -12,8 +12,8 @@
       </template>
 
       <el-table :data="redirectList" v-loading="loading" stripe>
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="source_domain" label="源域名" />
+        <el-table-column prop="id" label="ID" width="60" />
+        <el-table-column prop="source_domain" label="源域名"  width="130"/>
         <el-table-column prop="domain_status" label="域名状态" width="120">
           <template #default="{ row }">
             <el-tag v-if="row.domain_status" :type="getDomainStatusType(row.domain_status)">
@@ -57,6 +57,15 @@
             <el-tag v-if="row.route53_dns_status" :type="getRoute53DNSStatusType(row.route53_dns_status)">
               {{ getRoute53DNSStatusText(row.route53_dns_status) }}
             </el-tag>
+            <span v-else style="color: #c0c4cc">未检查</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="www_cname_status" label="www CNAME" width="140">
+          <template #default="{ row }">
+            <el-tag v-if="row.www_cname_status" :type="getRoute53DNSStatusType(row.www_cname_status)">
+              {{ getRoute53DNSStatusText(row.www_cname_status) }}
+            </el-tag>
+            <span v-else-if="row.source_domain && row.source_domain.startsWith('www.')" style="color: #c0c4cc">不适用</span>
             <span v-else style="color: #c0c4cc">未检查</span>
           </template>
         </el-table-column>
@@ -207,6 +216,14 @@
             </el-tag>
             <span v-if="checkStatus.route53_dns_error" style="color: #f56c6c; margin-left: 10px">
               ({{ checkStatus.route53_dns_error }})
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="www CNAME记录">
+            <el-tag :type="checkStatus.www_cname_configured ? 'success' : 'danger'">
+              {{ checkStatus.www_cname_configured ? '已配置' : '未配置' }}
+            </el-tag>
+            <span v-if="checkStatus.www_cname_error" style="color: #f56c6c; margin-left: 10px">
+              ({{ checkStatus.www_cname_error }})
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="证书已找到">
