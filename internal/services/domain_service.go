@@ -348,3 +348,10 @@ func (s *DomainService) CreateWWWCNAMERecord(hostedZoneID, rootDomain string) er
 	// 创建 CNAME 记录：www.example.com -> example.com
 	return s.route53Svc.CreateCNAMERecord(hostedZoneID, wwwDomain, rootDomainValue)
 }
+
+// CheckWWWCNAMERecord 检查是否存在 www 子域名的 CNAME 记录指向根域名
+// hostedZoneID: Route 53 托管区域 ID
+// rootDomain: 根域名（例如：example.com）
+func (s *DomainService) CheckWWWCNAMERecord(hostedZoneID, rootDomain string) (bool, error) {
+	return s.route53Svc.CheckWWWCNAMERecord(hostedZoneID, rootDomain)
+}

@@ -4,6 +4,7 @@ import (
 	"aws_cdn/internal/services"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -104,6 +105,12 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 		if rule.CloudFrontID != "" {
 			dnsStatus := h.service.CheckRoute53RecordStatus(rule.SourceDomain, rule.CloudFrontID)
 			ruleMap["route53_dns_status"] = dnsStatus
+			
+			// 检查 www CNAME 记录状态（仅对根域名检查，不包括 www 子域名）
+			if !strings.HasPrefix(rule.SourceDomain, "www.") {
+				wwwCNAMEStatus := h.service.CheckWWWCNAMERecordStatus(rule.SourceDomain)
+				ruleMap["www_cname_status"] = wwwCNAMEStatus
+			}
 		}
 		
 		// 检查目标URL状态

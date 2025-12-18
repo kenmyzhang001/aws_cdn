@@ -4,6 +4,7 @@ import (
 	"aws_cdn/internal/config"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -248,6 +249,65 @@ func (s *Route53Service) CheckCloudFrontAliasRecord(hostedZoneID, domainName, cl
 						// 没有指定 CloudFront 域名，只要指向 CloudFront 就返回 true
 						return true, nil
 					}
+				}
+			}
+		}
+	}
+
+	return false, nil
+}
+
+// CheckWWWCNAMERecord 检查是否存在 www 子域名的 CNAME 记录指向根域名
+// hostedZoneID: Route 53 托管区域 ID
+// rootDomain: 根域名（例如：example.com）
+// 返回 true 表示记录存在且指向根域名，false 表示不存在或指向错误，error 表示查询失败
+func (s *Route53Service) CheckWWWCNAMERecord(hostedZoneID, rootDomain string) (bool, error) {
+	// 确保 rootDomain 不是 www 子域名
+	if strings.HasPrefix(rootDomain, "www.") {
+		return false, fmt.Errorf("根域名不能是 www 子域名")
+	}
+
+	// 构建 www 子域名
+	wwwDomain := "www." + rootDomain
+	// 确保 wwwDomain 以点结尾（Route 53 要求）
+	recordName := wwwDomain
+	if recordName != "" && recordName[len(recordName)-1] != '.' {
+		recordName = recordName + "."
+	}
+
+	// 确保 rootDomain 以点结尾（用于比较）
+	expectedValue := rootDomain
+	if expectedValue != "" && expectedValue[len(expectedValue)-1] != '.' {
+		expectedValue = expectedValue + "."
+	}
+
+	// 列出所有记录
+	listInput := &route53.ListResourceRecordSetsInput{
+		HostedZoneId: aws.String(hostedZoneID),
+	}
+
+	result, err := s.client.ListResourceRecordSets(listInput)
+	if err != nil {
+		return false, fmt.Errorf("列出 Route 53 记录失败: %w", err)
+	}
+
+	// 查找匹配的 CNAME 记录
+	for _, record := range result.ResourceRecordSets {
+		if record.Name != nil && *record.Name == recordName && record.Type != nil && *record.Type == "CNAME" {
+		// 检查 ResourceRecords
+		if len(record.ResourceRecords) > 0 {
+				actualValue := *record.ResourceRecords[0].Value
+				// 比较值是否匹配（去掉末尾的点进行比较）
+				actualValueTrimmed := actualValue
+				if actualValueTrimmed != "" && actualValueTrimmed[len(actualValueTrimmed)-1] == '.' {
+					actualValueTrimmed = actualValueTrimmed[:len(actualValueTrimmed)-1]
+				}
+				expectedValueTrimmed := expectedValue
+				if expectedValueTrimmed != "" && expectedValueTrimmed[len(expectedValueTrimmed)-1] == '.' {
+					expectedValueTrimmed = expectedValueTrimmed[:len(expectedValueTrimmed)-1]
+				}
+				if actualValueTrimmed == expectedValueTrimmed {
+					return true, nil
 				}
 			}
 		}

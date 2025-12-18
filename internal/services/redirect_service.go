@@ -399,6 +399,42 @@ func (s *RedirectService) CheckRoute53RecordStatus(domainName, cloudFrontID stri
 	return "not_configured"
 }
 
+// CheckWWWCNAMERecordStatus 检查 www CNAME 记录状态
+// domainName: 根域名（例如：example.com）
+// 返回 "configured"（已配置）、"not_configured"（未配置）或 "error"（错误）
+func (s *RedirectService) CheckWWWCNAMERecordStatus(domainName string) string {
+	if s.domainSvc == nil {
+		return "error"
+	}
+
+	// 如果域名是 www 子域名，不需要检查
+	if strings.HasPrefix(domainName, "www.") {
+		return "not_configured" // www 子域名不需要 www CNAME
+	}
+
+	// 查找域名对应的 Route 53 Hosted Zone ID
+	var domain models.Domain
+	if err := s.db.Where("domain_name = ?", domainName).First(&domain).Error; err != nil {
+		return "not_configured" // 域名不存在，认为未配置
+	}
+
+	if domain.HostedZoneID == "" {
+		return "not_configured" // 没有托管区域
+	}
+
+	// 检查是否存在 www CNAME 记录
+	exists, err := s.domainSvc.CheckWWWCNAMERecord(domain.HostedZoneID, domainName)
+	if err != nil {
+		return "error"
+	}
+
+	if exists {
+		return "configured"
+	}
+
+	return "not_configured"
+}
+
 // createRoute53RecordForCloudFront 为 CloudFront 分发创建 Route 53 DNS 记录
 // 如果记录已存在，会更新为指向正确的 CloudFront 分发
 func (s *RedirectService) createRoute53RecordForCloudFront(domainName, distributionID string) error {
@@ -701,13 +737,15 @@ func (s *RedirectService) BindDomainToCloudFront(ruleID uint, distributionID str
 
 // CheckRedirectRuleStatus 检查重定向规则的状态
 type RedirectRuleStatus struct {
-	RuleExists           bool     `json:"rule_exists"`
-	HTMLUploaded         bool     `json:"html_uploaded"`
-	HTMLUploadError      string   `json:"html_upload_error,omitempty"`
+	RuleExists            bool     `json:"rule_exists"`
+	HTMLUploaded          bool     `json:"html_uploaded"`
+	HTMLUploadError       string   `json:"html_upload_error,omitempty"`
 	CloudFrontExists     bool     `json:"cloudfront_exists"`
 	CloudFrontError      string   `json:"cloudfront_error,omitempty"`
 	Route53DNSConfigured bool     `json:"route53_dns_configured"`
 	Route53DNSError      string   `json:"route53_dns_error,omitempty"`
+	WWWCNAMEConfigured   bool     `json:"www_cname_configured"`
+	WWWCNAMEError        string   `json:"www_cname_error,omitempty"`
 	CertificateFound     bool     `json:"certificate_found"`
 	CertificateARN       string   `json:"certificate_arn,omitempty"`
 	Issues               []string `json:"issues"`
@@ -767,6 +805,24 @@ func (s *RedirectService) CheckRedirectRule(ruleID uint) (*RedirectRuleStatus, e
 			} else if dnsStatus == "error" {
 				status.Route53DNSError = "检查Route 53 DNS记录失败"
 				status.Issues = append(status.Issues, "检查Route 53 DNS记录失败")
+			}
+
+			// 检查 www CNAME 记录（仅对根域名检查，不包括 www 子域名）
+			if !strings.HasPrefix(rule.SourceDomain, "www.") {
+				// 查找域名对应的 Route 53 Hosted Zone ID
+				var domain models.Domain
+				if err := s.db.Where("domain_name = ?", rule.SourceDomain).First(&domain).Error; err == nil && domain.HostedZoneID != "" {
+					exists, err := s.domainSvc.CheckWWWCNAMERecord(domain.HostedZoneID, rule.SourceDomain)
+					if err != nil {
+						status.WWWCNAMEError = fmt.Sprintf("检查www CNAME记录失败: %v", err)
+						status.Issues = append(status.Issues, "检查www CNAME记录失败")
+					} else if !exists {
+						status.WWWCNAMEError = "未配置www CNAME记录"
+						status.Issues = append(status.Issues, "www CNAME记录未配置")
+					} else {
+						status.WWWCNAMEConfigured = true
+					}
+				}
 			}
 		}
 	} else {
