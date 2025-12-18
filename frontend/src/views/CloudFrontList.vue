@@ -31,7 +31,7 @@
         <el-table-column prop="status" label="状态" width="120">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
-              {{ row.status }}
+              {{ row.status || '未知' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -59,6 +59,8 @@
           </template>
         </el-table-column>
       </el-table>
+      
+      <el-empty v-if="!loading && distributionList.length === 0" description="暂无 CloudFront 分发" />
     </el-card>
 
     <!-- 创建分发对话框 -->
@@ -205,9 +207,18 @@ const loadDistributions = async () => {
   loading.value = true
   try {
     const res = await cloudfrontApi.getDistributionList()
-    distributionList.value = res.data || []
+    // 处理返回数据，兼容不同的响应格式
+    if (res && res.data) {
+      distributionList.value = Array.isArray(res.data) ? res.data : []
+    } else if (Array.isArray(res)) {
+      distributionList.value = res
+    } else {
+      distributionList.value = []
+    }
   } catch (error) {
-    ElMessage.error('加载 CloudFront 分发列表失败')
+    console.error('加载 CloudFront 分发列表失败:', error)
+    ElMessage.error('加载 CloudFront 分发列表失败: ' + (error.message || '未知错误'))
+    distributionList.value = []
   } finally {
     loading.value = false
   }
@@ -246,7 +257,8 @@ const viewDetails = async (row) => {
     currentDistribution.value = res
     showDetailDialog.value = true
   } catch (error) {
-    ElMessage.error('获取详情失败')
+    console.error('获取详情失败:', error)
+    ElMessage.error('获取详情失败: ' + (error.message || '未知错误'))
   }
 }
 
@@ -262,7 +274,8 @@ const editDistribution = async (row) => {
     aliasesInput.value = (res.aliases || []).join('\n')
     showEditDialog.value = true
   } catch (error) {
-    ElMessage.error('获取分发信息失败')
+    console.error('获取分发信息失败:', error)
+    ElMessage.error('获取分发信息失败: ' + (error.message || '未知错误'))
   }
 }
 

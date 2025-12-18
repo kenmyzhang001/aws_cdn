@@ -21,7 +21,7 @@
             <span>重定向管理</span>
           </el-menu-item>
           <el-menu-item index="/cloudfront">
-            <el-icon><Cloud /></el-icon>
+            <el-icon><Connection /></el-icon>
             <span>CloudFront 管理</span>
           </el-menu-item>
         </el-menu>
@@ -36,7 +36,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Link, RefreshRight, Cloud } from '@element-plus/icons-vue'
+import { Link, RefreshRight, Connection } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)
