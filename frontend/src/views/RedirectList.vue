@@ -25,12 +25,21 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="cloudfront_id" label="CloudFront ID" />
-        <el-table-column label="操作" width="300">
+        <el-table-column prop="cloudfront_id" label="CloudFront ID" width="200" />
+        <el-table-column prop="cloudfront_status" label="CloudFront 状态" width="140">
+          <template #default="{ row }">
+            <el-tag v-if="row.cloudfront_status" :type="getCloudFrontStatusType(row.cloudfront_status)">
+              {{ getCloudFrontStatusText(row.cloudfront_status) }}
+            </el-tag>
+            <span v-else style="color: #c0c4cc">未绑定</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="350">
           <template #default="{ row }">
             <el-button size="small" @click="viewDetails(row)">详情</el-button>
             <el-button size="small" type="success" @click="addTarget(row)">添加目标</el-button>
-            <el-button size="small" type="warning" @click="bindCloudFront(row)">绑定 CloudFront</el-button>
+            <el-button size="small" type="info" @click="checkRule(row)">检查</el-button>
+            <el-button size="small" type="warning" @click="fixRule(row)" :disabled="!checkStatus?.can_fix">修复</el-button>
             <el-button size="small" type="danger" @click="deleteRule(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -141,23 +150,73 @@
       </template>
     </el-dialog>
 
-    <!-- 绑定 CloudFront 对话框 -->
-    <el-dialog v-model="showBindDialog" title="绑定 CloudFront" width="500px">
-      <el-form :model="bindForm" label-width="120px">
-        <el-form-item label="Distribution ID" required>
-          <el-input v-model="bindForm.distribution_id" placeholder="CloudFront Distribution ID" />
-        </el-form-item>
-        <el-form-item label="域名" required>
-          <el-input v-model="bindForm.domain_name" placeholder="要绑定的域名" />
-        </el-form-item>
-      </el-form>
+    <!-- 检查状态对话框 -->
+    <el-dialog v-model="showCheckDialog" title="检查重定向规则状态" width="600px">
+      <div v-if="checkStatus">
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="规则存在">
+            <el-tag :type="checkStatus.rule_exists ? 'success' : 'danger'">
+              {{ checkStatus.rule_exists ? '是' : '否' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="HTML文件已上传">
+            <el-tag :type="checkStatus.html_uploaded ? 'success' : 'danger'">
+              {{ checkStatus.html_uploaded ? '是' : '否' }}
+            </el-tag>
+            <span v-if="checkStatus.html_upload_error" style="color: #f56c6c; margin-left: 10px">
+              ({{ checkStatus.html_upload_error }})
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFront分发存在">
+            <el-tag :type="checkStatus.cloudfront_exists ? 'success' : 'danger'">
+              {{ checkStatus.cloudfront_exists ? '是' : '否' }}
+            </el-tag>
+            <span v-if="checkStatus.cloudfront_error" style="color: #f56c6c; margin-left: 10px">
+              ({{ checkStatus.cloudfront_error }})
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="证书已找到">
+            <el-tag :type="checkStatus.certificate_found ? 'success' : 'warning'">
+              {{ checkStatus.certificate_found ? '是' : '否' }}
+            </el-tag>
+            <span v-if="checkStatus.certificate_arn" style="margin-left: 10px; font-size: 12px; color: #909399">
+              ({{ checkStatus.certificate_arn }})
+            </span>
+          </el-descriptions-item>
+        </el-descriptions>
+        
+        <div v-if="checkStatus.issues && checkStatus.issues.length > 0" style="margin-top: 20px">
+          <el-alert
+            title="发现的问题"
+            type="warning"
+            :closable="false"
+            show-icon
+          >
+            <ul style="margin: 10px 0; padding-left: 20px">
+              <li v-for="(issue, index) in checkStatus.issues" :key="index">{{ issue }}</li>
+            </ul>
+          </el-alert>
+        </div>
+        
+        <div v-else style="margin-top: 20px">
+          <el-alert
+            title="检查通过"
+            type="success"
+            :closable="false"
+            show-icon
+          >
+            所有检查项均正常
+          </el-alert>
+        </div>
+      </div>
       <template #footer>
-        <el-button @click="showBindDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleBind" :loading="bindLoading">
-          绑定
+        <el-button @click="showCheckDialog = false">关闭</el-button>
+        <el-button type="primary" @click="handleFix" :loading="fixLoading" :disabled="!checkStatus?.can_fix">
+          修复
         </el-button>
       </template>
     </el-dialog>
+
   </div>
 </template>
 
@@ -178,7 +237,6 @@ const createLoading = ref(false)
 const createForm = ref({
   source_domain: '',
   target_urls: [],
-  certificate_arn: '',
 })
 const targetUrlInput = ref('')
 
@@ -192,13 +250,12 @@ const targetForm = ref({
 })
 const currentRuleId = ref(null)
 
-const showBindDialog = ref(false)
-const bindLoading = ref(false)
-const bindForm = ref({
-  distribution_id: '',
-  domain_name: '',
-})
-const bindRuleId = ref(null)
+const showCheckDialog = ref(false)
+const checkStatus = ref(null)
+const checkLoading = ref(false)
+const fixLoading = ref(false)
+const checkRuleId = ref(null)
+
 
 onMounted(() => {
   loadRedirects()
@@ -277,7 +334,6 @@ const resetCreateForm = () => {
   createForm.value = {
     source_domain: '',
     target_urls: [],
-    certificate_arn: '',
   }
   targetUrlInput.value = ''
 }
@@ -301,17 +357,51 @@ const handleCreate = async () => {
 
   createLoading.value = true
   try {
-    // 构建请求数据（如果证书ARN为空，则不发送该字段）
+    // 构建请求数据（系统会自动查找证书并创建CloudFront）
     const requestData = {
       source_domain: createForm.value.source_domain,
       target_urls: createForm.value.target_urls,
     }
-    if (createForm.value.certificate_arn) {
-      requestData.certificate_arn = createForm.value.certificate_arn
-    }
 
-    await redirectApi.createRedirectRule(requestData)
+    const res = await redirectApi.createRedirectRule(requestData)
+    
+    // 检查是否有警告信息
+    if (res.warnings && res.warnings.length > 0) {
+      // 检查是否有权限错误
+      const hasPermissionError = res.warnings.some(w => 
+        w.includes('访问被拒绝') || 
+        w.includes('AccessDenied') || 
+        w.includes('Access Denied') ||
+        w.includes('403')
+      )
+      
+      // 显示所有警告信息（延迟显示，避免消息重叠）
+      res.warnings.forEach((warning, index) => {
+        setTimeout(() => {
+          // 如果是权限错误，使用error类型显示
+          const messageType = (warning.includes('访问被拒绝') || 
+                              warning.includes('AccessDenied') || 
+                              warning.includes('Access Denied') ||
+                              warning.includes('403')) ? 'error' : 'warning'
+          ElMessage[messageType]({
+            message: warning,
+            duration: hasPermissionError ? 10000 : 5000, // 权限错误显示10秒
+            showClose: true,
+          })
+        }, index * 300) // 每个警告消息间隔300ms显示
+      })
+      // 仍然显示成功消息，因为规则已创建
+      setTimeout(() => {
+        if (hasPermissionError) {
+          ElMessage.warning('重定向规则已创建，但部署失败。请检查AWS权限配置后使用"修复"功能重新部署')
+        } else {
+          ElMessage.success('重定向规则创建成功，但存在警告，请查看上方提示')
+        }
+      }, res.warnings.length * 300)
+    } else {
     ElMessage.success('重定向规则创建成功')
+    }
+    
     showCreateDialog.value = false
     resetCreateForm()
     loadRedirects()
@@ -375,31 +465,6 @@ const removeTarget = async (targetId) => {
   }
 }
 
-const bindCloudFront = (row) => {
-  bindRuleId.value = row.id
-  bindForm.value.distribution_id = row.cloudfront_id || ''
-  bindForm.value.domain_name = row.source_domain
-  showBindDialog.value = true
-}
-
-const handleBind = async () => {
-  if (!bindForm.value.distribution_id || !bindForm.value.domain_name) {
-    ElMessage.warning('请填写完整信息')
-    return
-  }
-
-  bindLoading.value = true
-  try {
-    await redirectApi.bindDomainToCloudFront(bindRuleId.value, bindForm.value)
-    ElMessage.success('绑定成功')
-    showBindDialog.value = false
-    loadRedirects()
-  } catch (error) {
-    // 错误已在拦截器中处理
-  } finally {
-    bindLoading.value = false
-  }
-}
 
 const deleteRule = async (row) => {
   try {
@@ -414,6 +479,103 @@ const deleteRule = async (row) => {
       ElMessage.error('删除失败')
     }
   }
+}
+
+const checkRule = async (row) => {
+  checkRuleId.value = row.id
+  checkLoading.value = true
+  checkStatus.value = null
+  try {
+    const res = await redirectApi.checkRedirectRule(row.id)
+    checkStatus.value = res
+    showCheckDialog.value = true
+  } catch (error) {
+    ElMessage.error('检查失败')
+  } finally {
+    checkLoading.value = false
+  }
+}
+
+const fixRule = async (row) => {
+  try {
+    await ElMessageBox.confirm('确定要修复这个重定向规则吗？', '提示', {
+      type: 'warning',
+    })
+    fixLoading.value = true
+    const res = await redirectApi.fixRedirectRule(row.id)
+    
+    // 检查是否有警告信息
+    if (res.warnings && res.warnings.length > 0) {
+      // 检查是否有权限错误
+      const hasPermissionError = res.warnings.some(w => 
+        w.includes('访问被拒绝') || 
+        w.includes('AccessDenied') || 
+        w.includes('Access Denied') ||
+        w.includes('403')
+      )
+      
+      res.warnings.forEach((warning, index) => {
+        setTimeout(() => {
+          // 如果是权限错误，使用error类型显示
+          const messageType = (warning.includes('访问被拒绝') || 
+                              warning.includes('AccessDenied') || 
+                              warning.includes('Access Denied') ||
+                              warning.includes('403')) ? 'error' : 'warning'
+          ElMessage[messageType]({
+            message: warning,
+            duration: hasPermissionError ? 10000 : 5000, // 权限错误显示10秒
+            showClose: true,
+          })
+        }, index * 300)
+      })
+      setTimeout(() => {
+        if (hasPermissionError) {
+          ElMessage.warning('修复失败，请检查AWS权限配置。需要s3:PutObject和s3:GetObject权限')
+        } else {
+          ElMessage.success('修复完成，但存在警告，请查看上方提示')
+        }
+      }, res.warnings.length * 300)
+    } else {
+      ElMessage.success('修复成功')
+    }
+    
+    // 重新检查状态
+    if (checkRuleId.value === row.id) {
+      const checkRes = await redirectApi.checkRedirectRule(row.id)
+      checkStatus.value = checkRes
+    }
+    
+    loadRedirects()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('修复失败')
+    }
+  } finally {
+    fixLoading.value = false
+  }
+}
+
+const handleFix = async () => {
+  if (!checkRuleId.value) return
+  await fixRule({ id: checkRuleId.value })
+}
+
+const getCloudFrontStatusType = (status) => {
+  const statusMap = {
+    InProgress: 'warning',
+    Deployed: 'success',
+    Disabled: 'info',
+  }
+  return statusMap[status] || 'info'
+}
+
+const getCloudFrontStatusText = (status) => {
+  const statusTextMap = {
+    InProgress: '部署中',
+    Deployed: '已部署',
+    Disabled: '已禁用',
+  }
+  return statusTextMap[status] || status || '未知'
 }
 </script>
 

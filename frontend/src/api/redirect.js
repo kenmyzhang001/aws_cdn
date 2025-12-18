@@ -35,6 +35,16 @@ export const redirectApi = {
   bindDomainToCloudFront(ruleId, data) {
     return request.post(`/redirects/${ruleId}/bind-cloudfront`, data)
   },
+
+  // 检查重定向规则状态
+  checkRedirectRule(ruleId) {
+    return request.get(`/redirects/${ruleId}/check`)
+  },
+
+  // 修复重定向规则
+  fixRedirectRule(ruleId) {
+    return request.post(`/redirects/${ruleId}/fix`)
+  },
 }
 
 

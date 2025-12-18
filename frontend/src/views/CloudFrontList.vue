@@ -28,10 +28,10 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="120">
+        <el-table-column prop="status" label="部署状态" width="140">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
-              {{ row.status || '未知' }}
+              {{ getStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -108,9 +108,9 @@
             无
           </span>
         </el-descriptions-item>
-        <el-descriptions-item label="状态">
+        <el-descriptions-item label="部署状态">
           <el-tag :type="getStatusType(currentDistribution.status)">
-            {{ currentDistribution.status }}
+            {{ getStatusText(currentDistribution.status) }}
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="启用状态">
@@ -353,6 +353,15 @@ const getStatusType = (status) => {
     Disabled: 'info',
   }
   return statusMap[status] || 'info'
+}
+
+const getStatusText = (status) => {
+  const statusTextMap = {
+    InProgress: '部署中',
+    Deployed: '已部署',
+    Disabled: '已禁用',
+  }
+  return statusTextMap[status] || status || '未知'
 }
 </script>
 
