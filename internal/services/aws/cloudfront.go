@@ -105,7 +105,16 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 						aws.String("HEAD"),
 					},
 				},
-				Compress:   aws.Bool(true),
+				Compress: aws.Bool(true),
+				ForwardedValues: &cloudfront.ForwardedValues{
+					QueryString: aws.Bool(false), // 不转发查询字符串
+					Cookies: &cloudfront.CookiePreference{
+						Forward: aws.String("none"), // 不转发 cookies
+					},
+					Headers: &cloudfront.Headers{
+						Quantity: aws.Int64(0), // 不转发请求头
+					},
+				},
 				MinTTL:     aws.Int64(0),        // 最小缓存时间（秒）
 				DefaultTTL: aws.Int64(86400),    // 默认缓存时间（24小时）
 				MaxTTL:     aws.Int64(31536000), // 最大缓存时间（1年）
