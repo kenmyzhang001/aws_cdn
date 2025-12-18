@@ -13,21 +13,23 @@
 
       <el-table :data="redirectList" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="source_domain" label="源域名"  width="130"/>
-        <el-table-column prop="domain_status" label="域名状态" width="120">
+        <el-table-column label="域名信息" width="280">
           <template #default="{ row }">
-            <el-tag v-if="row.domain_status" :type="getDomainStatusType(row.domain_status)">
-              {{ getDomainStatusText(row.domain_status) }}
-            </el-tag>
-            <span v-else style="color: #c0c4cc">未找到</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="certificate_status" label="证书状态" width="120">
-          <template #default="{ row }">
-            <el-tag v-if="row.certificate_status" :type="getCertificateStatusType(row.certificate_status)">
-              {{ getCertificateStatusText(row.certificate_status) }}
-            </el-tag>
-            <span v-else style="color: #c0c4cc">未申请</span>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <div style="font-weight: 500;">{{ row.source_domain }}</div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <span style="font-size: 12px; color: #909399;">域名:</span>
+                <el-tag v-if="row.domain_status" :type="getDomainStatusType(row.domain_status)" size="small">
+                  {{ getDomainStatusText(row.domain_status) }}
+                </el-tag>
+                <span v-else style="color: #c0c4cc; font-size: 12px;">未找到</span>
+                <span style="font-size: 12px; color: #909399; margin-left: 8px;">证书:</span>
+                <el-tag v-if="row.certificate_status" :type="getCertificateStatusType(row.certificate_status)" size="small">
+                  {{ getCertificateStatusText(row.certificate_status) }}
+                </el-tag>
+                <span v-else style="color: #c0c4cc; font-size: 12px;">未申请</span>
+              </div>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="目标 URL" min-width="200">
@@ -43,30 +45,41 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="cloudfront_id" label="CloudFront ID" width="200" />
-        <el-table-column prop="cloudfront_status" label="CloudFront 状态" width="140">
+        <el-table-column label="CloudFront" width="240">
           <template #default="{ row }">
-            <el-tag v-if="row.cloudfront_status" :type="getCloudFrontStatusType(row.cloudfront_status)">
-              {{ getCloudFrontStatusText(row.cloudfront_status) }}
-            </el-tag>
-            <span v-else style="color: #c0c4cc">未绑定</span>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <div v-if="row.cloudfront_id" style="font-size: 12px; color: #606266; font-family: monospace;">
+                {{ row.cloudfront_id }}
+              </div>
+              <div v-else style="color: #c0c4cc; font-size: 12px;">未绑定</div>
+              <div style="display: flex; align-items: center;">
+                <el-tag v-if="row.cloudfront_status" :type="getCloudFrontStatusType(row.cloudfront_status)" size="small">
+                  {{ getCloudFrontStatusText(row.cloudfront_status) }}
+                </el-tag>
+                <span v-else style="color: #c0c4cc; font-size: 12px;">未部署</span>
+              </div>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="route53_dns_status" label="Route 53 DNS" width="140">
+        <el-table-column label="DNS 记录" width="200">
           <template #default="{ row }">
-            <el-tag v-if="row.route53_dns_status" :type="getRoute53DNSStatusType(row.route53_dns_status)">
-              {{ getRoute53DNSStatusText(row.route53_dns_status) }}
-            </el-tag>
-            <span v-else style="color: #c0c4cc">未检查</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="www_cname_status" label="www CNAME" width="140">
-          <template #default="{ row }">
-            <el-tag v-if="row.www_cname_status" :type="getRoute53DNSStatusType(row.www_cname_status)">
-              {{ getRoute53DNSStatusText(row.www_cname_status) }}
-            </el-tag>
-            <span v-else-if="row.source_domain && row.source_domain.startsWith('www.')" style="color: #c0c4cc">不适用</span>
-            <span v-else style="color: #c0c4cc">未检查</span>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 12px; color: #909399;">Route 53:</span>
+                <el-tag v-if="row.route53_dns_status" :type="getRoute53DNSStatusType(row.route53_dns_status)" size="small">
+                  {{ getRoute53DNSStatusText(row.route53_dns_status) }}
+                </el-tag>
+                <span v-else style="color: #c0c4cc; font-size: 12px;">未检查</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 12px; color: #909399;">www CNAME:</span>
+                <el-tag v-if="row.www_cname_status" :type="getRoute53DNSStatusType(row.www_cname_status)" size="small">
+                  {{ getRoute53DNSStatusText(row.www_cname_status) }}
+                </el-tag>
+                <span v-else-if="row.source_domain && row.source_domain.startsWith('www.')" style="color: #c0c4cc; font-size: 12px;">不适用</span>
+                <span v-else style="color: #c0c4cc; font-size: 12px;">未检查</span>
+              </div>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="350">
