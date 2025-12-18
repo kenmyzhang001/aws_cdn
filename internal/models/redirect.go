@@ -9,7 +9,7 @@ import (
 // RedirectRule 重定向规则
 type RedirectRule struct {
 	ID           uint             `json:"id" gorm:"primaryKey"`
-	SourceDomain string           `json:"source_domain" gorm:"uniqueIndex;not null"`
+	SourceDomain string           `json:"source_domain" gorm:"type:varchar(255);uniqueIndex;not null"`
 	Targets      []RedirectTarget `json:"targets" gorm:"foreignKey:RuleID;constraint:OnDelete:CASCADE"`
 	CloudFrontID string           `json:"cloudfront_id"` // CloudFront Distribution ID
 	CreatedAt    time.Time        `json:"created_at"`

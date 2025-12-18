@@ -8,11 +8,11 @@ import (
 
 // User 用户模型
 type User struct {
-	ID        uint           `json:"id" gorm:"primaryKey"`
-	Username  string         `json:"username" gorm:"uniqueIndex;not null"`
-	Email     string         `json:"email" gorm:"uniqueIndex;not null"`
-	Password  string         `json:"-" gorm:"not null"` // bcrypt 哈希
-	IsActive  bool           `json:"is_active" gorm:"default:true"`
+	ID       uint   `json:"id" gorm:"primaryKey"`
+	Username string `json:"username" gorm:"type:varchar(191);uniqueIndex;not null"`
+	Email    string `json:"email" gorm:"type:varchar(191);uniqueIndex;not null"`
+	Password string `json:"-" gorm:"not null"` // bcrypt 哈希
+	IsActive bool   `json:"is_active" gorm:"default:true"`
 
 	// 谷歌验证码 (TOTP)
 	TwoFactorSecret    string `json:"-" gorm:"column:two_factor_secret"`
@@ -27,4 +27,3 @@ type User struct {
 func (User) TableName() string {
 	return "users"
 }
-

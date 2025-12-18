@@ -19,7 +19,7 @@ const (
 // Domain 域名模型
 type Domain struct {
 	ID                uint           `json:"id" gorm:"primaryKey"`
-	DomainName        string         `json:"domain_name" gorm:"uniqueIndex;not null"`
+	DomainName        string         `json:"domain_name" gorm:"type:varchar(255);uniqueIndex;not null"`
 	Registrar         string         `json:"registrar"` // 原注册商
 	Status            DomainStatus   `json:"status" gorm:"default:'pending'"`
 	NServers          string         `json:"n_servers" gorm:"type:text"`                  // NS 服务器配置，JSON 格式
@@ -35,4 +35,3 @@ type Domain struct {
 func (Domain) TableName() string {
 	return "domains"
 }
-
