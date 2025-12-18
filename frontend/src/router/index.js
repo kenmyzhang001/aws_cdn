@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import DomainList from '@/views/DomainList.vue'
 import RedirectList from '@/views/RedirectList.vue'
+import CloudFrontList from '@/views/CloudFrontList.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -22,6 +23,11 @@ const routes = [
     path: '/redirects',
     name: 'RedirectList',
     component: RedirectList,
+  },
+  {
+    path: '/cloudfront',
+    name: 'CloudFrontList',
+    component: CloudFrontList,
   },
 ]
 
