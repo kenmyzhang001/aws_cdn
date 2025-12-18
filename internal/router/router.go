@@ -6,6 +6,7 @@ import (
 	"aws_cdn/internal/middleware"
 	"aws_cdn/internal/services"
 	"aws_cdn/internal/services/aws"
+	"log"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -35,6 +36,13 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	var s3Origin string
 	if cfg.AWS.S3BucketName != "" {
+		// 自动检查并创建存储桶（如果不存在）
+		if err := s3Svc.EnsureBucketExists(cfg.AWS.S3BucketName); err != nil {
+			// 记录错误但不阻止服务启动，因为可能是权限问题
+			log.Printf("警告: 无法确保S3存储桶 '%s' 存在: %v", cfg.AWS.S3BucketName, err)
+		} else {
+			log.Printf("S3存储桶 '%s' 已确认存在", cfg.AWS.S3BucketName)
+		}
 		s3Origin = s3Svc.GetBucketDomain(cfg.AWS.S3BucketName)
 	}
 

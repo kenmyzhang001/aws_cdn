@@ -36,6 +36,24 @@ func NewS3Service(cfg *config.AWSConfig) (*S3Service, error) {
 	}, nil
 }
 
+// BucketExists 检查存储桶是否存在
+func (s *S3Service) BucketExists(bucketName string) (bool, error) {
+	input := &s3.HeadBucketInput{
+		Bucket: aws.String(bucketName),
+	}
+
+	_, err := s.client.HeadBucket(input)
+	if err != nil {
+		// 检查是否是404错误（存储桶不存在）
+		if strings.Contains(err.Error(), "NotFound") || strings.Contains(err.Error(), "404") {
+			return false, nil
+		}
+		return false, fmt.Errorf("检查存储桶是否存在失败: %w", err)
+	}
+
+	return true, nil
+}
+
 // CreateBucket 创建 S3 存储桶
 func (s *S3Service) CreateBucket(bucketName string) error {
 	input := &s3.CreateBucketInput{
@@ -50,6 +68,20 @@ func (s *S3Service) CreateBucket(bucketName string) error {
 	return nil
 }
 
+// EnsureBucketExists 确保存储桶存在，如果不存在则创建
+func (s *S3Service) EnsureBucketExists(bucketName string) error {
+	exists, err := s.BucketExists(bucketName)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		return s.CreateBucket(bucketName)
+	}
+
+	return nil
+}
+
 // UploadFile 上传文件到 S3
 func (s *S3Service) UploadFile(bucketName, key string, body io.ReadSeeker, contentType string) error {
 	return s.UploadFileWithACL(bucketName, key, body, contentType, "public-read")
@@ -57,6 +89,11 @@ func (s *S3Service) UploadFile(bucketName, key string, body io.ReadSeeker, conte
 
 // UploadFileWithACL 上传文件到 S3（支持自定义ACL）
 func (s *S3Service) UploadFileWithACL(bucketName, key string, body io.ReadSeeker, contentType string, acl string) error {
+	// 确保存储桶存在
+	if err := s.EnsureBucketExists(bucketName); err != nil {
+		return fmt.Errorf("确保存储桶存在失败: %w", err)
+	}
+
 	input := &s3.PutObjectInput{
 		Bucket:      aws.String(bucketName),
 		Key:         aws.String(key),
@@ -168,4 +205,3 @@ func (s *S3Service) ObjectExists(bucketName, key string) (bool, error) {
 
 	return true, nil
 }
-
