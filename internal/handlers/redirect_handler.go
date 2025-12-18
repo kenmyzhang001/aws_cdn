@@ -162,4 +162,43 @@ func (h *RedirectHandler) DeleteRule(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "规则删除成功"})
 }
 
+// CheckRedirectRule 检查重定向规则状态
+func (h *RedirectHandler) CheckRedirectRule(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的规则 ID"})
+		return
+	}
+
+	status, err := h.service.CheckRedirectRule(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, status)
+}
+
+// FixRedirectRule 修复重定向规则
+func (h *RedirectHandler) FixRedirectRule(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的规则 ID"})
+		return
+	}
+
+	result, err := h.service.FixRedirectRule(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 返回规则和警告信息
+	response := gin.H{
+		"rule":     result.Rule,
+		"warnings": result.Warnings,
+	}
+	c.JSON(http.StatusOK, response)
+}
+
 

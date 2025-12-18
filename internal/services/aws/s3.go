@@ -136,3 +136,22 @@ func (s *S3Service) DeleteObjectsWithPrefix(bucketName, prefix string) error {
 	return nil
 }
 
+// ObjectExists 检查S3对象是否存在
+func (s *S3Service) ObjectExists(bucketName, key string) (bool, error) {
+	input := &s3.HeadObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+	}
+
+	_, err := s.client.HeadObject(input)
+	if err != nil {
+		// 检查是否是404错误（对象不存在）
+		if strings.Contains(err.Error(), "NoSuchKey") || strings.Contains(err.Error(), "404") {
+			return false, nil
+		}
+		return false, fmt.Errorf("检查对象是否存在失败: %w", err)
+	}
+
+	return true, nil
+}
+

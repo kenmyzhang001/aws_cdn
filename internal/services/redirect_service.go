@@ -524,3 +524,135 @@ func (s *RedirectService) BindDomainToCloudFront(ruleID uint, distributionID str
 	rule.CloudFrontID = distributionID
 	return s.db.Save(rule).Error
 }
+
+// CheckRedirectRuleStatus 检查重定向规则的状态
+type RedirectRuleStatus struct {
+	RuleExists       bool     `json:"rule_exists"`
+	HTMLUploaded     bool     `json:"html_uploaded"`
+	HTMLUploadError  string   `json:"html_upload_error,omitempty"`
+	CloudFrontExists bool     `json:"cloudfront_exists"`
+	CloudFrontError  string   `json:"cloudfront_error,omitempty"`
+	CertificateFound bool     `json:"certificate_found"`
+	CertificateARN   string   `json:"certificate_arn,omitempty"`
+	Issues           []string `json:"issues"`
+	CanFix           bool     `json:"can_fix"`
+}
+
+// CheckRedirectRule 检查重定向规则的状态
+func (s *RedirectService) CheckRedirectRule(ruleID uint) (*RedirectRuleStatus, error) {
+	status := &RedirectRuleStatus{
+		Issues: []string{},
+	}
+
+	// 获取规则
+	rule, err := s.GetRedirectRule(ruleID)
+	if err != nil {
+		return nil, fmt.Errorf("获取重定向规则失败: %w", err)
+	}
+	status.RuleExists = true
+
+	// 检查S3 HTML文件是否存在
+	if s.config.S3BucketName != "" {
+		s3Path := fmt.Sprintf("redirects/%s/", rule.SourceDomain)
+		s3Key := s3Path + "index.html"
+		exists, err := s.s3Svc.ObjectExists(s.config.S3BucketName, s3Key)
+		if err != nil {
+			status.HTMLUploadError = err.Error()
+			status.Issues = append(status.Issues, fmt.Sprintf("检查S3文件失败: %v", err))
+		} else if !exists {
+			status.Issues = append(status.Issues, "S3 HTML文件不存在")
+		} else {
+			status.HTMLUploaded = true
+		}
+	} else {
+		status.HTMLUploadError = "S3存储桶名称未配置"
+		status.Issues = append(status.Issues, "S3存储桶名称未配置")
+	}
+
+	// 检查CloudFront分发是否存在
+	if rule.CloudFrontID != "" {
+		_, err := s.cloudFrontSvc.GetDistribution(rule.CloudFrontID)
+		if err != nil {
+			status.CloudFrontError = err.Error()
+			status.Issues = append(status.Issues, fmt.Sprintf("CloudFront分发不存在或无法访问: %v", err))
+		} else {
+			status.CloudFrontExists = true
+		}
+	} else {
+		status.Issues = append(status.Issues, "未创建CloudFront分发")
+	}
+
+	// 检查证书
+	certificateARN := s.findCertificateARN(rule.SourceDomain)
+	if certificateARN != "" {
+		status.CertificateFound = true
+		status.CertificateARN = certificateARN
+	} else {
+		status.Issues = append(status.Issues, "未找到证书")
+	}
+
+	// 判断是否可以修复
+	status.CanFix = len(status.Issues) > 0 && s.config.S3BucketName != ""
+
+	return status, nil
+}
+
+// FixRedirectRule 修复重定向规则
+func (s *RedirectService) FixRedirectRule(ruleID uint) (*CreateRedirectRuleResult, error) {
+	// 获取规则
+	rule, err := s.GetRedirectRule(ruleID)
+	if err != nil {
+		return nil, fmt.Errorf("获取重定向规则失败: %w", err)
+	}
+
+	// 重新加载规则以获取所有目标
+	if err := s.db.Preload("Targets").First(rule, rule.ID).Error; err != nil {
+		return nil, fmt.Errorf("加载重定向规则失败: %w", err)
+	}
+
+	// 收集部署警告信息
+	var deploymentWarnings []string
+
+	// 查找证书
+	certificateARN := s.findCertificateARN(rule.SourceDomain)
+
+	// 如果已有CloudFront ID，先检查是否存在
+	if rule.CloudFrontID != "" {
+		_, err := s.cloudFrontSvc.GetDistribution(rule.CloudFrontID)
+		if err != nil {
+			// CloudFront不存在，清除ID，重新创建
+			rule.CloudFrontID = ""
+			s.db.Save(rule)
+		}
+	}
+
+	// 自动部署到S3和CloudFront
+	if certificateARN != "" {
+		// 如果已有CloudFront ID，只重新上传HTML
+		if rule.CloudFrontID != "" {
+			if err := s.redeployHTML(rule); err != nil {
+				warningMsg := fmt.Sprintf("重新部署HTML文件失败: %v", err)
+				deploymentWarnings = append(deploymentWarnings, warningMsg)
+			}
+		} else {
+			// 创建新的CloudFront分发
+			if err := s.deployRedirectRule(rule, certificateARN); err != nil {
+				warningMsg := fmt.Sprintf("部署重定向规则失败: %v", err)
+				deploymentWarnings = append(deploymentWarnings, warningMsg)
+			}
+		}
+	} else {
+		// 没有证书，只上传HTML文件
+		if err := s.uploadHTMLOnly(rule); err != nil {
+			warningMsg := fmt.Sprintf("上传HTML文件失败: %v", err)
+			deploymentWarnings = append(deploymentWarnings, warningMsg)
+		} else {
+			deploymentWarnings = append(deploymentWarnings, "未找到证书，已上传HTML文件到S3，但未创建CloudFront分发")
+		}
+	}
+
+	return &CreateRedirectRuleResult{
+		Rule:     rule,
+		Warnings: deploymentWarnings,
+	}, nil
+}

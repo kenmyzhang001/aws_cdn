@@ -83,6 +83,8 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			redirects.POST("/:id/targets", redirectHandler.AddTarget)
 			redirects.DELETE("/targets/:id", redirectHandler.RemoveTarget)
 			redirects.POST("/:id/bind-cloudfront", redirectHandler.BindDomainToCloudFront)
+			redirects.GET("/:id/check", redirectHandler.CheckRedirectRule)
+			redirects.POST("/:id/fix", redirectHandler.FixRedirectRule)
 		}
 
 		// CloudFront 管理
