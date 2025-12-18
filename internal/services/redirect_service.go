@@ -141,15 +141,15 @@ func (s *RedirectService) deployRedirectRule(rule *models.RedirectRule, certific
 	// 获取S3域名
 	s3Origin := s.s3Svc.GetBucketDomain(s.config.S3BucketName)
 
-	// S3目录路径
-	s3Path := fmt.Sprintf("redirects/%s/", rule.SourceDomain)
+	// S3目录路径（OriginPath会在CreateDistributionWithPath中自动格式化）
+	s3Path := fmt.Sprintf("redirects/%s", rule.SourceDomain)
 
 	// 创建CloudFront分发，指向S3目录
 	distributionID, err := s.cloudFrontSvc.CreateDistributionWithPath(
 		rule.SourceDomain,
 		certificateARN,
 		s3Origin,
-		"/"+s3Path, // OriginPath需要以/开头
+		s3Path, // OriginPath会自动格式化为 /redirects/example.com
 	)
 	if err != nil {
 		return fmt.Errorf("创建CloudFront分发失败: %w", err)

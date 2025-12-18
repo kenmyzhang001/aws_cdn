@@ -3,6 +3,7 @@ package aws
 import (
 	"aws_cdn/internal/config"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -65,8 +66,20 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 	}
 
 	// 如果指定了路径，设置 OriginPath
+	// OriginPath 必须以 / 开头，不能以 / 结尾（除非是根路径 /）
 	if originPath != "" {
-		origin.OriginPath = aws.String(originPath)
+		// 确保以 / 开头
+		path := originPath
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		// 去掉末尾的 /（除非是根路径）
+		if path != "/" && strings.HasSuffix(path, "/") {
+			path = strings.TrimSuffix(path, "/")
+		}
+		// 确保没有连续的 /
+		path = strings.ReplaceAll(path, "//", "/")
+		origin.OriginPath = aws.String(path)
 	}
 
 	input := &cloudfront.CreateDistributionInput{
