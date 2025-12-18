@@ -13,11 +13,11 @@
           class="sidebar-menu"
         >
           <el-menu-item index="/domains">
-            <el-icon><Globe /></el-icon>
+            <el-icon><Link /></el-icon>
             <span>域名管理</span>
           </el-menu-item>
           <el-menu-item index="/redirects">
-            <el-icon><Switch /></el-icon>
+            <el-icon><RefreshRight /></el-icon>
             <span>重定向管理</span>
           </el-menu-item>
         </el-menu>
@@ -32,7 +32,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Globe, Switch } from '@element-plus/icons-vue'
+import { Link, RefreshRight } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)
