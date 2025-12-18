@@ -52,18 +52,24 @@ func (s *S3Service) CreateBucket(bucketName string) error {
 
 // UploadFile 上传文件到 S3
 func (s *S3Service) UploadFile(bucketName, key string, body io.ReadSeeker, contentType string) error {
+	return s.UploadFileWithACL(bucketName, key, body, contentType, "public-read")
+}
+
+// UploadFileWithACL 上传文件到 S3（支持自定义ACL）
+func (s *S3Service) UploadFileWithACL(bucketName, key string, body io.ReadSeeker, contentType string, acl string) error {
 	input := &s3.PutObjectInput{
 		Bucket:      aws.String(bucketName),
 		Key:         aws.String(key),
 		Body:        body,
 		ContentType: aws.String(contentType),
+		ACL:         aws.String(acl), // 设置ACL为public-read，允许公开访问
 	}
 
 	_, err := s.client.PutObject(input)
 	if err != nil {
 		// 检查是否是权限错误
 		if strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "Access Denied") || strings.Contains(err.Error(), "403") {
-			return fmt.Errorf("S3访问被拒绝，请检查AWS凭证权限。需要s3:PutObject权限。错误详情: %w", err)
+			return fmt.Errorf("S3访问被拒绝，请检查AWS凭证权限。需要s3:PutObject和s3:PutObjectAcl权限。错误详情: %w", err)
 		}
 		return fmt.Errorf("上传文件失败: %w", err)
 	}
