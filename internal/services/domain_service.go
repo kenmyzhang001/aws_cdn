@@ -4,6 +4,7 @@ import (
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/aws"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -13,7 +14,7 @@ type DomainService struct {
 	db            *gorm.DB
 	route53Svc    *aws.Route53Service
 	acmSvc        *aws.ACMService
-	cloudFrontSvc  *aws.CloudFrontService
+	cloudFrontSvc *aws.CloudFrontService
 	s3Svc         *aws.S3Service
 }
 
@@ -78,8 +79,8 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 	}
 
 	s.db.Model(domain).Updates(map[string]interface{}{
-		"certificate_arn":     certificateARN,
-		"certificate_status":  "pending",
+		"certificate_arn":    certificateARN,
+		"certificate_status": "pending",
 	})
 
 	// 等待证书验证（最多等待 1 小时）
@@ -326,3 +327,24 @@ func (s *DomainService) CheckCloudFrontAliasRecord(hostedZoneID, domainName, clo
 	return s.route53Svc.CheckCloudFrontAliasRecord(hostedZoneID, domainName, cloudFrontDomainName)
 }
 
+// CreateWWWCNAMERecord 为根域名创建 www 子域名的 CNAME 记录指向根域名
+// hostedZoneID: Route 53 托管区域 ID
+// rootDomain: 根域名（例如：example.com）
+func (s *DomainService) CreateWWWCNAMERecord(hostedZoneID, rootDomain string) error {
+	// 确保 rootDomain 不是 www 子域名
+	if strings.HasPrefix(rootDomain, "www.") {
+		return nil // 如果已经是 www 子域名，不需要创建
+	}
+
+	// 构建 www 子域名
+	wwwDomain := "www." + rootDomain
+
+	// 确保 rootDomain 以点结尾（CNAME 值需要）
+	rootDomainValue := rootDomain
+	if rootDomainValue != "" && rootDomainValue[len(rootDomainValue)-1] != '.' {
+		rootDomainValue = rootDomainValue + "."
+	}
+
+	// 创建 CNAME 记录：www.example.com -> example.com
+	return s.route53Svc.CreateCNAMERecord(hostedZoneID, wwwDomain, rootDomainValue)
+}

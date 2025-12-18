@@ -432,13 +432,23 @@ func (s *RedirectService) createRoute53RecordForCloudFront(domainName, distribut
 	exists, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName)
 	if err != nil {
 		// 检查失败，继续尝试创建
-	} else if exists {
-		// 已存在正确的 DNS 记录，无需创建
-		return nil
+	} else if !exists {
+		// 如果不存在，创建或更新 Alias 记录（使用 UPSERT，如果存在则更新）
+		if err := s.domainSvc.CreateCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName); err != nil {
+			return err
+		}
 	}
 
-	// 通过 domainSvc 创建或更新 Alias 记录（使用 UPSERT，如果存在则更新）
-	return s.domainSvc.CreateCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName)
+	// 如果域名不是 www 子域名，为 www 子域名创建 CNAME 记录指向根域名
+	// 即使根域名的 A 记录已存在，也要确保 www CNAME 记录存在
+	if !strings.HasPrefix(domainName, "www.") {
+		if err := s.domainSvc.CreateWWWCNAMERecord(domain.HostedZoneID, domainName); err != nil {
+			// 记录错误但不阻止流程，因为 www CNAME 不是必需的
+			fmt.Printf("警告: 创建 www CNAME 记录失败: %v\n", err)
+		}
+	}
+
+	return nil
 }
 
 // ListRedirectRules 列出所有重定向规则
