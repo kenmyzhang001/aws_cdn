@@ -194,6 +194,41 @@ func (s *Route53Service) CreateAliasRecord(hostedZoneID, name, cloudFrontDomainN
 	return nil
 }
 
+// CheckCloudFrontAliasRecord 检查是否存在指向 CloudFront 的 A 记录（Alias）
+// 返回 true 表示记录存在，false 表示不存在，error 表示查询失败
+func (s *Route53Service) CheckCloudFrontAliasRecord(hostedZoneID, domainName string) (bool, error) {
+	// 确保 domainName 以点结尾（Route 53 要求）
+	recordName := domainName
+	if recordName != "" && recordName[len(recordName)-1] != '.' {
+		recordName = recordName + "."
+	}
+
+	// 列出所有记录
+	listInput := &route53.ListResourceRecordSetsInput{
+		HostedZoneId: aws.String(hostedZoneID),
+	}
+
+	result, err := s.client.ListResourceRecordSets(listInput)
+	if err != nil {
+		return false, fmt.Errorf("列出 Route 53 记录失败: %w", err)
+	}
+
+	// 查找匹配的 A 记录（Alias）
+	for _, record := range result.ResourceRecordSets {
+		if record.Name != nil && *record.Name == recordName && record.Type != nil && *record.Type == "A" {
+			// 检查是否是 Alias 记录且指向 CloudFront
+			if record.AliasTarget != nil {
+				// CloudFront 的 Hosted Zone ID 是固定的
+				if record.AliasTarget.HostedZoneId != nil && *record.AliasTarget.HostedZoneId == "Z2FDTNDATAQYW2" {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	return false, nil
+}
+
 // DeleteHostedZone 删除托管区域
 // 注意：删除托管区域前需要先删除所有记录（除了默认的 NS 和 SOA 记录）
 func (s *Route53Service) DeleteHostedZone(hostedZoneID string) error {

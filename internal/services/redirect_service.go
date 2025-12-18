@@ -349,6 +349,36 @@ func (s *RedirectService) GetDomainInfoByDomainName(domainName string) (string, 
 	return string(domain.Status), certStatus
 }
 
+// CheckRoute53RecordStatus 检查 Route 53 DNS 记录状态
+// 返回 "configured"（已配置）、"not_configured"（未配置）或 "error"（错误）
+func (s *RedirectService) CheckRoute53RecordStatus(domainName string) string {
+	if s.domainSvc == nil {
+		return "error"
+	}
+
+	// 查找域名对应的 Route 53 Hosted Zone ID
+	var domain models.Domain
+	if err := s.db.Where("domain_name = ?", domainName).First(&domain).Error; err != nil {
+		return "not_configured" // 域名不存在，认为未配置
+	}
+
+	if domain.HostedZoneID == "" {
+		return "not_configured" // 没有托管区域
+	}
+
+	// 检查是否存在指向 CloudFront 的 A 记录
+	exists, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName)
+	if err != nil {
+		return "error"
+	}
+
+	if exists {
+		return "configured"
+	}
+
+	return "not_configured"
+}
+
 // createRoute53RecordForCloudFront 为 CloudFront 分发创建 Route 53 DNS 记录
 func (s *RedirectService) createRoute53RecordForCloudFront(domainName, distributionID string) error {
 	if s.domainSvc == nil {
