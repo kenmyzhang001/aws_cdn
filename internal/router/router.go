@@ -40,7 +40,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 初始化服务
 	domainService := services.NewDomainService(db, route53Svc, acmSvc, cloudFrontSvc, s3Svc)
-	redirectService := services.NewRedirectService(db, cloudFrontSvc)
+	redirectService := services.NewRedirectService(db, cloudFrontSvc, s3Svc, &cfg.AWS)
 	authService := services.NewAuthService(db, &cfg.JWT)
 	cloudFrontService := services.NewCloudFrontService(cloudFrontSvc, s3Origin)
 
@@ -103,5 +103,3 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	return r
 }
-
-

@@ -1,29 +1,171 @@
 package services
 
 import (
+	"aws_cdn/internal/config"
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/aws"
+	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
 
 type RedirectService struct {
-	db           *gorm.DB
+	db            *gorm.DB
 	cloudFrontSvc *aws.CloudFrontService
+	s3Svc         *aws.S3Service
+	config        *config.AWSConfig
 }
 
-func NewRedirectService(db *gorm.DB, cloudFrontSvc *aws.CloudFrontService) *RedirectService {
+func NewRedirectService(db *gorm.DB, cloudFrontSvc *aws.CloudFrontService, s3Svc *aws.S3Service, cfg *config.AWSConfig) *RedirectService {
 	return &RedirectService{
 		db:            db,
 		cloudFrontSvc: cloudFrontSvc,
+		s3Svc:         s3Svc,
+		config:        cfg,
 	}
 }
 
-// CreateRedirectRule 创建重定向规则
-func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []string) (*models.RedirectRule, error) {
+// generateRedirectHTML 生成包含轮播逻辑的HTML文件
+func (s *RedirectService) generateRedirectHTML(targetURLs []string) (string, error) {
+	// 将目标URL列表转换为JSON字符串，用于嵌入到HTML中
+	targetsJSON, err := json.Marshal(targetURLs)
+	if err != nil {
+		return "", fmt.Errorf("序列化目标URL失败: %w", err)
+	}
+
+	htmlTemplate := `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirecting...</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        (function() {
+            // 目标URL列表（嵌入在HTML中）
+            const targets = {{.TargetsJSON}};
+            
+            if (!targets || targets.length === 0) {
+                console.error('No target URLs available');
+                return;
+            }
+            
+            // 从localStorage获取访问计数器
+            const storageKey = 'redirect_counter';
+            let counter = parseInt(localStorage.getItem(storageKey) || '0', 10);
+            
+            // 选择目标URL（轮询）
+            const targetIndex = counter % targets.length;
+            const targetURL = targets[targetIndex];
+            
+            // 增加计数器并保存
+            counter++;
+            localStorage.setItem(storageKey, counter.toString());
+            
+            // 立即跳转，无感知
+            window.location.replace(targetURL);
+        })();
+    </script>
+</body>
+</html>`
+
+	tmpl, err := template.New("redirect").Parse(htmlTemplate)
+	if err != nil {
+		return "", fmt.Errorf("解析HTML模板失败: %w", err)
+	}
+
+	var buf strings.Builder
+	data := map[string]interface{}{
+		"TargetsJSON": template.JS(string(targetsJSON)),
+	}
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("生成HTML失败: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+// uploadHTMLOnly 仅上传HTML文件到S3（不创建CloudFront分发）
+func (s *RedirectService) uploadHTMLOnly(rule *models.RedirectRule) error {
+	if s.config.S3BucketName == "" {
+		return fmt.Errorf("S3存储桶名称未配置")
+	}
+
+	// 收集活跃的目标URL
+	var activeTargets []string
+	for _, target := range rule.Targets {
+		if target.IsActive {
+			activeTargets = append(activeTargets, target.TargetURL)
+		}
+	}
+
+	if len(activeTargets) == 0 {
+		return fmt.Errorf("没有可用的重定向目标")
+	}
+
+	// 生成HTML文件
+	htmlContent, err := s.generateRedirectHTML(activeTargets)
+	if err != nil {
+		return fmt.Errorf("生成HTML文件失败: %w", err)
+	}
+
+	// S3目录路径：redirects/{domain}/
+	s3Path := fmt.Sprintf("redirects/%s/", rule.SourceDomain)
+	s3Key := s3Path + "index.html"
+
+	// 上传HTML文件到S3
+	return s.s3Svc.UploadHTML(s.config.S3BucketName, s3Key, htmlContent)
+}
+
+// deployRedirectRule 部署重定向规则到S3和CloudFront
+func (s *RedirectService) deployRedirectRule(rule *models.RedirectRule, certificateARN string) error {
+	// 先上传HTML文件
+	if err := s.uploadHTMLOnly(rule); err != nil {
+		return err
+	}
+
+	// 获取S3域名
+	s3Origin := s.s3Svc.GetBucketDomain(s.config.S3BucketName)
+
+	// S3目录路径
+	s3Path := fmt.Sprintf("redirects/%s/", rule.SourceDomain)
+
+	// 创建CloudFront分发，指向S3目录
+	distributionID, err := s.cloudFrontSvc.CreateDistributionWithPath(
+		rule.SourceDomain,
+		certificateARN,
+		s3Origin,
+		"/"+s3Path, // OriginPath需要以/开头
+	)
+	if err != nil {
+		return fmt.Errorf("创建CloudFront分发失败: %w", err)
+	}
+
+	// 更新规则中的CloudFront ID
+	rule.CloudFrontID = distributionID
+	if err := s.db.Save(rule).Error; err != nil {
+		return fmt.Errorf("更新规则失败: %w", err)
+	}
+
+	return nil
+}
+
+// CreateRedirectRule 创建重定向规则并自动部署
+func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []string, certificateARN string) (*models.RedirectRule, error) {
 	// 检查源域名是否已存在
 	var existingRule models.RedirectRule
 	if err := s.db.Where("source_domain = ?", sourceDomain).First(&existingRule).Error; err == nil {
@@ -53,13 +195,25 @@ func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []s
 		rule.Targets = append(rule.Targets, *target)
 	}
 
-	// 创建 CloudFront 分发（需要先有证书）
-	// 这里简化处理，实际应该先检查域名证书
-	// distributionID, err := s.cloudFrontSvc.CreateDistribution(...)
-	// if err == nil {
-	// 	rule.CloudFrontID = distributionID
-	// 	s.db.Save(rule)
-	// }
+	// 重新加载规则以获取所有目标
+	if err := s.db.Preload("Targets").First(rule, rule.ID).Error; err != nil {
+		return nil, fmt.Errorf("加载重定向规则失败: %w", err)
+	}
+
+	// 部署到S3和CloudFront
+	if certificateARN != "" {
+		if err := s.deployRedirectRule(rule, certificateARN); err != nil {
+			// 如果部署失败，记录错误但不阻止规则创建
+			// 可以后续通过更新接口重新部署
+			fmt.Printf("警告: 部署重定向规则失败: %v\n", err)
+		}
+	} else {
+		// 即使没有证书，也先上传HTML文件到S3
+		// 后续可以通过BindDomainToCloudFront接口绑定CloudFront
+		if err := s.uploadHTMLOnly(rule); err != nil {
+			fmt.Printf("警告: 上传HTML文件失败: %v\n", err)
+		}
+	}
 
 	return rule, nil
 }
@@ -91,14 +245,8 @@ func (s *RedirectService) ListRedirectRules(page, pageSize int) ([]models.Redire
 	return rules, total, nil
 }
 
-// AddTarget 添加重定向目标
+// AddTarget 添加重定向目标并重新部署
 func (s *RedirectService) AddTarget(ruleID uint, targetURL string) error {
-	// 验证规则是否存在
-	_, err := s.GetRedirectRule(ruleID)
-	if err != nil {
-		return err
-	}
-
 	target := &models.RedirectTarget{
 		RuleID:    ruleID,
 		TargetURL: targetURL,
@@ -106,12 +254,83 @@ func (s *RedirectService) AddTarget(ruleID uint, targetURL string) error {
 		IsActive:  true,
 	}
 
-	return s.db.Create(target).Error
+	if err := s.db.Create(target).Error; err != nil {
+		return err
+	}
+
+	// 重新加载规则
+	rule, err := s.GetRedirectRule(ruleID)
+	if err != nil {
+		return err
+	}
+
+	// 如果已有CloudFront分发，重新部署HTML文件
+	if rule.CloudFrontID != "" {
+		if err := s.redeployHTML(rule); err != nil {
+			fmt.Printf("警告: 重新部署HTML文件失败: %v\n", err)
+		}
+	}
+
+	return nil
 }
 
-// RemoveTarget 删除重定向目标
+// redeployHTML 重新部署HTML文件（不重新创建CloudFront分发）
+func (s *RedirectService) redeployHTML(rule *models.RedirectRule) error {
+	// 收集活跃的目标URL
+	var activeTargets []string
+	for _, target := range rule.Targets {
+		if target.IsActive {
+			activeTargets = append(activeTargets, target.TargetURL)
+		}
+	}
+
+	if len(activeTargets) == 0 {
+		return fmt.Errorf("没有可用的重定向目标")
+	}
+
+	// 生成HTML文件
+	htmlContent, err := s.generateRedirectHTML(activeTargets)
+	if err != nil {
+		return fmt.Errorf("生成HTML文件失败: %w", err)
+	}
+
+	// S3目录路径
+	s3Path := fmt.Sprintf("redirects/%s/", rule.SourceDomain)
+	s3Key := s3Path + "index.html"
+
+	// 上传HTML文件到S3
+	return s.s3Svc.UploadHTML(s.config.S3BucketName, s3Key, htmlContent)
+}
+
+// RemoveTarget 删除重定向目标并重新部署
 func (s *RedirectService) RemoveTarget(targetID uint) error {
-	return s.db.Delete(&models.RedirectTarget{}, targetID).Error
+	// 先获取目标信息，以便找到对应的规则
+	var target models.RedirectTarget
+	if err := s.db.First(&target, targetID).Error; err != nil {
+		return err
+	}
+
+	ruleID := target.RuleID
+
+	// 删除目标
+	if err := s.db.Delete(&models.RedirectTarget{}, targetID).Error; err != nil {
+		return err
+	}
+
+	// 重新加载规则
+	rule, err := s.GetRedirectRule(ruleID)
+	if err != nil {
+		return err
+	}
+
+	// 如果已有CloudFront分发，重新部署HTML文件
+	if rule.CloudFrontID != "" {
+		if err := s.redeployHTML(rule); err != nil {
+			fmt.Printf("警告: 重新部署HTML文件失败: %v\n", err)
+		}
+	}
+
+	return nil
 }
 
 // SelectTarget 选择目标 URL（轮询算法，基于浏览器缓存）
@@ -204,4 +423,3 @@ func (s *RedirectService) BindDomainToCloudFront(ruleID uint, distributionID str
 	rule.CloudFrontID = distributionID
 	return s.db.Save(rule).Error
 }
-

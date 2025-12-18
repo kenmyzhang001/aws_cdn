@@ -19,8 +19,9 @@ func NewRedirectHandler(service *services.RedirectService) *RedirectHandler {
 // CreateRedirectRule 创建重定向规则
 func (h *RedirectHandler) CreateRedirectRule(c *gin.Context) {
 	var req struct {
-		SourceDomain string   `json:"source_domain" binding:"required"`
-		TargetURLs   []string `json:"target_urls" binding:"required,min=1"`
+		SourceDomain  string   `json:"source_domain" binding:"required"`
+		TargetURLs    []string `json:"target_urls" binding:"required,min=1"`
+		CertificateARN string  `json:"certificate_arn"` // 可选，用于创建CloudFront分发
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -28,7 +29,7 @@ func (h *RedirectHandler) CreateRedirectRule(c *gin.Context) {
 		return
 	}
 
-	rule, err := h.service.CreateRedirectRule(req.SourceDomain, req.TargetURLs)
+	rule, err := h.service.CreateRedirectRule(req.SourceDomain, req.TargetURLs, req.CertificateARN)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -37,7 +37,27 @@ func NewCloudFrontService(cfg *config.AWSConfig) (*CloudFrontService, error) {
 
 // CreateDistribution 创建 CloudFront 分发
 func (s *CloudFrontService) CreateDistribution(domainName string, certificateARN string, s3Origin string) (string, error) {
+	return s.CreateDistributionWithPath(domainName, certificateARN, s3Origin, "")
+}
+
+// CreateDistributionWithPath 创建 CloudFront 分发（支持指定 S3 路径）
+func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certificateARN string, s3Origin string, originPath string) (string, error) {
 	callerRef := fmt.Sprintf("%s-%d", domainName, time.Now().Unix())
+	originId := fmt.Sprintf("S3-%s-%s", s.config.S3BucketName, domainName)
+
+	origin := &cloudfront.Origin{
+		Id:         aws.String(originId),
+		DomainName: aws.String(s3Origin),
+		S3OriginConfig: &cloudfront.S3OriginConfig{
+			OriginAccessIdentity: aws.String(""),
+		},
+	}
+
+	// 如果指定了路径，设置 OriginPath
+	if originPath != "" {
+		origin.OriginPath = aws.String(originPath)
+	}
+
 	input := &cloudfront.CreateDistributionInput{
 		DistributionConfig: &cloudfront.DistributionConfig{
 			CallerReference: aws.String(callerRef),
@@ -48,29 +68,16 @@ func (s *CloudFrontService) CreateDistribution(domainName string, certificateARN
 			DefaultRootObject: aws.String("index.html"),
 			Origins: &cloudfront.Origins{
 				Quantity: aws.Int64(1),
-				Items: []*cloudfront.Origin{
-					{
-						Id:         aws.String("S3-" + s.config.S3BucketName),
-						DomainName: aws.String(s3Origin),
-						S3OriginConfig: &cloudfront.S3OriginConfig{
-							OriginAccessIdentity: aws.String(""),
-						},
-					},
-				},
+				Items:    []*cloudfront.Origin{origin},
 			},
 			DefaultCacheBehavior: &cloudfront.DefaultCacheBehavior{
-				TargetOriginId:       aws.String("S3-" + s.config.S3BucketName),
+				TargetOriginId:       aws.String(originId),
 				ViewerProtocolPolicy: aws.String("redirect-to-https"),
 				AllowedMethods: &cloudfront.AllowedMethods{
-					Quantity: aws.Int64(7),
+					Quantity: aws.Int64(2),
 					Items: []*string{
 						aws.String("GET"),
 						aws.String("HEAD"),
-						aws.String("OPTIONS"),
-						aws.String("PUT"),
-						aws.String("POST"),
-						aws.String("PATCH"),
-						aws.String("DELETE"),
 					},
 				},
 				Compress: aws.Bool(true),
@@ -236,4 +243,3 @@ func (s *CloudFrontService) DeleteDistribution(distributionID string) error {
 
 	return nil
 }
-

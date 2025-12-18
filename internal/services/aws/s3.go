@@ -4,6 +4,7 @@ import (
 	"aws_cdn/internal/config"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -69,5 +70,16 @@ func (s *S3Service) UploadFile(bucketName, key string, body io.ReadSeeker, conte
 // GetBucketDomain 获取存储桶的域名
 func (s *S3Service) GetBucketDomain(bucketName string) string {
 	return fmt.Sprintf("%s.s3.%s.amazonaws.com", bucketName, s.config.Region)
+}
+
+// UploadString 上传字符串内容到 S3
+func (s *S3Service) UploadString(bucketName, key string, content string, contentType string) error {
+	body := strings.NewReader(content)
+	return s.UploadFile(bucketName, key, body, contentType)
+}
+
+// UploadHTML 上传 HTML 内容到 S3（便捷方法）
+func (s *S3Service) UploadHTML(bucketName, key string, htmlContent string) error {
+	return s.UploadString(bucketName, key, htmlContent, "text/html; charset=utf-8")
 }
 
