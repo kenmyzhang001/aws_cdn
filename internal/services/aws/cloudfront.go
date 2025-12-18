@@ -41,7 +41,18 @@ func (s *CloudFrontService) CreateDistribution(domainName string, certificateARN
 }
 
 // CreateDistributionWithPath 创建 CloudFront 分发（支持指定 S3 路径）
+// 如果已存在相同域名的分发，则返回现有分发ID，不重复创建
 func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certificateARN string, s3Origin string, originPath string) (string, error) {
+	// 先检查是否已存在相同域名的分发
+	existingID, err := s.findDistributionByDomain(domainName)
+	if err != nil {
+		return "", fmt.Errorf("检查现有分发失败: %w", err)
+	}
+	if existingID != "" {
+		// 已存在相同域名的分发，返回现有分发ID
+		return existingID, nil
+	}
+
 	callerRef := fmt.Sprintf("%s-%d", domainName, time.Now().Unix())
 	originId := fmt.Sprintf("S3-%s-%s", s.config.S3BucketName, domainName)
 
@@ -61,6 +72,7 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 	input := &cloudfront.CreateDistributionInput{
 		DistributionConfig: &cloudfront.DistributionConfig{
 			CallerReference: aws.String(callerRef),
+			Comment:         aws.String(fmt.Sprintf("CloudFront distribution for %s", domainName)),
 			Aliases: &cloudfront.Aliases{
 				Quantity: aws.Int64(1),
 				Items:    []*string{aws.String(domainName)},
@@ -97,6 +109,38 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 	}
 
 	return *result.Distribution.Id, nil
+}
+
+// findDistributionByDomain 根据域名查找现有的 CloudFront 分发
+func (s *CloudFrontService) findDistributionByDomain(domainName string) (string, error) {
+	distList, err := s.ListDistributions()
+	if err != nil {
+		return "", err
+	}
+
+	if distList == nil || distList.Items == nil {
+		return "", nil
+	}
+
+	// 遍历所有分发，查找匹配的域名别名
+	for _, distSummary := range distList.Items {
+		if distSummary == nil {
+			continue
+		}
+
+		// DistributionSummary 直接包含 Aliases 字段
+		aliases := distSummary.Aliases
+		if aliases != nil && aliases.Items != nil {
+			for _, alias := range aliases.Items {
+				if alias != nil && *alias == domainName {
+					// 找到匹配的域名，返回分发ID
+					return *distSummary.Id, nil
+				}
+			}
+		}
+	}
+
+	return "", nil
 }
 
 // ListDistributions 列出所有 CloudFront 分发
