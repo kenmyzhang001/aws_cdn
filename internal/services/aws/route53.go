@@ -111,3 +111,60 @@ func ParseNServersJSON(jsonStr string) ([]string, error) {
 	return nsServers, nil
 }
 
+// DeleteHostedZone 删除托管区域
+// 注意：删除托管区域前需要先删除所有记录（除了默认的 NS 和 SOA 记录）
+func (s *Route53Service) DeleteHostedZone(hostedZoneID string) error {
+	// 首先列出所有记录
+	listInput := &route53.ListResourceRecordSetsInput{
+		HostedZoneId: aws.String(hostedZoneID),
+	}
+
+	result, err := s.client.ListResourceRecordSets(listInput)
+	if err != nil {
+		return fmt.Errorf("列出记录失败: %w", err)
+	}
+
+	// 删除所有非默认记录（NS 和 SOA 记录是默认的，不能删除）
+	var changes []*route53.Change
+	for _, record := range result.ResourceRecordSets {
+		// 跳过默认的 NS 和 SOA 记录
+		if *record.Type == "NS" || *record.Type == "SOA" {
+			continue
+		}
+
+		change := &route53.Change{
+			Action:            aws.String("DELETE"),
+			ResourceRecordSet: record,
+		}
+		changes = append(changes, change)
+	}
+
+	// 如果有需要删除的记录，先删除它们
+	if len(changes) > 0 {
+		changeBatch := &route53.ChangeBatch{
+			Changes: changes,
+		}
+		changeInput := &route53.ChangeResourceRecordSetsInput{
+			HostedZoneId: aws.String(hostedZoneID),
+			ChangeBatch:  changeBatch,
+		}
+
+		_, err = s.client.ChangeResourceRecordSets(changeInput)
+		if err != nil {
+			return fmt.Errorf("删除记录失败: %w", err)
+		}
+	}
+
+	// 删除托管区域
+	deleteInput := &route53.DeleteHostedZoneInput{
+		Id: aws.String(hostedZoneID),
+	}
+
+	_, err = s.client.DeleteHostedZone(deleteInput)
+	if err != nil {
+		return fmt.Errorf("删除托管区域失败: %w", err)
+	}
+
+	return nil
+}
+

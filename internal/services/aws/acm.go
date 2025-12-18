@@ -91,4 +91,18 @@ func (s *ACMService) WaitForCertificateValidation(certificateARN string, timeout
 	return fmt.Errorf("等待证书验证超时")
 }
 
+// DeleteCertificate 删除证书
+func (s *ACMService) DeleteCertificate(certificateARN string) error {
+	input := &acm.DeleteCertificateInput{
+		CertificateArn: aws.String(certificateARN),
+	}
+
+	_, err := s.client.DeleteCertificate(input)
+	if err != nil {
+		return fmt.Errorf("删除证书失败: %w", err)
+	}
+
+	return nil
+}
+
 

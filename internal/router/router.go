@@ -66,6 +66,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			domains.POST("", domainHandler.TransferDomain)
 			domains.GET("", domainHandler.ListDomains)
 			domains.GET("/:id", domainHandler.GetDomain)
+			domains.DELETE("/:id", domainHandler.DeleteDomain)
 			domains.GET("/:id/ns-servers", domainHandler.GetNServers)
 			domains.GET("/:id/status", domainHandler.GetDomainStatus)
 			domains.POST("/:id/certificate", domainHandler.GenerateCertificate)

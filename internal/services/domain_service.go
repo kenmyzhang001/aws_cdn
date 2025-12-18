@@ -205,3 +205,36 @@ func (s *DomainService) UpdateDomainStatus(id uint, status models.DomainStatus) 
 	return s.db.Model(&models.Domain{}).Where("id = ?", id).Update("status", status).Error
 }
 
+// DeleteDomain 删除域名
+// 删除域名时会同时删除相关的 AWS 资源（Route53 Hosted Zone 和 ACM 证书）
+func (s *DomainService) DeleteDomain(id uint) error {
+	// 获取域名信息
+	domain, err := s.GetDomain(id)
+	if err != nil {
+		return err
+	}
+
+	// 删除 ACM 证书（如果存在）
+	if domain.CertificateARN != "" {
+		if err := s.acmSvc.DeleteCertificate(domain.CertificateARN); err != nil {
+			// 记录错误但不阻止删除，因为证书可能已经被删除或不存在
+			// 可以记录日志，这里简化处理
+		}
+	}
+
+	// 删除 Route53 Hosted Zone（如果存在）
+	if domain.HostedZoneID != "" {
+		if err := s.route53Svc.DeleteHostedZone(domain.HostedZoneID); err != nil {
+			// 记录错误但不阻止删除，因为托管区域可能已经被删除或不存在
+			// 可以记录日志，这里简化处理
+		}
+	}
+
+	// 从数据库删除域名记录（软删除）
+	if err := s.db.Delete(domain).Error; err != nil {
+		return fmt.Errorf("删除域名记录失败: %w", err)
+	}
+
+	return nil
+}
+

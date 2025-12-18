@@ -140,3 +140,19 @@ func (h *DomainHandler) GetDomainStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": status})
 }
 
+// DeleteDomain 删除域名
+func (h *DomainHandler) DeleteDomain(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的域名 ID"})
+		return
+	}
+
+	if err := h.service.DeleteDomain(uint(id)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "域名删除成功"})
+}
+
