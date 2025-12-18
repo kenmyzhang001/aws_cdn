@@ -177,10 +177,40 @@ func (s *RedirectService) findCertificateARN(domainName string) string {
 
 // CreateRedirectRule 创建重定向规则并自动部署
 func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []string, certificateARN string) (*models.RedirectRule, error) {
-	// 检查源域名是否已存在
+	// 检查源域名是否已存在（排除软删除的记录）
 	var existingRule models.RedirectRule
 	if err := s.db.Where("source_domain = ?", sourceDomain).First(&existingRule).Error; err == nil {
 		return nil, fmt.Errorf("源域名 %s 的重定向规则已存在", sourceDomain)
+	}
+
+	// 检查是否存在软删除的记录，如果存在则先真正删除它
+	var softDeletedRule models.RedirectRule
+	if err := s.db.Unscoped().Where("source_domain = ?", sourceDomain).First(&softDeletedRule).Error; err == nil {
+		// 如果存在软删除的记录，先真正删除它（硬删除）
+		// 同时删除相关的CloudFront和S3资源
+		if softDeletedRule.CloudFrontID != "" {
+			// 先禁用分发
+			enabled := false
+			if err := s.cloudFrontSvc.UpdateDistribution(softDeletedRule.CloudFrontID, nil, "", &enabled); err != nil {
+				fmt.Printf("警告: 禁用CloudFront分发失败: %v\n", err)
+			}
+			time.Sleep(2 * time.Second)
+			// 删除分发
+			if err := s.cloudFrontSvc.DeleteDistribution(softDeletedRule.CloudFrontID); err != nil {
+				fmt.Printf("警告: 删除CloudFront分发失败: %v\n", err)
+			}
+		}
+		// 删除S3目录
+		if s.config.S3BucketName != "" {
+			s3Path := fmt.Sprintf("redirects/%s/", softDeletedRule.SourceDomain)
+			if err := s.s3Svc.DeleteObjectsWithPrefix(s.config.S3BucketName, s3Path); err != nil {
+				fmt.Printf("警告: 删除S3目录失败: %v\n", err)
+			}
+		}
+		// 真正删除数据库记录（硬删除）
+		if err := s.db.Unscoped().Delete(&softDeletedRule).Error; err != nil {
+			return nil, fmt.Errorf("清理已删除的记录失败: %w", err)
+		}
 	}
 
 	// 创建重定向规则
