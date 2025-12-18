@@ -71,7 +71,7 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 		return
 	}
 
-	// 为每个规则添加 CloudFront 状态
+	// 为每个规则添加 CloudFront 状态、域名状态、证书状态和目标URL状态
 	rulesWithStatus := make([]gin.H, len(rules))
 	for i, rule := range rules {
 		ruleMap := gin.H{
@@ -90,6 +90,31 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 				ruleMap["cloudfront_status"] = status
 			}
 		}
+		
+		// 查询域名状态和证书状态
+		domainStatus, certStatus := h.service.GetDomainInfoByDomainName(rule.SourceDomain)
+		if domainStatus != "" {
+			ruleMap["domain_status"] = domainStatus
+		}
+		if certStatus != "" {
+			ruleMap["certificate_status"] = certStatus
+		}
+		
+		// 检查目标URL状态
+		targetsWithStatus := make([]gin.H, len(rule.Targets))
+		for j, target := range rule.Targets {
+			targetMap := gin.H{
+				"id":         target.ID,
+				"target_url": target.TargetURL,
+				"weight":     target.Weight,
+				"is_active":  target.IsActive,
+			}
+			// 检查URL状态
+			urlStatus := h.service.CheckURLStatus(target.TargetURL)
+			targetMap["url_status"] = urlStatus
+			targetsWithStatus[j] = targetMap
+		}
+		ruleMap["targets"] = targetsWithStatus
 		
 		rulesWithStatus[i] = ruleMap
 	}

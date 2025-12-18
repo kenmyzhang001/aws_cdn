@@ -18,14 +18,16 @@ type RedirectService struct {
 	db            *gorm.DB
 	cloudFrontSvc *aws.CloudFrontService
 	s3Svc         *aws.S3Service
+	domainSvc     *DomainService // 域名服务，用于查询域名和证书状态
 	config        *config.AWSConfig
 }
 
-func NewRedirectService(db *gorm.DB, cloudFrontSvc *aws.CloudFrontService, s3Svc *aws.S3Service, cfg *config.AWSConfig) *RedirectService {
+func NewRedirectService(db *gorm.DB, cloudFrontSvc *aws.CloudFrontService, s3Svc *aws.S3Service, domainSvc *DomainService, cfg *config.AWSConfig) *RedirectService {
 	return &RedirectService{
 		db:            db,
 		cloudFrontSvc: cloudFrontSvc,
 		s3Svc:         s3Svc,
+		domainSvc:     domainSvc,
 		config:        cfg,
 	}
 }
@@ -293,6 +295,52 @@ func (s *RedirectService) GetRedirectRule(id uint) (*models.RedirectRule, error)
 		return nil, fmt.Errorf("重定向规则不存在: %w", err)
 	}
 	return &rule, nil
+}
+
+// CheckURLStatus 检查URL是否可访问
+func (s *RedirectService) CheckURLStatus(targetURL string) string {
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	// 确保URL有协议
+	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
+		targetURL = "https://" + targetURL
+	}
+
+	resp, err := client.Head(targetURL)
+	if err != nil {
+		return "unreachable" // 不可访问
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+		return "active" // 可访问
+	}
+	return "error" // 错误状态码
+}
+
+// GetDomainInfoByDomainName 根据域名名称获取域名信息
+// 返回域名状态和证书状态
+func (s *RedirectService) GetDomainInfoByDomainName(domainName string) (string, string) {
+	if s.domainSvc == nil {
+		return "", ""
+	}
+
+	var domain models.Domain
+	if err := s.db.Where("domain_name = ?", domainName).First(&domain).Error; err != nil {
+		return "", "" // 域名不存在
+	}
+
+	// 查询最新的证书状态
+	certStatus := domain.CertificateStatus
+	if domain.CertificateARN != "" {
+		if status, err := s.domainSvc.GetCertificateStatus(domain.ID); err == nil {
+			certStatus = status
+		}
+	}
+
+	return string(domain.Status), certStatus
 }
 
 // ListRedirectRules 列出所有重定向规则
