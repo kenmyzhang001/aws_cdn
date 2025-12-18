@@ -60,6 +60,13 @@ func (s *S3Service) CreateBucket(bucketName string) error {
 		Bucket: aws.String(bucketName),
 	}
 
+	// 对于非 us-east-1 区域，需要指定 LocationConstraint
+	if s.config.Region != "us-east-1" {
+		input.CreateBucketConfiguration = &s3.CreateBucketConfiguration{
+			LocationConstraint: aws.String(s.config.Region),
+		}
+	}
+
 	_, err := s.client.CreateBucket(input)
 	if err != nil {
 		return fmt.Errorf("创建存储桶失败: %w", err)
@@ -88,10 +95,16 @@ func (s *S3Service) UploadFile(bucketName, key string, body io.ReadSeeker, conte
 }
 
 // UploadFileWithACL 上传文件到 S3（支持自定义ACL）
+// 如果存储桶不支持ACL，会自动重试不使用ACL
 func (s *S3Service) UploadFileWithACL(bucketName, key string, body io.ReadSeeker, contentType string, acl string) error {
 	// 确保存储桶存在
 	if err := s.EnsureBucketExists(bucketName); err != nil {
 		return fmt.Errorf("确保存储桶存在失败: %w", err)
+	}
+
+	// 重置body的位置，以便重试时可以使用
+	if seeker, ok := body.(io.Seeker); ok {
+		seeker.Seek(0, io.SeekStart)
 	}
 
 	input := &s3.PutObjectInput{
@@ -104,6 +117,36 @@ func (s *S3Service) UploadFileWithACL(bucketName, key string, body io.ReadSeeker
 
 	_, err := s.client.PutObject(input)
 	if err != nil {
+		// 检查是否是ACL不支持的错误
+		if strings.Contains(err.Error(), "AccessControlListNotSupported") ||
+			strings.Contains(err.Error(), "does not allow ACLs") {
+			// 存储桶不支持ACL，重试不使用ACL
+			// 重置body位置
+			if seeker, ok := body.(io.Seeker); ok {
+				seeker.Seek(0, io.SeekStart)
+			}
+
+			// 不使用ACL重试上传
+			inputWithoutACL := &s3.PutObjectInput{
+				Bucket:      aws.String(bucketName),
+				Key:         aws.String(key),
+				Body:        body,
+				ContentType: aws.String(contentType),
+				// 不设置ACL，依赖存储桶策略来管理访问权限
+			}
+
+			_, retryErr := s.client.PutObject(inputWithoutACL)
+			if retryErr != nil {
+				// 检查是否是权限错误
+				if strings.Contains(retryErr.Error(), "AccessDenied") || strings.Contains(retryErr.Error(), "Access Denied") || strings.Contains(retryErr.Error(), "403") {
+					return fmt.Errorf("S3访问被拒绝，请检查AWS凭证权限。需要s3:PutObject权限。错误详情: %w", retryErr)
+				}
+				return fmt.Errorf("上传文件失败（存储桶不支持ACL，且不使用ACL重试也失败）: %w", retryErr)
+			}
+			// 不使用ACL上传成功
+			return nil
+		}
+
 		// 检查是否是权限错误
 		if strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "Access Denied") || strings.Contains(err.Error(), "403") {
 			return fmt.Errorf("S3访问被拒绝，请检查AWS凭证权限。需要s3:PutObject和s3:PutObjectAcl权限。错误详情: %w", err)
