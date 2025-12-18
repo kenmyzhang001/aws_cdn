@@ -83,3 +83,56 @@ func (s *S3Service) UploadHTML(bucketName, key string, htmlContent string) error
 	return s.UploadString(bucketName, key, htmlContent, "text/html; charset=utf-8")
 }
 
+// DeleteObjectsWithPrefix 删除指定前缀的所有对象
+func (s *S3Service) DeleteObjectsWithPrefix(bucketName, prefix string) error {
+	// 列出所有匹配前缀的对象
+	listInput := &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucketName),
+		Prefix: aws.String(prefix),
+	}
+
+	var objectsToDelete []*s3.ObjectIdentifier
+
+	// 分页列出所有对象
+	err := s.client.ListObjectsV2Pages(listInput, func(page *s3.ListObjectsV2Output, lastPage bool) bool {
+		for _, obj := range page.Contents {
+			objectsToDelete = append(objectsToDelete, &s3.ObjectIdentifier{
+				Key: obj.Key,
+			})
+		}
+		return true
+	})
+	if err != nil {
+		return fmt.Errorf("列出对象失败: %w", err)
+	}
+
+	// 如果没有对象需要删除，直接返回
+	if len(objectsToDelete) == 0 {
+		return nil
+	}
+
+	// 批量删除对象（每次最多删除1000个）
+	const maxDeleteBatch = 1000
+	for i := 0; i < len(objectsToDelete); i += maxDeleteBatch {
+		end := i + maxDeleteBatch
+		if end > len(objectsToDelete) {
+			end = len(objectsToDelete)
+		}
+
+		deleteInput := &s3.DeleteObjectsInput{
+			Bucket: aws.String(bucketName),
+			Delete: &s3.Delete{
+				Objects: objectsToDelete[i:end],
+				Quiet:   aws.Bool(true),
+			},
+		}
+
+		_, err := s.client.DeleteObjects(deleteInput)
+		if err != nil {
+			return fmt.Errorf("删除对象失败: %w", err)
+		}
+	}
+
+	return nil
+}
+

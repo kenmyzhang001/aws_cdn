@@ -164,6 +164,17 @@ func (s *RedirectService) deployRedirectRule(rule *models.RedirectRule, certific
 	return nil
 }
 
+// findCertificateARN 查找域名的证书ARN（从domain表中查找）
+func (s *RedirectService) findCertificateARN(domainName string) string {
+	var domain models.Domain
+	if err := s.db.Where("domain_name = ?", domainName).First(&domain).Error; err == nil {
+		if domain.CertificateARN != "" {
+			return domain.CertificateARN
+		}
+	}
+	return ""
+}
+
 // CreateRedirectRule 创建重定向规则并自动部署
 func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []string, certificateARN string) (*models.RedirectRule, error) {
 	// 检查源域名是否已存在
@@ -200,7 +211,13 @@ func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []s
 		return nil, fmt.Errorf("加载重定向规则失败: %w", err)
 	}
 
-	// 部署到S3和CloudFront
+	// 如果没有提供证书ARN，尝试从domain表中查找
+	if certificateARN == "" {
+		certificateARN = s.findCertificateARN(sourceDomain)
+	}
+
+	// 自动部署到S3和CloudFront
+	// 如果找到了证书ARN，创建CloudFront分发
 	if certificateARN != "" {
 		if err := s.deployRedirectRule(rule, certificateARN); err != nil {
 			// 如果部署失败，记录错误但不阻止规则创建
@@ -208,8 +225,9 @@ func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []s
 			fmt.Printf("警告: 部署重定向规则失败: %v\n", err)
 		}
 	} else {
-		// 即使没有证书，也先上传HTML文件到S3
-		// 后续可以通过BindDomainToCloudFront接口绑定CloudFront
+		// 如果没有找到证书，先上传HTML文件到S3
+		// 系统会自动尝试从domain表中查找证书，如果找到会自动创建CloudFront
+		// 如果确实没有证书，可以后续通过BindDomainToCloudFront接口手动绑定CloudFront
 		if err := s.uploadHTMLOnly(rule); err != nil {
 			fmt.Printf("警告: 上传HTML文件失败: %v\n", err)
 		}
@@ -402,8 +420,41 @@ func (s *RedirectService) UpdateRule(id uint, sourceDomain string) error {
 	return s.db.Model(&models.RedirectRule{}).Where("id = ?", id).Update("source_domain", sourceDomain).Error
 }
 
-// DeleteRule 删除重定向规则
+// DeleteRule 删除重定向规则（同时删除CloudFront分发和S3目录）
 func (s *RedirectService) DeleteRule(id uint) error {
+	// 获取规则信息
+	rule, err := s.GetRedirectRule(id)
+	if err != nil {
+		return err
+	}
+
+	// 删除CloudFront分发（如果存在）
+	if rule.CloudFrontID != "" {
+		// 先禁用分发
+		enabled := false
+		if err := s.cloudFrontSvc.UpdateDistribution(rule.CloudFrontID, nil, "", &enabled); err != nil {
+			fmt.Printf("警告: 禁用CloudFront分发失败: %v\n", err)
+		}
+
+		// 等待一段时间确保禁用生效（CloudFront需要时间）
+		// 注意：实际生产环境应该使用轮询检查状态
+		time.Sleep(2 * time.Second)
+
+		// 删除分发
+		if err := s.cloudFrontSvc.DeleteDistribution(rule.CloudFrontID); err != nil {
+			fmt.Printf("警告: 删除CloudFront分发失败: %v\n", err)
+		}
+	}
+
+	// 删除S3目录中的文件
+	if s.config.S3BucketName != "" {
+		s3Path := fmt.Sprintf("redirects/%s/", rule.SourceDomain)
+		if err := s.s3Svc.DeleteObjectsWithPrefix(s.config.S3BucketName, s3Path); err != nil {
+			fmt.Printf("警告: 删除S3目录失败: %v\n", err)
+		}
+	}
+
+	// 从数据库删除规则（软删除）
 	return s.db.Delete(&models.RedirectRule{}, id).Error
 }
 
