@@ -42,9 +42,9 @@ func Load() *Config {
 	return &Config{
 		Database: DatabaseConfig{
 			Host:     getEnv("DB_HOST", "localhost"),
-			Port:     getEnv("DB_PORT", "5432"),
-			User:     getEnv("DB_USER", "postgres"),
-			Password: getEnv("DB_PASSWORD", "postgres"),
+			Port:     getEnv("DB_PORT", "3306"),
+			User:     getEnv("DB_USER", "root"),
+			Password: getEnv("DB_PASSWORD", ""),
 			DBName:   getEnv("DB_NAME", "aws_cdn"),
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
 		},
@@ -72,5 +72,3 @@ func getEnv(key, defaultValue string) string {
 	}
 	return defaultValue
 }
-
-
