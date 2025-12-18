@@ -100,9 +100,9 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 			ruleMap["certificate_status"] = certStatus
 		}
 		
-		// 查询 Route 53 DNS 记录状态
+		// 查询 Route 53 DNS 记录状态（验证是否指向正确的 CloudFront）
 		if rule.CloudFrontID != "" {
-			dnsStatus := h.service.CheckRoute53RecordStatus(rule.SourceDomain)
+			dnsStatus := h.service.CheckRoute53RecordStatus(rule.SourceDomain, rule.CloudFrontID)
 			ruleMap["route53_dns_status"] = dnsStatus
 		}
 		

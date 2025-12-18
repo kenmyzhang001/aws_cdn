@@ -194,13 +194,22 @@ func (s *Route53Service) CreateAliasRecord(hostedZoneID, name, cloudFrontDomainN
 	return nil
 }
 
-// CheckCloudFrontAliasRecord 检查是否存在指向 CloudFront 的 A 记录（Alias）
-// 返回 true 表示记录存在，false 表示不存在，error 表示查询失败
-func (s *Route53Service) CheckCloudFrontAliasRecord(hostedZoneID, domainName string) (bool, error) {
+// CheckCloudFrontAliasRecord 检查是否存在指向指定 CloudFront 分发的 A 记录（Alias）
+// hostedZoneID: Route 53 托管区域 ID
+// domainName: 域名
+// cloudFrontDomainName: CloudFront 分发域名（例如：d1234567890.cloudfront.net），如果为空则只检查是否指向 CloudFront
+// 返回 true 表示记录存在且指向正确的 CloudFront，false 表示不存在或指向错误，error 表示查询失败
+func (s *Route53Service) CheckCloudFrontAliasRecord(hostedZoneID, domainName, cloudFrontDomainName string) (bool, error) {
 	// 确保 domainName 以点结尾（Route 53 要求）
 	recordName := domainName
 	if recordName != "" && recordName[len(recordName)-1] != '.' {
 		recordName = recordName + "."
+	}
+
+	// 标准化 CloudFront 域名（去掉末尾的点）
+	expectedCFDomain := cloudFrontDomainName
+	if expectedCFDomain != "" && expectedCFDomain[len(expectedCFDomain)-1] == '.' {
+		expectedCFDomain = expectedCFDomain[:len(expectedCFDomain)-1]
 	}
 
 	// 列出所有记录
@@ -220,7 +229,25 @@ func (s *Route53Service) CheckCloudFrontAliasRecord(hostedZoneID, domainName str
 			if record.AliasTarget != nil {
 				// CloudFront 的 Hosted Zone ID 是固定的
 				if record.AliasTarget.HostedZoneId != nil && *record.AliasTarget.HostedZoneId == "Z2FDTNDATAQYW2" {
-					return true, nil
+					// 如果指定了 CloudFront 域名，验证是否匹配
+					if expectedCFDomain != "" {
+						if record.AliasTarget.DNSName != nil {
+							actualCFDomain := *record.AliasTarget.DNSName
+							// 去掉末尾的点（如果有）
+							if actualCFDomain != "" && actualCFDomain[len(actualCFDomain)-1] == '.' {
+								actualCFDomain = actualCFDomain[:len(actualCFDomain)-1]
+							}
+							// 检查是否匹配
+							if actualCFDomain == expectedCFDomain {
+								return true, nil
+							}
+							// 指向了 CloudFront 但不是正确的分发
+							return false, nil
+						}
+					} else {
+						// 没有指定 CloudFront 域名，只要指向 CloudFront 就返回 true
+						return true, nil
+					}
 				}
 			}
 		}

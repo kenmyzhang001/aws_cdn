@@ -321,8 +321,8 @@ func (s *DomainService) CreateCloudFrontAliasRecord(hostedZoneID, domainName, cl
 	return s.route53Svc.CreateAliasRecord(hostedZoneID, domainName, cloudFrontDomainName)
 }
 
-// CheckCloudFrontAliasRecord 检查是否存在指向 CloudFront 的 A 记录（Alias）
-func (s *DomainService) CheckCloudFrontAliasRecord(hostedZoneID, domainName string) (bool, error) {
-	return s.route53Svc.CheckCloudFrontAliasRecord(hostedZoneID, domainName)
+// CheckCloudFrontAliasRecord 检查是否存在指向指定 CloudFront 分发的 A 记录（Alias）
+func (s *DomainService) CheckCloudFrontAliasRecord(hostedZoneID, domainName, cloudFrontDomainName string) (bool, error) {
+	return s.route53Svc.CheckCloudFrontAliasRecord(hostedZoneID, domainName, cloudFrontDomainName)
 }
 

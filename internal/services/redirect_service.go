@@ -350,8 +350,10 @@ func (s *RedirectService) GetDomainInfoByDomainName(domainName string) (string, 
 }
 
 // CheckRoute53RecordStatus 检查 Route 53 DNS 记录状态
-// 返回 "configured"（已配置）、"not_configured"（未配置）或 "error"（错误）
-func (s *RedirectService) CheckRoute53RecordStatus(domainName string) string {
+// domainName: 域名
+// cloudFrontID: CloudFront 分发 ID（可选，如果提供则验证是否指向正确的分发）
+// 返回 "configured"（已配置且正确）、"not_configured"（未配置）、"mismatched"（指向错误的分发）或 "error"（错误）
+func (s *RedirectService) CheckRoute53RecordStatus(domainName, cloudFrontID string) string {
 	if s.domainSvc == nil {
 		return "error"
 	}
@@ -366,14 +368,32 @@ func (s *RedirectService) CheckRoute53RecordStatus(domainName string) string {
 		return "not_configured" // 没有托管区域
 	}
 
-	// 检查是否存在指向 CloudFront 的 A 记录
-	exists, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName)
+	// 如果提供了 CloudFront ID，获取对应的域名进行验证
+	var cloudFrontDomainName string
+	if cloudFrontID != "" {
+		dist, err := s.cloudFrontSvc.GetDistribution(cloudFrontID)
+		if err == nil && dist != nil && dist.DomainName != nil {
+			cloudFrontDomainName = *dist.DomainName
+		}
+	}
+
+	// 检查是否存在指向 CloudFront 的 A 记录，并验证是否指向正确的分发
+	exists, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName)
 	if err != nil {
 		return "error"
 	}
 
 	if exists {
 		return "configured"
+	}
+
+	// 如果指定了 CloudFront 域名但检查失败，可能是指向了错误的分发
+	if cloudFrontDomainName != "" {
+		// 再次检查是否指向了其他 CloudFront（不指定域名）
+		existsAny, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName, "")
+		if err == nil && existsAny {
+			return "mismatched" // 指向了 CloudFront 但不是正确的分发
+		}
 	}
 
 	return "not_configured"
