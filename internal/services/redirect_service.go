@@ -681,15 +681,17 @@ func (s *RedirectService) BindDomainToCloudFront(ruleID uint, distributionID str
 
 // CheckRedirectRuleStatus 检查重定向规则的状态
 type RedirectRuleStatus struct {
-	RuleExists       bool     `json:"rule_exists"`
-	HTMLUploaded     bool     `json:"html_uploaded"`
-	HTMLUploadError  string   `json:"html_upload_error,omitempty"`
-	CloudFrontExists bool     `json:"cloudfront_exists"`
-	CloudFrontError  string   `json:"cloudfront_error,omitempty"`
-	CertificateFound bool     `json:"certificate_found"`
-	CertificateARN   string   `json:"certificate_arn,omitempty"`
-	Issues           []string `json:"issues"`
-	CanFix           bool     `json:"can_fix"`
+	RuleExists           bool     `json:"rule_exists"`
+	HTMLUploaded         bool     `json:"html_uploaded"`
+	HTMLUploadError      string   `json:"html_upload_error,omitempty"`
+	CloudFrontExists     bool     `json:"cloudfront_exists"`
+	CloudFrontError      string   `json:"cloudfront_error,omitempty"`
+	Route53DNSConfigured bool     `json:"route53_dns_configured"`
+	Route53DNSError      string   `json:"route53_dns_error,omitempty"`
+	CertificateFound     bool     `json:"certificate_found"`
+	CertificateARN       string   `json:"certificate_arn,omitempty"`
+	Issues               []string `json:"issues"`
+	CanFix               bool     `json:"can_fix"`
 }
 
 // CheckRedirectRule 检查重定向规则的状态
@@ -731,6 +733,21 @@ func (s *RedirectService) CheckRedirectRule(ruleID uint) (*RedirectRuleStatus, e
 			status.Issues = append(status.Issues, fmt.Sprintf("CloudFront分发不存在或无法访问: %v", err))
 		} else {
 			status.CloudFrontExists = true
+
+			// 检查 Route 53 DNS 记录是否指向正确的 CloudFront
+			dnsStatus := s.CheckRoute53RecordStatus(rule.SourceDomain, rule.CloudFrontID)
+			if dnsStatus == "configured" {
+				status.Route53DNSConfigured = true
+			} else if dnsStatus == "mismatched" {
+				status.Route53DNSError = "DNS记录指向了错误的CloudFront分发"
+				status.Issues = append(status.Issues, "Route 53 DNS记录指向了错误的CloudFront分发")
+			} else if dnsStatus == "not_configured" {
+				status.Route53DNSError = "未配置Route 53 DNS记录"
+				status.Issues = append(status.Issues, "Route 53 DNS记录未配置")
+			} else if dnsStatus == "error" {
+				status.Route53DNSError = "检查Route 53 DNS记录失败"
+				status.Issues = append(status.Issues, "检查Route 53 DNS记录失败")
+			}
 		}
 	} else {
 		status.Issues = append(status.Issues, "未创建CloudFront分发")
