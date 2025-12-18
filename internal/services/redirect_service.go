@@ -163,6 +163,12 @@ func (s *RedirectService) deployRedirectRule(rule *models.RedirectRule, certific
 		return fmt.Errorf("更新规则失败: %w", err)
 	}
 
+	// 创建 Route 53 DNS 记录指向 CloudFront
+	if err := s.createRoute53RecordForCloudFront(rule.SourceDomain, distributionID); err != nil {
+		// 记录错误但不阻止流程，因为 DNS 记录可以稍后手动创建
+		fmt.Printf("警告: 创建 Route 53 DNS 记录失败: %v\n", err)
+	}
+
 	return nil
 }
 
@@ -341,6 +347,38 @@ func (s *RedirectService) GetDomainInfoByDomainName(domainName string) (string, 
 	}
 
 	return string(domain.Status), certStatus
+}
+
+// createRoute53RecordForCloudFront 为 CloudFront 分发创建 Route 53 DNS 记录
+func (s *RedirectService) createRoute53RecordForCloudFront(domainName, distributionID string) error {
+	if s.domainSvc == nil {
+		return fmt.Errorf("域名服务未初始化")
+	}
+
+	// 查找域名对应的 Route 53 Hosted Zone ID
+	var domain models.Domain
+	if err := s.db.Where("domain_name = ?", domainName).First(&domain).Error; err != nil {
+		return fmt.Errorf("未找到域名 %s 的 Route 53 托管区域", domainName)
+	}
+
+	if domain.HostedZoneID == "" {
+		return fmt.Errorf("域名 %s 没有配置 Route 53 托管区域", domainName)
+	}
+
+	// 获取 CloudFront 分发的域名
+	dist, err := s.cloudFrontSvc.GetDistribution(distributionID)
+	if err != nil {
+		return fmt.Errorf("获取 CloudFront 分发信息失败: %w", err)
+	}
+
+	if dist == nil || dist.DomainName == nil {
+		return fmt.Errorf("CloudFront 分发没有域名信息")
+	}
+
+	cloudFrontDomainName := *dist.DomainName
+
+	// 通过 domainSvc 创建 Alias 记录
+	return s.domainSvc.CreateCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName)
 }
 
 // ListRedirectRules 列出所有重定向规则

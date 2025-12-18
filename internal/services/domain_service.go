@@ -316,3 +316,8 @@ func (s *DomainService) DeleteDomain(id uint) error {
 	return nil
 }
 
+// CreateCloudFrontAliasRecord 创建指向 CloudFront 的 A 记录（Alias）
+func (s *DomainService) CreateCloudFrontAliasRecord(hostedZoneID, domainName, cloudFrontDomainName string) error {
+	return s.route53Svc.CreateAliasRecord(hostedZoneID, domainName, cloudFrontDomainName)
+}
+

@@ -145,6 +145,55 @@ func (s *Route53Service) CreateCNAMERecord(hostedZoneID, name, value string) err
 	return nil
 }
 
+// CreateAliasRecord 创建 A 记录（Alias）指向 CloudFront 分发
+// hostedZoneID: Route 53 托管区域 ID
+// name: 记录名称（域名）
+// cloudFrontDomainName: CloudFront 分发域名（例如：d1234567890.cloudfront.net）
+func (s *Route53Service) CreateAliasRecord(hostedZoneID, name, cloudFrontDomainName string) error {
+	// 确保 name 以点结尾（Route 53 要求）
+	if name != "" && name[len(name)-1] != '.' {
+		name = name + "."
+	}
+
+	// 确保 CloudFront 域名不以点结尾（AliasTarget 的 DNSName 不应该以点结尾）
+	cfDomain := cloudFrontDomainName
+	if cfDomain != "" && cfDomain[len(cfDomain)-1] == '.' {
+		cfDomain = cfDomain[:len(cfDomain)-1]
+	}
+
+	// CloudFront 的 Hosted Zone ID 是固定的（所有 CloudFront 分发使用同一个）
+	cloudFrontHostedZoneID := "Z2FDTNDATAQYW2"
+
+	change := &route53.Change{
+		Action: aws.String("UPSERT"),
+		ResourceRecordSet: &route53.ResourceRecordSet{
+			Name: aws.String(name),
+			Type: aws.String("A"),
+			AliasTarget: &route53.AliasTarget{
+				DNSName:              aws.String(cfDomain),
+				HostedZoneId:         aws.String(cloudFrontHostedZoneID),
+				EvaluateTargetHealth: aws.Bool(false),
+			},
+		},
+	}
+
+	changeBatch := &route53.ChangeBatch{
+		Changes: []*route53.Change{change},
+	}
+
+	input := &route53.ChangeResourceRecordSetsInput{
+		HostedZoneId: aws.String(hostedZoneID),
+		ChangeBatch:  changeBatch,
+	}
+
+	_, err := s.client.ChangeResourceRecordSets(input)
+	if err != nil {
+		return fmt.Errorf("创建 A 记录（Alias）失败: %w", err)
+	}
+
+	return nil
+}
+
 // DeleteHostedZone 删除托管区域
 // 注意：删除托管区域前需要先删除所有记录（除了默认的 NS 和 SOA 记录）
 func (s *Route53Service) DeleteHostedZone(hostedZoneID string) error {
@@ -201,4 +250,3 @@ func (s *Route53Service) DeleteHostedZone(hostedZoneID string) error {
 
 	return nil
 }
-
