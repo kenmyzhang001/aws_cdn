@@ -119,6 +119,25 @@ func (s *DomainService) ListDomains(page, pageSize int) ([]models.Domain, int64,
 		return nil, 0, err
 	}
 
+	// 为每个有证书的域名查询最新的证书状态
+	for i := range domains {
+		if domains[i].CertificateARN != "" {
+			status, err := s.acmSvc.GetCertificateStatus(domains[i].CertificateARN)
+			if err == nil {
+				// 更新证书状态（如果状态有变化，也更新数据库）
+				if domains[i].CertificateStatus != status {
+					domains[i].CertificateStatus = status
+					// 异步更新数据库，不阻塞列表返回
+					go func(domainID uint, certStatus string) {
+						s.db.Model(&models.Domain{}).Where("id = ?", domainID).Update("certificate_status", certStatus)
+					}(domains[i].ID, status)
+				} else {
+					domains[i].CertificateStatus = status
+				}
+			}
+		}
+	}
+
 	return domains, total, nil
 }
 

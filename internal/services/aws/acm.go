@@ -3,6 +3,7 @@ package aws
 import (
 	"aws_cdn/internal/config"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -62,7 +63,8 @@ func (s *ACMService) GetCertificateStatus(certificateARN string) (string, error)
 	}
 
 	status := *result.Certificate.Status
-	return status, nil
+	// 将 AWS 返回的大写状态转换为小写，以保持与数据库的一致性
+	return strings.ToLower(status), nil
 }
 
 // WaitForCertificateValidation 等待证书验证完成
@@ -107,9 +109,9 @@ func (s *ACMService) DeleteCertificate(certificateARN string) error {
 
 // CertificateValidationRecord 证书验证记录
 type CertificateValidationRecord struct {
-	Name   string // CNAME 记录名称
-	Type   string // 记录类型，通常是 "CNAME"
-	Value  string // CNAME 记录值
+	Name  string // CNAME 记录名称
+	Type  string // 记录类型，通常是 "CNAME"
+	Value string // CNAME 记录值
 }
 
 // GetCertificateValidationRecords 获取证书的验证记录
@@ -139,5 +141,3 @@ func (s *ACMService) GetCertificateValidationRecords(certificateARN string) ([]C
 
 	return records, nil
 }
-
-
