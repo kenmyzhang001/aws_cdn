@@ -105,4 +105,39 @@ func (s *ACMService) DeleteCertificate(certificateARN string) error {
 	return nil
 }
 
+// CertificateValidationRecord 证书验证记录
+type CertificateValidationRecord struct {
+	Name   string // CNAME 记录名称
+	Type   string // 记录类型，通常是 "CNAME"
+	Value  string // CNAME 记录值
+}
+
+// GetCertificateValidationRecords 获取证书的验证记录
+func (s *ACMService) GetCertificateValidationRecords(certificateARN string) ([]CertificateValidationRecord, error) {
+	input := &acm.DescribeCertificateInput{
+		CertificateArn: aws.String(certificateARN),
+	}
+
+	result, err := s.client.DescribeCertificate(input)
+	if err != nil {
+		return nil, fmt.Errorf("获取证书详情失败: %w", err)
+	}
+
+	var records []CertificateValidationRecord
+	if result.Certificate != nil && result.Certificate.DomainValidationOptions != nil {
+		for _, option := range result.Certificate.DomainValidationOptions {
+			if option.ResourceRecord != nil {
+				record := CertificateValidationRecord{
+					Name:  aws.StringValue(option.ResourceRecord.Name),
+					Type:  aws.StringValue(option.ResourceRecord.Type),
+					Value: aws.StringValue(option.ResourceRecord.Value),
+				}
+				records = append(records, record)
+			}
+		}
+	}
+
+	return records, nil
+}
+
 

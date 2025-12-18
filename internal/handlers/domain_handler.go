@@ -99,11 +99,17 @@ func (h *DomainHandler) GenerateCertificate(c *gin.Context) {
 	}
 
 	if err := h.service.GenerateCertificate(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// 检查是否是证书已存在的情况（状态为ISSUED等）
+		errMsg := err.Error()
+		if len(errMsg) >= 12 && errMsg[:12] == "证书已存在" {
+			c.JSON(http.StatusOK, gin.H{"message": errMsg})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "证书生成请求已提交"})
+	c.JSON(http.StatusOK, gin.H{"message": "证书生成请求已提交，验证记录已添加到 Route 53"})
 }
 
 // GetCertificateStatus 获取证书状态

@@ -111,6 +111,40 @@ func ParseNServersJSON(jsonStr string) ([]string, error) {
 	return nsServers, nil
 }
 
+// CreateCNAMERecord 创建 CNAME 记录
+func (s *Route53Service) CreateCNAMERecord(hostedZoneID, name, value string) error {
+	// 确保 name 以点结尾（Route 53 要求）
+	if name != "" && name[len(name)-1] != '.' {
+		name = name + "."
+	}
+
+	change := &route53.Change{
+		Action: aws.String("UPSERT"),
+		ResourceRecordSet: &route53.ResourceRecordSet{
+			Name:            aws.String(name),
+			Type:            aws.String("CNAME"),
+			TTL:             aws.Int64(300), // 5 分钟
+			ResourceRecords: []*route53.ResourceRecord{{Value: aws.String(value)}},
+		},
+	}
+
+	changeBatch := &route53.ChangeBatch{
+		Changes: []*route53.Change{change},
+	}
+
+	input := &route53.ChangeResourceRecordSetsInput{
+		HostedZoneId: aws.String(hostedZoneID),
+		ChangeBatch:  changeBatch,
+	}
+
+	_, err := s.client.ChangeResourceRecordSets(input)
+	if err != nil {
+		return fmt.Errorf("创建 CNAME 记录失败: %w", err)
+	}
+
+	return nil
+}
+
 // DeleteHostedZone 删除托管区域
 // 注意：删除托管区域前需要先删除所有记录（除了默认的 NS 和 SOA 记录）
 func (s *Route53Service) DeleteHostedZone(hostedZoneID string) error {

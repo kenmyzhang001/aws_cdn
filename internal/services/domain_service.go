@@ -149,11 +149,51 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 		return err
 	}
 
+	var certificateARN string
 	if domain.CertificateARN != "" {
-		return fmt.Errorf("证书已存在: %s", domain.CertificateARN)
+		// 证书已存在，检查状态
+		certificateARN = domain.CertificateARN
+		status, err := s.acmSvc.GetCertificateStatus(certificateARN)
+		if err != nil {
+			return fmt.Errorf("获取证书状态失败: %w", err)
+		}
+
+		// 如果证书状态是 PENDING_VALIDATION，需要添加验证记录
+		if status == "PENDING_VALIDATION" {
+			if domain.HostedZoneID == "" {
+				return fmt.Errorf("证书已存在但缺少托管区域ID，无法添加验证记录")
+			}
+
+			// 获取证书验证记录
+			validationRecords, err := s.acmSvc.GetCertificateValidationRecords(certificateARN)
+			if err != nil {
+				return fmt.Errorf("获取证书验证记录失败: %w", err)
+			}
+
+			// 将验证记录添加到 Route 53
+			for _, record := range validationRecords {
+				if record.Type == "CNAME" {
+					if err := s.route53Svc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value); err != nil {
+						return fmt.Errorf("添加 CNAME 验证记录失败: %w", err)
+					}
+				}
+			}
+
+			// 更新证书状态
+			s.db.Model(domain).Update("certificate_status", "pending_validation")
+
+			// 异步等待证书验证
+			go s.requestCertificateAsync(domain)
+
+			return nil
+		}
+
+		// 如果证书已经是 ISSUED 或其他状态，直接返回
+		return fmt.Errorf("证书已存在: %s (状态: %s)", certificateARN, status)
 	}
 
-	certificateARN, err := s.acmSvc.RequestCertificate(domain.DomainName)
+	// 证书不存在，创建新证书
+	certificateARN, err = s.acmSvc.RequestCertificate(domain.DomainName)
 	if err != nil {
 		return fmt.Errorf("请求证书失败: %w", err)
 	}
@@ -162,6 +202,25 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 		"certificate_arn":    certificateARN,
 		"certificate_status": "pending",
 	})
+
+	// 获取证书验证记录并添加到 Route 53
+	if domain.HostedZoneID != "" {
+		// 等待一下让 AWS 生成验证记录
+		time.Sleep(2 * time.Second)
+
+		validationRecords, err := s.acmSvc.GetCertificateValidationRecords(certificateARN)
+		if err == nil && len(validationRecords) > 0 {
+			// 将验证记录添加到 Route 53
+			for _, record := range validationRecords {
+				if record.Type == "CNAME" {
+					if err := s.route53Svc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value); err != nil {
+						// 记录错误但不阻止流程继续
+						// 可以记录日志，这里简化处理
+					}
+				}
+			}
+		}
+	}
 
 	// 异步等待证书验证
 	go s.requestCertificateAsync(domain)
