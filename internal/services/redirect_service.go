@@ -400,6 +400,7 @@ func (s *RedirectService) CheckRoute53RecordStatus(domainName, cloudFrontID stri
 }
 
 // createRoute53RecordForCloudFront 为 CloudFront 分发创建 Route 53 DNS 记录
+// 如果记录已存在，会更新为指向正确的 CloudFront 分发
 func (s *RedirectService) createRoute53RecordForCloudFront(domainName, distributionID string) error {
 	if s.domainSvc == nil {
 		return fmt.Errorf("域名服务未初始化")
@@ -427,7 +428,16 @@ func (s *RedirectService) createRoute53RecordForCloudFront(domainName, distribut
 
 	cloudFrontDomainName := *dist.DomainName
 
-	// 通过 domainSvc 创建 Alias 记录
+	// 先检查是否已存在正确的 DNS 记录
+	exists, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName)
+	if err != nil {
+		// 检查失败，继续尝试创建
+	} else if exists {
+		// 已存在正确的 DNS 记录，无需创建
+		return nil
+	}
+
+	// 通过 domainSvc 创建或更新 Alias 记录（使用 UPSERT，如果存在则更新）
 	return s.domainSvc.CreateCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName)
 }
 
@@ -805,12 +815,19 @@ func (s *RedirectService) FixRedirectRule(ruleID uint) (*CreateRedirectRuleResul
 				warningMsg := fmt.Sprintf("重新部署HTML文件失败: %v", err)
 				deploymentWarnings = append(deploymentWarnings, warningMsg)
 			}
+
+			// 检查并创建 Route 53 DNS 记录（如果不存在）
+			if err := s.createRoute53RecordForCloudFront(rule.SourceDomain, rule.CloudFrontID); err != nil {
+				warningMsg := fmt.Sprintf("创建 Route 53 DNS 记录失败: %v", err)
+				deploymentWarnings = append(deploymentWarnings, warningMsg)
+			}
 		} else {
 			// 创建新的CloudFront分发
 			if err := s.deployRedirectRule(rule, certificateARN); err != nil {
 				warningMsg := fmt.Sprintf("部署重定向规则失败: %v", err)
 				deploymentWarnings = append(deploymentWarnings, warningMsg)
 			}
+			// deployRedirectRule 内部已经会创建 DNS 记录，这里不需要重复创建
 		}
 	} else {
 		// 没有证书，只上传HTML文件

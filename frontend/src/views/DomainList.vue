@@ -256,8 +256,12 @@ const getStatusText = (status) => {
 const getCertificateStatusType = (status) => {
   const map = {
     pending: 'warning',
+    'pending_validation': 'warning',
     issued: 'success',
     failed: 'danger',
+    'validation_timed_out': 'danger',
+    revoked: 'danger',
+    expired: 'warning',
     not_requested: 'info',
   }
   return map[status] || 'info'
@@ -266,11 +270,15 @@ const getCertificateStatusType = (status) => {
 const getCertificateStatusText = (status) => {
   const map = {
     pending: '验证中',
+    'pending_validation': '待验证',
     issued: '已签发',
     failed: '失败',
+    'validation_timed_out': '验证超时',
+    revoked: '已撤销',
+    expired: '已过期',
     not_requested: '未申请',
   }
-  return map[status] || status
+  return map[status] || status || '未知'
 }
 </script>
 

@@ -14,15 +14,33 @@
       <el-table :data="redirectList" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="source_domain" label="源域名" />
+        <el-table-column prop="domain_status" label="域名状态" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.domain_status" :type="getDomainStatusType(row.domain_status)">
+              {{ getDomainStatusText(row.domain_status) }}
+            </el-tag>
+            <span v-else style="color: #c0c4cc">未找到</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="certificate_status" label="证书状态" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.certificate_status" :type="getCertificateStatusType(row.certificate_status)">
+              {{ getCertificateStatusText(row.certificate_status) }}
+            </el-tag>
+            <span v-else style="color: #c0c4cc">未申请</span>
+          </template>
+        </el-table-column>
         <el-table-column label="目标 URL" min-width="200">
           <template #default="{ row }">
-            <el-tag
-              v-for="target in row.targets"
-              :key="target.id"
-              style="margin-right: 5px; margin-bottom: 5px"
-            >
-              {{ target.target_url }}
-            </el-tag>
+            <div v-for="target in row.targets" :key="target.id" style="margin-bottom: 5px">
+              <el-tag
+                :type="getURLStatusType(target.url_status)"
+                style="margin-right: 5px"
+              >
+                {{ getURLStatusText(target.url_status) }}
+              </el-tag>
+              <span>{{ target.target_url }}</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column prop="cloudfront_id" label="CloudFront ID" width="200" />
@@ -32,6 +50,14 @@
               {{ getCloudFrontStatusText(row.cloudfront_status) }}
             </el-tag>
             <span v-else style="color: #c0c4cc">未绑定</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="route53_dns_status" label="Route 53 DNS" width="140">
+          <template #default="{ row }">
+            <el-tag v-if="row.route53_dns_status" :type="getRoute53DNSStatusType(row.route53_dns_status)">
+              {{ getRoute53DNSStatusText(row.route53_dns_status) }}
+            </el-tag>
+            <span v-else style="color: #c0c4cc">未检查</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="350">
@@ -173,6 +199,14 @@
             </el-tag>
             <span v-if="checkStatus.cloudfront_error" style="color: #f56c6c; margin-left: 10px">
               ({{ checkStatus.cloudfront_error }})
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="Route 53 DNS记录">
+            <el-tag :type="checkStatus.route53_dns_configured ? 'success' : 'danger'">
+              {{ checkStatus.route53_dns_configured ? '已配置' : '未配置' }}
+            </el-tag>
+            <span v-if="checkStatus.route53_dns_error" style="color: #f56c6c; margin-left: 10px">
+              ({{ checkStatus.route53_dns_error }})
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="证书已找到">
@@ -574,6 +608,92 @@ const getCloudFrontStatusText = (status) => {
     InProgress: '部署中',
     Deployed: '已部署',
     Disabled: '已禁用',
+  }
+  return statusTextMap[status] || status || '未知'
+}
+
+const getDomainStatusType = (status) => {
+  const statusMap = {
+    pending: 'info',
+    in_progress: 'warning',
+    completed: 'success',
+    failed: 'danger',
+  }
+  return statusMap[status] || 'info'
+}
+
+const getDomainStatusText = (status) => {
+  const statusTextMap = {
+    pending: '待转入',
+    in_progress: '转入中',
+    completed: '已完成',
+    failed: '失败',
+  }
+  return statusTextMap[status] || status || '未知'
+}
+
+const getCertificateStatusType = (status) => {
+  const statusMap = {
+    pending: 'warning',
+    'pending_validation': 'warning',
+    issued: 'success',
+    failed: 'danger',
+    'validation_timed_out': 'danger',
+    revoked: 'danger',
+    expired: 'warning',
+    not_requested: 'info',
+  }
+  return statusMap[status] || 'info'
+}
+
+const getCertificateStatusText = (status) => {
+  const statusTextMap = {
+    pending: '验证中',
+    'pending_validation': '待验证',
+    issued: '已签发',
+    failed: '失败',
+    'validation_timed_out': '验证超时',
+    revoked: '已撤销',
+    expired: '已过期',
+    not_requested: '未申请',
+  }
+  return statusTextMap[status] || status || '未知'
+}
+
+const getURLStatusType = (status) => {
+  const statusMap = {
+    active: 'success',
+    unreachable: 'danger',
+    error: 'warning',
+  }
+  return statusMap[status] || 'info'
+}
+
+const getURLStatusText = (status) => {
+  const statusTextMap = {
+    active: '正常',
+    unreachable: '不可访问',
+    error: '错误',
+  }
+  return statusTextMap[status] || status || '未知'
+}
+
+const getRoute53DNSStatusType = (status) => {
+  const statusMap = {
+    configured: 'success',
+    not_configured: 'warning',
+    mismatched: 'danger',
+    error: 'danger',
+  }
+  return statusMap[status] || 'info'
+}
+
+const getRoute53DNSStatusText = (status) => {
+  const statusTextMap = {
+    configured: '已配置',
+    not_configured: '未配置',
+    mismatched: '指向错误',
+    error: '检查失败',
   }
   return statusTextMap[status] || status || '未知'
 }
