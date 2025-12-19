@@ -745,19 +745,21 @@ func (s *RedirectService) BindDomainToCloudFront(ruleID uint, distributionID str
 
 // CheckRedirectRuleStatus 检查重定向规则的状态
 type RedirectRuleStatus struct {
-	RuleExists           bool     `json:"rule_exists"`
-	HTMLUploaded         bool     `json:"html_uploaded"`
-	HTMLUploadError      string   `json:"html_upload_error,omitempty"`
-	CloudFrontExists     bool     `json:"cloudfront_exists"`
-	CloudFrontError      string   `json:"cloudfront_error,omitempty"`
-	Route53DNSConfigured bool     `json:"route53_dns_configured"`
-	Route53DNSError      string   `json:"route53_dns_error,omitempty"`
-	WWWCNAMEConfigured   bool     `json:"www_cname_configured"`
-	WWWCNAMEError        string   `json:"www_cname_error,omitempty"`
-	CertificateFound     bool     `json:"certificate_found"`
-	CertificateARN       string   `json:"certificate_arn,omitempty"`
-	Issues               []string `json:"issues"`
-	CanFix               bool     `json:"can_fix"`
+	RuleExists               bool     `json:"rule_exists"`
+	HTMLUploaded             bool     `json:"html_uploaded"`
+	HTMLUploadError          string   `json:"html_upload_error,omitempty"`
+	S3BucketPolicyConfigured bool     `json:"s3_bucket_policy_configured"`
+	S3BucketPolicyError      string   `json:"s3_bucket_policy_error,omitempty"`
+	CloudFrontExists         bool     `json:"cloudfront_exists"`
+	CloudFrontError          string   `json:"cloudfront_error,omitempty"`
+	Route53DNSConfigured     bool     `json:"route53_dns_configured"`
+	Route53DNSError          string   `json:"route53_dns_error,omitempty"`
+	WWWCNAMEConfigured       bool     `json:"www_cname_configured"`
+	WWWCNAMEError            string   `json:"www_cname_error,omitempty"`
+	CertificateFound         bool     `json:"certificate_found"`
+	CertificateARN           string   `json:"certificate_arn,omitempty"`
+	Issues                   []string `json:"issues"`
+	CanFix                   bool     `json:"can_fix"`
 }
 
 // CheckRedirectRule 检查重定向规则的状态
@@ -775,6 +777,18 @@ func (s *RedirectService) CheckRedirectRule(ruleID uint) (*RedirectRuleStatus, e
 
 	// 检查S3 HTML文件是否存在
 	if s.config.S3BucketName != "" {
+		// 检查 S3 bucket policy 是否已配置
+		policyConfigured, err := s.s3Svc.CheckBucketPolicyForPublicAccess(s.config.S3BucketName)
+		if err != nil {
+			status.S3BucketPolicyError = fmt.Sprintf("检查bucket policy失败: %v", err)
+			status.Issues = append(status.Issues, "检查S3 bucket policy失败")
+		} else if !policyConfigured {
+			status.S3BucketPolicyError = "未配置S3 bucket policy"
+			status.Issues = append(status.Issues, "S3 bucket policy未配置，CloudFront可能无法访问S3对象")
+		} else {
+			status.S3BucketPolicyConfigured = true
+		}
+
 		s3Path := fmt.Sprintf("redirects/%s/", rule.SourceDomain)
 		s3Key := s3Path + "index.html"
 		exists, err := s.s3Svc.ObjectExists(s.config.S3BucketName, s3Key)

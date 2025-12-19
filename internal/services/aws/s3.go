@@ -304,3 +304,28 @@ func (s *S3Service) EnsureBucketPolicyForPublicAccess(bucketName string) error {
 
 	return nil
 }
+
+// CheckBucketPolicyForPublicAccess 检查存储桶策略是否允许公开访问 redirects/* 路径
+func (s *S3Service) CheckBucketPolicyForPublicAccess(bucketName string) (bool, error) {
+	// 检查是否已有 bucket policy
+	getPolicyInput := &s3.GetBucketPolicyInput{
+		Bucket: aws.String(bucketName),
+	}
+	existingPolicy, err := s.client.GetBucketPolicy(getPolicyInput)
+	if err != nil {
+		// 如果没有 policy 或获取失败，返回 false
+		return false, nil
+	}
+
+	if existingPolicy.Policy == nil {
+		return false, nil
+	}
+
+	// 检查 policy 是否包含 redirects/* 的访问规则
+	existingPolicyStr := *existingPolicy.Policy
+	if strings.Contains(existingPolicyStr, "redirects/*") {
+		return true, nil
+	}
+
+	return false, nil
+}
