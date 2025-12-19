@@ -146,6 +146,7 @@ const showUploadDialog = ref(false)
 const uploadLoading = ref(false)
 const uploadForm = ref({
   domain_id: '',
+  file: null,
 })
 const uploadFormRef = ref(null)
 const fileList = ref([])
@@ -154,7 +155,20 @@ const availableDomains = ref([])
 
 const uploadRules = {
   domain_id: [{ required: true, message: '请选择下载域名', trigger: 'change' }],
-  file: [{ required: true, message: '请选择文件', trigger: 'change' }],
+  file: [
+    {
+      required: true,
+      message: '请选择文件',
+      trigger: 'change',
+      validator: (rule, value, callback) => {
+        if (!value) {
+          callback(new Error('请选择文件'))
+        } else {
+          callback()
+        }
+      },
+    },
+  ],
 }
 
 // 加载下载包列表
@@ -193,48 +207,59 @@ const loadAvailableDomains = async () => {
 const handleFileChange = (file) => {
   selectedFile.value = file.raw
   uploadForm.value.file_name = file.name
+  uploadForm.value.file = file.raw // 设置文件到表单数据，用于验证
+  // 手动触发表单验证
+  if (uploadFormRef.value) {
+    uploadFormRef.value.validateField('file')
+  }
 }
 
 // 上传文件
 const handleUpload = async () => {
   if (!uploadFormRef.value) return
 
-  await uploadFormRef.value.validate(async (valid) => {
-    if (!valid) return
+  // 先进行表单验证
+  try {
+    await uploadFormRef.value.validate()
+  } catch (error) {
+    // 验证失败，直接返回
+    return
+  }
 
-    if (!selectedFile.value) {
-      ElMessage.warning('请选择文件')
-      return
+  // 验证通过后，再次检查文件
+  if (!selectedFile.value) {
+    ElMessage.warning('请选择文件')
+    return
+  }
+
+  uploadLoading.value = true
+
+  try {
+    const formData = new FormData()
+    formData.append('domain_id', uploadForm.value.domain_id)
+    formData.append('file_name', uploadForm.value.file_name)
+    formData.append('file', selectedFile.value)
+
+    const response = await request.post('/download-packages', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+
+    ElMessage.success('上传成功，正在处理中...')
+    showUploadDialog.value = false
+    uploadForm.value = {
+      domain_id: '',
+      file: null,
     }
-
-    uploadLoading.value = true
-
-    try {
-      const formData = new FormData()
-      formData.append('domain_id', uploadForm.value.domain_id)
-      formData.append('file_name', uploadForm.value.file_name)
-      formData.append('file', selectedFile.value)
-
-      const response = await request.post('/download-packages', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      })
-
-      ElMessage.success('上传成功，正在处理中...')
-      showUploadDialog.value = false
-      uploadForm.value = {
-        domain_id: '',
-      }
-      fileList.value = []
-      selectedFile.value = null
-      loadPackages()
-    } catch (error) {
-      ElMessage.error('上传失败: ' + (error.response?.data?.error || error.message))
-    } finally {
-      uploadLoading.value = false
-    }
-  })
+    fileList.value = []
+    selectedFile.value = null
+    loadPackages()
+  } catch (error) {
+    ElMessage.error('上传失败: ' + (error.response?.data?.error || error.message))
+  } finally {
+    uploadLoading.value = false
+  }
 }
 
 // 删除下载包
