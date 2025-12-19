@@ -66,6 +66,42 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column label="CloudFront源路径" width="280">
+          <template #default="{ row }">
+            <div v-if="row.cloudfront_id" style="display: flex; flex-direction: column; gap: 4px; font-size: 12px;">
+              <div>
+                <span style="color: #909399;">期望:</span>
+                <code style="background: #f5f7fa; padding: 2px 4px; border-radius: 2px; margin-left: 4px; font-size: 11px;">
+                  {{ row.cloudfront_origin_path_expected || '(空)' }}
+                </code>
+              </div>
+              <div>
+                <span style="color: #909399;">实际:</span>
+                <code 
+                  :style="{
+                    background: row.cloudfront_origin_path_current === row.cloudfront_origin_path_expected ? '#f0f9ff' : '#fef0f0',
+                    padding: '2px 4px',
+                    borderRadius: '2px',
+                    marginLeft: '4px',
+                    fontSize: '11px',
+                    color: row.cloudfront_origin_path_current === row.cloudfront_origin_path_expected ? '#67c23a' : '#f56c6c'
+                  }"
+                >
+                  {{ row.cloudfront_origin_path_current || '(空)' }}
+                </code>
+                <el-tag 
+                  v-if="row.cloudfront_origin_path_current !== row.cloudfront_origin_path_expected" 
+                  type="danger" 
+                  size="small" 
+                  style="margin-left: 4px"
+                >
+                  不匹配
+                </el-tag>
+              </div>
+            </div>
+            <span v-else style="color: #c0c4cc; font-size: 12px">未配置</span>
+          </template>
+        </el-table-column>
         <el-table-column label="DNS 记录" width="200">
           <template #default="{ row }">
             <div style="display: flex; flex-direction: column; gap: 6px;">
@@ -278,6 +314,22 @@
               ({{ checkStatus.cloudfront_enabled_error }})
             </span>
           </el-descriptions-item>
+          <el-descriptions-item label="CloudFront源路径">
+            <el-tag :type="checkStatus.cloudfront_origin_path_match ? 'success' : 'danger'">
+              {{ checkStatus.cloudfront_origin_path_match ? '匹配' : '不匹配' }}
+            </el-tag>
+            <div v-if="checkStatus.cloudfront_origin_path_current || checkStatus.cloudfront_origin_path_expected" style="margin-top: 5px; font-size: 12px; color: #606266">
+              <div v-if="checkStatus.cloudfront_origin_path_current">
+                当前: <code style="background: #f5f7fa; padding: 2px 4px; border-radius: 2px">{{ checkStatus.cloudfront_origin_path_current || '(空)' }}</code>
+              </div>
+              <div v-if="checkStatus.cloudfront_origin_path_expected" style="margin-top: 3px">
+                期望: <code style="background: #f5f7fa; padding: 2px 4px; border-radius: 2px">{{ checkStatus.cloudfront_origin_path_expected || '(空)' }}</code>
+              </div>
+            </div>
+            <span v-if="checkStatus.cloudfront_origin_path_error" style="color: #f56c6c; margin-left: 10px; display: block; margin-top: 5px">
+              ({{ checkStatus.cloudfront_origin_path_error }})
+            </span>
+          </el-descriptions-item>
           <el-descriptions-item label="Route 53 DNS记录">
             <el-tag :type="checkStatus.route53_dns_configured ? 'success' : 'danger'">
               {{ checkStatus.route53_dns_configured ? '已配置' : '未配置' }}
@@ -300,6 +352,14 @@
             </el-tag>
             <span v-if="checkStatus.certificate_arn" style="margin-left: 10px; font-size: 12px; color: #909399">
               ({{ checkStatus.certificate_arn }})
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="重定向URL可访问">
+            <el-tag :type="checkStatus.redirect_url_accessible ? 'success' : 'danger'">
+              {{ checkStatus.redirect_url_accessible ? '可访问' : '不可访问' }}
+            </el-tag>
+            <span v-if="checkStatus.redirect_url_error" style="color: #f56c6c; margin-left: 10px">
+              ({{ checkStatus.redirect_url_error }})
             </span>
           </el-descriptions-item>
         </el-descriptions>

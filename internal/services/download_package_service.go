@@ -272,6 +272,27 @@ func (s *DownloadPackageService) GetCloudFrontEnabled(cloudFrontID string) (bool
 	return *dist.DistributionConfig.Enabled, nil
 }
 
+// GetCloudFrontOriginPathInfo 获取CloudFront OriginPath信息（当前路径和期望路径）
+func (s *DownloadPackageService) GetCloudFrontOriginPathInfo(pkg *models.DownloadPackage) (currentPath, expectedPath string, err error) {
+	// 计算期望的 originPath
+	if strings.Contains(pkg.S3Key, "/") {
+		parts := strings.Split(pkg.S3Key, "/")
+		if len(parts) > 1 {
+			expectedPath = "/" + strings.Join(parts[:len(parts)-1], "/")
+		}
+	}
+
+	// 获取当前的 OriginPath
+	if pkg.CloudFrontID != "" {
+		currentPath, err = s.cloudFrontSvc.GetDistributionOriginPath(pkg.CloudFrontID)
+		if err != nil {
+			return "", expectedPath, err
+		}
+	}
+
+	return currentPath, expectedPath, nil
+}
+
 // ListDownloadPackages 列出所有下载包
 func (s *DownloadPackageService) ListDownloadPackages(page, pageSize int) ([]models.DownloadPackage, int64, error) {
 	var packages []models.DownloadPackage

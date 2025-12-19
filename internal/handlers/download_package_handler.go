@@ -81,22 +81,24 @@ func (h *DownloadPackageHandler) GetDownloadPackage(c *gin.Context) {
 
 // DownloadPackageResponse 下载包响应结构（包含CloudFront状态）
 type DownloadPackageResponse struct {
-	ID                uint   `json:"id"`
-	DomainID          uint   `json:"domain_id"`
-	DomainName        string `json:"domain_name"`
-	FileName          string `json:"file_name"`
-	FileSize          int64  `json:"file_size"`
-	FileType          string `json:"file_type"`
-	S3Key             string `json:"s3_key"`
-	CloudFrontID      string `json:"cloudfront_id"`
-	CloudFrontDomain  string `json:"cloudfront_domain"`
-	CloudFrontStatus  string `json:"cloudfront_status"`  // CloudFront部署状态
-	CloudFrontEnabled bool   `json:"cloudfront_enabled"` // CloudFront启用状态
-	DownloadURL       string `json:"download_url"`
-	Status            string `json:"status"`
-	ErrorMessage      string `json:"error_message"`
-	CreatedAt         string `json:"created_at"`
-	UpdatedAt         string `json:"updated_at"`
+	ID                           uint   `json:"id"`
+	DomainID                     uint   `json:"domain_id"`
+	DomainName                   string `json:"domain_name"`
+	FileName                     string `json:"file_name"`
+	FileSize                     int64  `json:"file_size"`
+	FileType                     string `json:"file_type"`
+	S3Key                        string `json:"s3_key"`
+	CloudFrontID                 string `json:"cloudfront_id"`
+	CloudFrontDomain             string `json:"cloudfront_domain"`
+	CloudFrontStatus             string `json:"cloudfront_status"`               // CloudFront部署状态
+	CloudFrontEnabled            bool   `json:"cloudfront_enabled"`              // CloudFront启用状态
+	CloudFrontOriginPathCurrent  string `json:"cloudfront_origin_path_current"`  // CloudFront当前OriginPath
+	CloudFrontOriginPathExpected string `json:"cloudfront_origin_path_expected"` // CloudFront期望OriginPath
+	DownloadURL                  string `json:"download_url"`
+	Status                       string `json:"status"`
+	ErrorMessage                 string `json:"error_message"`
+	CreatedAt                    string `json:"created_at"`
+	UpdatedAt                    string `json:"updated_at"`
 }
 
 // ListDownloadPackages 列出所有下载包
@@ -148,6 +150,13 @@ func (h *DownloadPackageHandler) ListDownloadPackages(c *gin.Context) {
 		} else {
 			responses[i].CloudFrontStatus = ""
 			responses[i].CloudFrontEnabled = false
+		}
+
+		// 获取 CloudFront OriginPath 信息
+		currentPath, expectedPath, err := h.service.GetCloudFrontOriginPathInfo(&pkg)
+		if err == nil {
+			responses[i].CloudFrontOriginPathCurrent = currentPath
+			responses[i].CloudFrontOriginPathExpected = expectedPath
 		}
 	}
 

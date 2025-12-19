@@ -618,6 +618,22 @@ func (s *RedirectService) GetCloudFrontEnabled(cloudFrontID string) (bool, error
 	return *dist.DistributionConfig.Enabled, nil
 }
 
+// GetCloudFrontOriginPathInfo 获取CloudFront OriginPath信息（当前路径和期望路径）
+func (s *RedirectService) GetCloudFrontOriginPathInfo(rule *models.RedirectRule) (currentPath, expectedPath string, err error) {
+	// 计算期望的 originPath
+	expectedPath = fmt.Sprintf("/redirects/%s", rule.SourceDomain)
+
+	// 获取当前的 OriginPath
+	if rule.CloudFrontID != "" {
+		currentPath, err = s.cloudFrontSvc.GetDistributionOriginPath(rule.CloudFrontID)
+		if err != nil {
+			return "", expectedPath, err
+		}
+	}
+
+	return currentPath, expectedPath, nil
+}
+
 // AddTarget 添加重定向目标并重新部署
 func (s *RedirectService) AddTarget(ruleID uint, targetURL string) error {
 	target := &models.RedirectTarget{

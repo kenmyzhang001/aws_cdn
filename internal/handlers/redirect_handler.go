@@ -97,6 +97,13 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 			}
 		}
 
+		// 获取 CloudFront OriginPath 信息
+		currentPath, expectedPath, err := h.service.GetCloudFrontOriginPathInfo(&rule)
+		if err == nil {
+			ruleMap["cloudfront_origin_path_current"] = currentPath
+			ruleMap["cloudfront_origin_path_expected"] = expectedPath
+		}
+
 		// 查询域名状态和证书状态
 		domainStatus, certStatus := h.service.GetDomainInfoByDomainName(rule.SourceDomain)
 		if domainStatus != "" {
