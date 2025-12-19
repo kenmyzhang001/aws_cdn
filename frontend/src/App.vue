@@ -20,6 +20,10 @@
             <el-icon><RefreshRight /></el-icon>
             <span>重定向管理</span>
           </el-menu-item>
+          <el-menu-item index="/download-packages">
+            <el-icon><Download /></el-icon>
+            <span>下载包管理</span>
+          </el-menu-item>
           <!--el-menu-item index="/cloudfront">
             <el-icon><Connection /></el-icon>
             <span>CloudFront 管理</span>
@@ -36,7 +40,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Link, RefreshRight, Connection } from '@element-plus/icons-vue'
+import { Link, RefreshRight, Connection, Download } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)

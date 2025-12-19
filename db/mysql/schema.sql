@@ -103,6 +103,38 @@ CREATE TABLE IF NOT EXISTS `redirect_targets` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='重定向目标表';
 
 
+/*
+ * 5. 下载包表：download_packages
+ *    - 管理下载包文件、S3存储、CloudFront分发
+ */
+CREATE TABLE IF NOT EXISTS `download_packages` (
+  `id`                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `domain_id`           BIGINT UNSIGNED NOT NULL COMMENT '所属域名 ID',
+  `domain_name`         VARCHAR(255) NOT NULL COMMENT '下载域名',
+  `file_name`           VARCHAR(255) NOT NULL COMMENT '文件名',
+  `file_size`           BIGINT NOT NULL COMMENT '文件大小（字节）',
+  `file_type`           VARCHAR(100) DEFAULT NULL COMMENT '文件类型',
+  `s3_key`              VARCHAR(500) NOT NULL COMMENT 'S3对象键',
+  `cloudfront_id`       VARCHAR(255) DEFAULT NULL COMMENT 'CloudFront分发ID',
+  `cloudfront_domain`   VARCHAR(255) DEFAULT NULL COMMENT 'CloudFront域名',
+  `download_url`        VARCHAR(500) DEFAULT NULL COMMENT '下载URL',
+  `status`              VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT '状态: pending/uploading/processing/completed/failed',
+  `error_message`       TEXT DEFAULT NULL COMMENT '错误信息',
+
+  `created_at`          DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`          DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at`          DATETIME(3) NULL DEFAULT NULL,
+
+  PRIMARY KEY (`id`),
+  KEY `idx_download_packages_domain_id` (`domain_id`),
+  KEY `idx_download_packages_deleted_at` (`deleted_at`),
+
+  CONSTRAINT `fk_download_packages_domain`
+    FOREIGN KEY (`domain_id`) REFERENCES `domains` (`id`)
+    ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='下载包表';
+
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 
