@@ -41,5 +41,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.RedirectRule{},
 		&models.RedirectTarget{},
 		&models.User{},
+		&models.DownloadPackage{},
 	)
 }

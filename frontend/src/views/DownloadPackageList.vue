@@ -244,6 +244,7 @@ const handleUpload = async () => {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: 300000, // 5分钟超时，适合大文件上传
     })
 
     ElMessage.success('上传成功，正在处理中...')

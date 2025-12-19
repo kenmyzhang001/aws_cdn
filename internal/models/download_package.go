@@ -26,10 +26,10 @@ type DownloadPackage struct {
 	FileName         string                `json:"file_name" gorm:"type:varchar(255);not null"`   // 文件名
 	FileSize         int64                 `json:"file_size" gorm:"not null"`                     // 文件大小（字节）
 	FileType         string                `json:"file_type" gorm:"type:varchar(100)"`            // 文件类型（如：application/vnd.android.package-archive）
-	S3Key            string                `json:"s3_key" gorm:"type:varchar(500);not null"`      // S3对象键
-	CloudFrontID     string                `json:"cloudfront_id" gorm:"type:varchar(255)"`        // CloudFront分发ID
-	CloudFrontDomain string                `json:"cloudfront_domain" gorm:"type:varchar(255)"`    // CloudFront域名
-	DownloadURL      string                `json:"download_url" gorm:"type:varchar(500)"`         // 下载URL（通过域名访问）
+	S3Key            string                `json:"s3_key" gorm:"type:varchar(500);not null"`                    // S3对象键
+	CloudFrontID     string                `json:"cloudfront_id" gorm:"column:cloudfront_id;type:varchar(255)"` // CloudFront分发ID
+	CloudFrontDomain string                `json:"cloudfront_domain" gorm:"column:cloudfront_domain;type:varchar(255)"` // CloudFront域名
+	DownloadURL      string                `json:"download_url" gorm:"type:varchar(500)"`                      // 下载URL（通过域名访问）
 	Status           DownloadPackageStatus `json:"status" gorm:"default:'pending'"`
 	ErrorMessage     string                `json:"error_message" gorm:"type:text"` // 错误信息
 	CreatedAt        time.Time             `json:"created_at"`
