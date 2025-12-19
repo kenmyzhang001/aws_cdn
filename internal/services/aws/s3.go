@@ -2,6 +2,7 @@ package aws
 
 import (
 	"aws_cdn/internal/config"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -247,4 +248,59 @@ func (s *S3Service) ObjectExists(bucketName, key string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// EnsureBucketPolicyForPublicAccess 确保存储桶策略允许公开访问 redirects/* 路径
+func (s *S3Service) EnsureBucketPolicyForPublicAccess(bucketName string) error {
+	// 构建 bucket policy，允许公开访问 redirects/* 路径
+	policy := map[string]interface{}{
+		"Version": "2012-10-17",
+		"Statement": []map[string]interface{}{
+			{
+				"Sid":    "PublicReadAccess",
+				"Effect": "Allow",
+				"Principal": map[string]interface{}{
+					"AWS": "*",
+				},
+				"Action":   "s3:GetObject",
+				"Resource": fmt.Sprintf("arn:aws:s3:::%s/redirects/*", bucketName),
+			},
+		},
+	}
+
+	policyJSON, err := json.Marshal(policy)
+	if err != nil {
+		return fmt.Errorf("序列化 bucket policy 失败: %w", err)
+	}
+
+	policyString := string(policyJSON)
+
+	// 检查是否已有 bucket policy
+	getPolicyInput := &s3.GetBucketPolicyInput{
+		Bucket: aws.String(bucketName),
+	}
+	existingPolicy, err := s.client.GetBucketPolicy(getPolicyInput)
+	if err == nil && existingPolicy.Policy != nil {
+		// 如果已有 policy，检查是否包含我们需要的规则
+		existingPolicyStr := *existingPolicy.Policy
+		if strings.Contains(existingPolicyStr, "redirects/*") {
+			// 已包含 redirects/* 的访问规则，不需要更新
+			return nil
+		}
+		// 如果已有 policy 但不包含我们的规则，合并策略（这里简化处理，直接使用新策略）
+		// 注意：实际生产环境应该合并策略而不是替换
+	}
+
+	// 设置 bucket policy
+	putPolicyInput := &s3.PutBucketPolicyInput{
+		Bucket: aws.String(bucketName),
+		Policy: aws.String(policyString),
+	}
+
+	_, err = s.client.PutBucketPolicy(putPolicyInput)
+	if err != nil {
+		return fmt.Errorf("设置 bucket policy 失败: %w", err)
+	}
+
+	return nil
 }

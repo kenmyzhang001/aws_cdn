@@ -135,6 +135,14 @@ func (s *RedirectService) uploadHTMLOnly(rule *models.RedirectRule) error {
 
 // deployRedirectRule 部署重定向规则到S3和CloudFront
 func (s *RedirectService) deployRedirectRule(rule *models.RedirectRule, certificateARN string) error {
+	// 确保 S3 bucket policy 允许公开访问
+	if s.config.S3BucketName != "" {
+		if err := s.s3Svc.EnsureBucketPolicyForPublicAccess(s.config.S3BucketName); err != nil {
+			// 记录警告但不阻止流程，因为可能已有其他策略
+			fmt.Printf("警告: 配置 S3 bucket policy 失败: %v\n", err)
+		}
+	}
+
 	// 先上传HTML文件
 	if err := s.uploadHTMLOnly(rule); err != nil {
 		return err
