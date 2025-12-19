@@ -316,6 +316,55 @@ func (s *Route53Service) CheckWWWCNAMERecord(hostedZoneID, rootDomain string) (b
 	return false, nil
 }
 
+// CheckCertificateValidationCNAME 检查证书验证 CNAME 记录是否存在
+// hostedZoneID: Route 53 托管区域 ID
+// recordName: CNAME 记录名称（例如：_abc123.example.com）
+// recordValue: CNAME 记录值（例如：_xyz789.acm-validations.aws.）
+// 返回 true 表示记录存在且值正确，false 表示不存在或值错误，error 表示查询失败
+func (s *Route53Service) CheckCertificateValidationCNAME(hostedZoneID, recordName, recordValue string) (bool, error) {
+	// 确保 recordName 以点结尾（Route 53 要求）
+	name := recordName
+	if name != "" && name[len(name)-1] != '.' {
+		name = name + "."
+	}
+
+	// 标准化 recordValue（去掉末尾的点进行比较）
+	expectedValue := recordValue
+	if expectedValue != "" && expectedValue[len(expectedValue)-1] == '.' {
+		expectedValue = expectedValue[:len(expectedValue)-1]
+	}
+
+	// 列出所有记录
+	listInput := &route53.ListResourceRecordSetsInput{
+		HostedZoneId: aws.String(hostedZoneID),
+	}
+
+	result, err := s.client.ListResourceRecordSets(listInput)
+	if err != nil {
+		return false, fmt.Errorf("列出 Route 53 记录失败: %w", err)
+	}
+
+	// 查找匹配的 CNAME 记录
+	for _, record := range result.ResourceRecordSets {
+		if record.Name != nil && *record.Name == name && record.Type != nil && *record.Type == "CNAME" {
+			// 检查 ResourceRecords
+			if len(record.ResourceRecords) > 0 {
+				actualValue := *record.ResourceRecords[0].Value
+				// 去掉末尾的点进行比较
+				actualValueTrimmed := actualValue
+				if actualValueTrimmed != "" && actualValueTrimmed[len(actualValueTrimmed)-1] == '.' {
+					actualValueTrimmed = actualValueTrimmed[:len(actualValueTrimmed)-1]
+				}
+				if actualValueTrimmed == expectedValue {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	return false, nil
+}
+
 // DeleteHostedZone 删除托管区域
 // 注意：删除托管区域前需要先删除所有记录（除了默认的 NS 和 SOA 记录）
 func (s *Route53Service) DeleteHostedZone(hostedZoneID string) error {

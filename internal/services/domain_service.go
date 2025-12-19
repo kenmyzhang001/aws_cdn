@@ -355,3 +355,189 @@ func (s *DomainService) CreateWWWCNAMERecord(hostedZoneID, rootDomain string) er
 func (s *DomainService) CheckWWWCNAMERecord(hostedZoneID, rootDomain string) (bool, error) {
 	return s.route53Svc.CheckWWWCNAMERecord(hostedZoneID, rootDomain)
 }
+
+// CertificateCheckResult 证书检查结果
+type CertificateCheckResult struct {
+	CertificateExists     bool     `json:"certificate_exists"`      // 证书是否存在
+	CertificateStatus     string   `json:"certificate_status"`      // 证书状态
+	ValidationRecords     []string `json:"validation_records"`      // 验证记录列表（格式：name:value）
+	MissingCNAMERecords   []string `json:"missing_cname_records"`   // 缺失的CNAME记录
+	IncorrectCNAMERecords []string `json:"incorrect_cname_records"` // 值不正确的CNAME记录
+	HasIssues             bool     `json:"has_issues"`              // 是否有问题
+	Issues                []string `json:"issues"`                  // 问题列表
+}
+
+// CheckCertificate 检查证书配置和CNAME记录
+func (s *DomainService) CheckCertificate(id uint) (*CertificateCheckResult, error) {
+	domain, err := s.GetDomain(id)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &CertificateCheckResult{
+		ValidationRecords:     []string{},
+		MissingCNAMERecords:   []string{},
+		IncorrectCNAMERecords: []string{},
+		Issues:                []string{},
+	}
+
+	// 检查证书是否存在
+	if domain.CertificateARN == "" {
+		result.HasIssues = true
+		result.Issues = append(result.Issues, "证书未申请")
+		return result, nil
+	}
+
+	result.CertificateExists = true
+
+	// 获取证书状态
+	status, err := s.acmSvc.GetCertificateStatus(domain.CertificateARN)
+	if err != nil {
+		result.HasIssues = true
+		result.Issues = append(result.Issues, fmt.Sprintf("获取证书状态失败: %v", err))
+		return result, nil
+	}
+
+	result.CertificateStatus = status
+
+	// 如果证书已签发，不需要检查验证记录
+	if status == "issued" {
+		return result, nil
+	}
+
+	// 如果证书状态是pending_validation或pending，需要检查验证记录
+	if status == "pending_validation" || status == "pending" {
+		// 获取证书验证记录
+		validationRecords, err := s.acmSvc.GetCertificateValidationRecords(domain.CertificateARN)
+		if err != nil {
+			result.HasIssues = true
+			result.Issues = append(result.Issues, fmt.Sprintf("获取证书验证记录失败: %v", err))
+			return result, nil
+		}
+
+		if len(validationRecords) == 0 {
+			result.HasIssues = true
+			result.Issues = append(result.Issues, "证书验证记录为空")
+			return result, nil
+		}
+
+		// 检查托管区域是否存在
+		if domain.HostedZoneID == "" {
+			result.HasIssues = true
+			result.Issues = append(result.Issues, "缺少托管区域ID，无法检查CNAME记录")
+			return result, nil
+		}
+
+		// 检查每个验证记录的CNAME是否存在于Route53
+		for _, record := range validationRecords {
+			if record.Type == "CNAME" {
+				recordDesc := fmt.Sprintf("%s -> %s", record.Name, record.Value)
+				result.ValidationRecords = append(result.ValidationRecords, recordDesc)
+
+				// 检查CNAME记录是否存在
+				exists, err := s.route53Svc.CheckCertificateValidationCNAME(domain.HostedZoneID, record.Name, record.Value)
+				if err != nil {
+					result.HasIssues = true
+					result.Issues = append(result.Issues, fmt.Sprintf("检查CNAME记录失败 (%s): %v", record.Name, err))
+					result.MissingCNAMERecords = append(result.MissingCNAMERecords, recordDesc)
+					continue
+				}
+
+				if !exists {
+					result.HasIssues = true
+					result.MissingCNAMERecords = append(result.MissingCNAMERecords, recordDesc)
+					result.Issues = append(result.Issues, fmt.Sprintf("CNAME记录缺失: %s", recordDesc))
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// FixCertificate 修复证书配置和CNAME记录
+func (s *DomainService) FixCertificate(id uint) error {
+	domain, err := s.GetDomain(id)
+	if err != nil {
+		return err
+	}
+
+	// 如果证书不存在，尝试生成证书
+	if domain.CertificateARN == "" {
+		return s.GenerateCertificate(id)
+	}
+
+	// 获取证书状态
+	status, err := s.acmSvc.GetCertificateStatus(domain.CertificateARN)
+	if err != nil {
+		return fmt.Errorf("获取证书状态失败: %w", err)
+	}
+
+	// 如果证书已签发，无需修复
+	if status == "issued" {
+		return nil
+	}
+
+	// 如果证书状态是pending_validation或pending，需要添加验证记录
+	if status == "pending_validation" || status == "pending" {
+		// 检查托管区域是否存在
+		if domain.HostedZoneID == "" {
+			return fmt.Errorf("缺少托管区域ID，无法添加验证记录")
+		}
+
+		// 获取证书验证记录
+		validationRecords, err := s.acmSvc.GetCertificateValidationRecords(domain.CertificateARN)
+		if err != nil {
+			return fmt.Errorf("获取证书验证记录失败: %w", err)
+		}
+
+		// 添加缺失的CNAME记录
+		for _, record := range validationRecords {
+			if record.Type == "CNAME" {
+				// 检查记录是否已存在
+				exists, err := s.route53Svc.CheckCertificateValidationCNAME(domain.HostedZoneID, record.Name, record.Value)
+				if err != nil {
+					// 如果检查失败，尝试直接创建（可能是记录不存在）
+					if err := s.route53Svc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value); err != nil {
+						return fmt.Errorf("创建CNAME记录失败 (%s): %w", record.Name, err)
+					}
+					continue
+				}
+
+				if !exists {
+					// 记录不存在，创建它
+					if err := s.route53Svc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value); err != nil {
+						return fmt.Errorf("创建CNAME记录失败 (%s): %w", record.Name, err)
+					}
+				}
+			}
+		}
+
+		// 更新证书状态
+		s.db.Model(domain).Update("certificate_status", "pending_validation")
+
+		// 异步等待证书验证
+		go s.waitForCertificateValidationAsync(domain)
+	}
+
+	return nil
+}
+
+// waitForCertificateValidationAsync 异步等待现有证书的验证完成
+func (s *DomainService) waitForCertificateValidationAsync(domain *models.Domain) {
+	if domain.CertificateARN == "" {
+		return
+	}
+
+	// 等待证书验证（最多等待 1 小时）
+	if err := s.acmSvc.WaitForCertificateValidation(domain.CertificateARN, 1*time.Hour); err != nil {
+		s.db.Model(domain).Update("certificate_status", "failed")
+		return
+	}
+
+	// 证书验证成功，更新状态
+	s.db.Model(domain).Updates(map[string]interface{}{
+		"certificate_status": "issued",
+		"status":             models.DomainStatusCompleted,
+	})
+}

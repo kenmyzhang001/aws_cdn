@@ -162,3 +162,36 @@ func (h *DomainHandler) DeleteDomain(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "域名删除成功"})
 }
 
+// CheckCertificate 检查证书配置和CNAME记录
+func (h *DomainHandler) CheckCertificate(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的域名 ID"})
+		return
+	}
+
+	result, err := h.service.CheckCertificate(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// FixCertificate 修复证书配置和CNAME记录
+func (h *DomainHandler) FixCertificate(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的域名 ID"})
+		return
+	}
+
+	if err := h.service.FixCertificate(uint(id)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "证书修复请求已提交"})
+}
+

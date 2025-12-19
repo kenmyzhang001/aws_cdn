@@ -79,6 +79,8 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			domains.GET("/:id/status", domainHandler.GetDomainStatus)
 			domains.POST("/:id/certificate", domainHandler.GenerateCertificate)
 			domains.GET("/:id/certificate/status", domainHandler.GetCertificateStatus)
+			domains.GET("/:id/certificate/check", domainHandler.CheckCertificate)
+			domains.POST("/:id/certificate/fix", domainHandler.FixCertificate)
 		}
 
 		// 重定向管理
