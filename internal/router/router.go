@@ -51,12 +51,14 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	redirectService := services.NewRedirectService(db, cloudFrontSvc, s3Svc, domainService, &cfg.AWS)
 	authService := services.NewAuthService(db, &cfg.JWT)
 	cloudFrontService := services.NewCloudFrontService(cloudFrontSvc, s3Origin)
+	downloadPackageService := services.NewDownloadPackageService(db, domainService, cloudFrontSvc, s3Svc, route53Svc, &cfg.AWS)
 
 	// 初始化处理器
 	domainHandler := handlers.NewDomainHandler(domainService)
 	redirectHandler := handlers.NewRedirectHandler(redirectService)
 	authHandler := handlers.NewAuthHandler(authService)
 	cloudFrontHandler := handlers.NewCloudFrontHandler(cloudFrontService)
+	downloadPackageHandler := handlers.NewDownloadPackageHandler(downloadPackageService)
 
 	// API 路由
 	api := r.Group("/api/v1")
@@ -105,6 +107,15 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			cloudfront.POST("/distributions", cloudFrontHandler.CreateDistribution)
 			cloudfront.PUT("/distributions/:id", cloudFrontHandler.UpdateDistribution)
 			cloudfront.DELETE("/distributions/:id", cloudFrontHandler.DeleteDistribution)
+		}
+
+		// 下载包管理
+		downloadPackages := protected.Group("/download-packages")
+		{
+			downloadPackages.POST("", downloadPackageHandler.CreateDownloadPackage)
+			downloadPackages.GET("", downloadPackageHandler.ListDownloadPackages)
+			downloadPackages.GET("/:id", downloadPackageHandler.GetDownloadPackage)
+			downloadPackages.DELETE("/:id", downloadPackageHandler.DeleteDownloadPackage)
 		}
 	}
 

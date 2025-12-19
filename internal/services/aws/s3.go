@@ -233,6 +233,21 @@ func (s *S3Service) DeleteObjectsWithPrefix(bucketName, prefix string) error {
 	return nil
 }
 
+// DeleteObject 删除单个S3对象
+func (s *S3Service) DeleteObject(bucketName, key string) error {
+	input := &s3.DeleteObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+	}
+
+	_, err := s.client.DeleteObject(input)
+	if err != nil {
+		return fmt.Errorf("删除S3对象失败: %w", err)
+	}
+
+	return nil
+}
+
 // ObjectExists 检查S3对象是否存在
 func (s *S3Service) ObjectExists(bucketName, key string) (bool, error) {
 	input := &s3.HeadObjectInput{

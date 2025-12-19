@@ -156,6 +156,138 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 	return *result.Distribution.Id, nil
 }
 
+// CreateDistributionForLargeFileDownload 创建用于大文件下载的 CloudFront 分发
+// 针对大文件下载优化：支持Range请求（断点续传）、合适的缓存策略
+func (s *CloudFrontService) CreateDistributionForLargeFileDownload(domainName string, certificateARN string, s3Origin string, originPath string) (string, error) {
+	// 先检查是否已存在相同域名的分发
+	existingID, err := s.findDistributionByDomain(domainName)
+	if err != nil {
+		return "", fmt.Errorf("检查现有分发失败: %w", err)
+	}
+	if existingID != "" {
+		return existingID, nil
+	}
+
+	callerRef := fmt.Sprintf("%s-%d", domainName, time.Now().Unix())
+	originId := fmt.Sprintf("S3-%s-%s", s.config.S3BucketName, domainName)
+
+	// 验证 S3 origin 域名格式
+	if s3Origin == "" {
+		return "", fmt.Errorf("S3 origin 域名不能为空")
+	}
+
+	if !strings.Contains(s3Origin, ".s3") || !strings.HasSuffix(s3Origin, ".amazonaws.com") {
+		return "", fmt.Errorf("S3 origin 域名格式不正确: %s", s3Origin)
+	}
+
+	origin := &cloudfront.Origin{
+		Id:         aws.String(originId),
+		DomainName: aws.String(s3Origin),
+		CustomOriginConfig: &cloudfront.CustomOriginConfig{
+			HTTPPort:             aws.Int64(80),
+			HTTPSPort:            aws.Int64(443),
+			OriginProtocolPolicy: aws.String("http-only"),
+			OriginSslProtocols: &cloudfront.OriginSslProtocols{
+				Quantity: aws.Int64(1),
+				Items:    []*string{aws.String("TLSv1.2")},
+			},
+		},
+	}
+
+	// 如果指定了路径，设置 OriginPath
+	if originPath != "" {
+		path := originPath
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		if path != "/" && strings.HasSuffix(path, "/") {
+			path = strings.TrimSuffix(path, "/")
+		}
+		path = strings.ReplaceAll(path, "//", "/")
+		origin.OriginPath = aws.String(path)
+	}
+
+	// 构建转发头列表，包含Range头以支持断点续传
+	forwardedHeaders := []*string{
+		aws.String("Range"),         // 支持Range请求（断点续传）
+		aws.String("If-Range"),      // 支持条件Range请求
+		aws.String("If-Match"),      // 支持ETag验证
+		aws.String("If-None-Match"), // 支持ETag验证
+	}
+
+	input := &cloudfront.CreateDistributionInput{
+		DistributionConfig: &cloudfront.DistributionConfig{
+			CallerReference: aws.String(callerRef),
+			Comment:         aws.String(fmt.Sprintf("CloudFront distribution for large file download: %s", domainName)),
+			Aliases: &cloudfront.Aliases{
+				Quantity: aws.Int64(1),
+				Items:    []*string{aws.String(domainName)},
+			},
+			DefaultRootObject: aws.String(""), // 大文件下载不需要默认根对象
+			Origins: &cloudfront.Origins{
+				Quantity: aws.Int64(1),
+				Items:    []*cloudfront.Origin{origin},
+			},
+			DefaultCacheBehavior: &cloudfront.DefaultCacheBehavior{
+				TargetOriginId:       aws.String(originId),
+				ViewerProtocolPolicy: aws.String("redirect-to-https"),
+				// 支持GET和HEAD方法（HEAD用于获取文件信息，GET用于下载）
+				AllowedMethods: &cloudfront.AllowedMethods{
+					Quantity: aws.Int64(2),
+					Items: []*string{
+						aws.String("GET"),
+						aws.String("HEAD"),
+					},
+				},
+				// 大文件通常已经压缩，不需要CloudFront压缩
+				Compress: aws.Bool(false),
+				// 转发必要的请求头以支持Range请求
+				ForwardedValues: &cloudfront.ForwardedValues{
+					QueryString: aws.Bool(false),
+					Cookies: &cloudfront.CookiePreference{
+						Forward: aws.String("none"),
+					},
+					Headers: &cloudfront.Headers{
+						Quantity: aws.Int64(int64(len(forwardedHeaders))),
+						Items:    forwardedHeaders,
+					},
+				},
+				// 大文件下载的缓存策略：较短的TTL，确保文件更新能及时反映
+				MinTTL:     aws.Int64(0),     // 最小缓存时间（秒）
+				DefaultTTL: aws.Int64(3600),  // 默认缓存时间（1小时）
+				MaxTTL:     aws.Int64(86400), // 最大缓存时间（24小时）
+			},
+			ViewerCertificate: &cloudfront.ViewerCertificate{
+				ACMCertificateArn:      aws.String(certificateARN),
+				SSLSupportMethod:       aws.String("sni-only"),
+				MinimumProtocolVersion: aws.String("TLSv1.2_2021"),
+			},
+			Enabled: aws.Bool(true),
+		},
+	}
+
+	result, err := s.client.CreateDistribution(input)
+	if err != nil {
+		return "", fmt.Errorf("创建 CloudFront 分发失败 (Origin: %s, OriginPath: %s): %w", s3Origin, originPath, err)
+	}
+
+	return *result.Distribution.Id, nil
+}
+
+// GetDistributionDomain 获取CloudFront分发的域名
+func (s *CloudFrontService) GetDistributionDomain(distributionID string) (string, error) {
+	dist, err := s.GetDistribution(distributionID)
+	if err != nil {
+		return "", err
+	}
+
+	if dist.DomainName != nil {
+		return *dist.DomainName, nil
+	}
+
+	return "", fmt.Errorf("无法获取分发域名")
+}
+
 // findDistributionByDomain 根据域名查找现有的 CloudFront 分发
 func (s *CloudFrontService) findDistributionByDomain(domainName string) (string, error) {
 	distList, err := s.ListDistributions()
