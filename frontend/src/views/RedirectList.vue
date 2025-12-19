@@ -79,6 +79,13 @@
                 <span v-else-if="row.source_domain && row.source_domain.startsWith('www.')" style="color: #c0c4cc; font-size: 12px;">不适用</span>
                 <span v-else style="color: #c0c4cc; font-size: 12px;">未检查</span>
               </div>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 12px; color: #909399;">S3 Policy:</span>
+                <el-tag v-if="row.s3_bucket_policy_status" :type="getRoute53DNSStatusType(row.s3_bucket_policy_status)" size="small">
+                  {{ getRoute53DNSStatusText(row.s3_bucket_policy_status) }}
+                </el-tag>
+                <span v-else style="color: #c0c4cc; font-size: 12px;">未检查</span>
+              </div>
             </div>
           </template>
         </el-table-column>
@@ -87,7 +94,7 @@
             <el-button size="small" @click="viewDetails(row)">详情</el-button>
             <el-button size="small" type="success" @click="addTarget(row)">添加目标</el-button>
             <el-button size="small" type="info" @click="checkRule(row)">检查</el-button>
-            <el-button size="small" type="warning" @click="fixRule(row)" :disabled="!checkStatus?.can_fix">修复</el-button>
+            <el-button size="small" type="warning" @click="fixRule(row)">修复</el-button>
             <el-button size="small" type="danger" @click="deleteRule(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -215,6 +222,14 @@
               ({{ checkStatus.html_upload_error }})
             </span>
           </el-descriptions-item>
+          <el-descriptions-item label="S3 Bucket Policy">
+            <el-tag :type="checkStatus.s3_bucket_policy_configured ? 'success' : 'danger'">
+              {{ checkStatus.s3_bucket_policy_configured ? '已配置' : '未配置' }}
+            </el-tag>
+            <span v-if="checkStatus.s3_bucket_policy_error" style="color: #f56c6c; margin-left: 10px">
+              ({{ checkStatus.s3_bucket_policy_error }})
+            </span>
+          </el-descriptions-item>
           <el-descriptions-item label="CloudFront分发存在">
             <el-tag :type="checkStatus.cloudfront_exists ? 'success' : 'danger'">
               {{ checkStatus.cloudfront_exists ? '是' : '否' }}
@@ -275,7 +290,7 @@
       </div>
       <template #footer>
         <el-button @click="showCheckDialog = false">关闭</el-button>
-        <el-button type="primary" @click="handleFix" :loading="fixLoading" :disabled="!checkStatus?.can_fix">
+        <el-button type="primary" @click="handleFix" :loading="fixLoading">
           修复
         </el-button>
       </template>
@@ -562,10 +577,15 @@ const checkRule = async (row) => {
 
 const fixRule = async (row) => {
   try {
-    await ElMessageBox.confirm('确定要修复这个重定向规则吗？', '提示', {
+    await ElMessageBox.confirm('确定要修复这个重定向规则吗？修复将重新部署到 S3 和 CloudFront，并创建/更新 DNS 记录。', '提示', {
       type: 'warning',
     })
     fixLoading.value = true
+    
+    // 如果还没有检查状态，先检查一下
+    if (!checkStatus.value || checkRuleId.value !== row.id) {
+      await checkRule(row)
+    }
     const res = await redirectApi.fixRedirectRule(row.id)
     
     // 检查是否有警告信息

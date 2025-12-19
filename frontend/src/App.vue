@@ -20,10 +20,10 @@
             <el-icon><RefreshRight /></el-icon>
             <span>重定向管理</span>
           </el-menu-item>
-          <el-menu-item index="/cloudfront">
+          <!--el-menu-item index="/cloudfront">
             <el-icon><Connection /></el-icon>
             <span>CloudFront 管理</span>
-          </el-menu-item>
+          </el-menu-item-->
         </el-menu>
       </el-aside>
       <el-main class="app-main">
