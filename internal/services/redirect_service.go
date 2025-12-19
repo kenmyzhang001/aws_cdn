@@ -653,11 +653,27 @@ func (s *RedirectService) AddTarget(ruleID uint, targetURL string) error {
 		return err
 	}
 
+	// 更新S3中的index.html
 	if err := s.redeployHTML(rule); err != nil {
 		fmt.Printf("警告: 重新部署HTML文件失败: %v\n", err)
 	}
 
+	// 如果有CloudFront分发，失效缓存
+	if rule.CloudFrontID != "" {
+		if err := s.invalidateCloudFrontCache(rule.CloudFrontID); err != nil {
+			fmt.Printf("警告: 失效CloudFront缓存失败: %v\n", err)
+		}
+	}
+
 	return nil
+}
+
+// invalidateCloudFrontCache 失效CloudFront缓存
+func (s *RedirectService) invalidateCloudFrontCache(cloudFrontID string) error {
+	// 失效 index.html 路径
+	paths := []string{"/index.html"}
+	_, err := s.cloudFrontSvc.CreateInvalidation(cloudFrontID, paths)
+	return err
 }
 
 // redeployHTML 重新部署HTML文件（不重新创建CloudFront分发）
@@ -709,9 +725,16 @@ func (s *RedirectService) RemoveTarget(targetID uint) error {
 		return err
 	}
 
-	// 自动更新S3中的index.html（无论是否有CloudFront分发）
+	// 更新S3中的index.html
 	if err := s.redeployHTML(rule); err != nil {
 		fmt.Printf("警告: 重新部署HTML文件失败: %v\n", err)
+	}
+
+	// 如果有CloudFront分发，失效缓存
+	if rule.CloudFrontID != "" {
+		if err := s.invalidateCloudFrontCache(rule.CloudFrontID); err != nil {
+			fmt.Printf("警告: 失效CloudFront缓存失败: %v\n", err)
+		}
 	}
 
 	return nil

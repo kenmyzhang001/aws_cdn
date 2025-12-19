@@ -599,3 +599,38 @@ func (s *CloudFrontService) DeleteDistribution(distributionID string) error {
 
 	return nil
 }
+
+// CreateInvalidation 创建 CloudFront 缓存失效
+// distributionID: CloudFront 分发 ID
+// paths: 要失效的路径列表，例如 ["/index.html"] 或 ["/*"] 来失效所有缓存
+// 返回 invalidation ID
+func (s *CloudFrontService) CreateInvalidation(distributionID string, paths []string) (string, error) {
+	if len(paths) == 0 {
+		// 如果没有指定路径，默认失效 index.html
+		paths = []string{"/index.html"}
+	}
+
+	callerRef := fmt.Sprintf("invalidation-%d", time.Now().UnixNano())
+
+	input := &cloudfront.CreateInvalidationInput{
+		DistributionId: aws.String(distributionID),
+		InvalidationBatch: &cloudfront.InvalidationBatch{
+			CallerReference: aws.String(callerRef),
+			Paths: &cloudfront.Paths{
+				Quantity: aws.Int64(int64(len(paths))),
+				Items:    aws.StringSlice(paths),
+			},
+		},
+	}
+
+	result, err := s.client.CreateInvalidation(input)
+	if err != nil {
+		return "", fmt.Errorf("创建 CloudFront 缓存失效失败: %w", err)
+	}
+
+	if result.Invalidation != nil && result.Invalidation.Id != nil {
+		return *result.Invalidation.Id, nil
+	}
+
+	return "", fmt.Errorf("创建缓存失效成功但未返回 ID")
+}
