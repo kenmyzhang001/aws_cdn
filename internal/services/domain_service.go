@@ -116,7 +116,7 @@ func (s *DomainService) ListDomains(page, pageSize int) ([]models.Domain, int64,
 		return nil, 0, err
 	}
 
-	if err := s.db.Offset(offset).Limit(pageSize).Find(&domains).Error; err != nil {
+	if err := s.db.Order("id DESC").Offset(offset).Limit(pageSize).Find(&domains).Error; err != nil {
 		return nil, 0, err
 	}
 
