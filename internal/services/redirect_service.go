@@ -847,6 +847,8 @@ type RedirectRuleStatus struct {
 	WWWCNAMEError            string   `json:"www_cname_error,omitempty"`
 	CertificateFound         bool     `json:"certificate_found"`
 	CertificateARN           string   `json:"certificate_arn,omitempty"`
+	RedirectURLAccessible    bool     `json:"redirect_url_accessible"`
+	RedirectURLError         string   `json:"redirect_url_error,omitempty"`
 	Issues                   []string `json:"issues"`
 	CanFix                   bool     `json:"can_fix"`
 }
@@ -959,6 +961,31 @@ func (s *RedirectService) CheckRedirectRule(ruleID uint) (*RedirectRuleStatus, e
 		status.CertificateARN = certificateARN
 	} else {
 		status.Issues = append(status.Issues, "未找到证书")
+	}
+
+	// 检查重定向 URL 是否可以访问（如果 CloudFront 已配置）
+	if rule.CloudFrontID != "" && status.CloudFrontExists && status.CloudFrontEnabled {
+		redirectURL := fmt.Sprintf("https://%s", rule.SourceDomain)
+		client := &http.Client{
+			Timeout: 10 * time.Second,
+		}
+
+		resp, err := client.Get(redirectURL)
+		if err != nil {
+			status.RedirectURLError = fmt.Sprintf("无法访问重定向URL: %v", err)
+			status.Issues = append(status.Issues, fmt.Sprintf("重定向URL无法访问: %v", err))
+		} else {
+			defer resp.Body.Close()
+			if resp.StatusCode == 200 || resp.StatusCode == 302 || resp.StatusCode == 301 {
+				status.RedirectURLAccessible = true
+			} else if resp.StatusCode == 403 {
+				status.RedirectURLError = fmt.Sprintf("访问被拒绝 (HTTP %d)，可能是S3 bucket policy配置问题", resp.StatusCode)
+				status.Issues = append(status.Issues, "重定向URL返回403错误，可能是S3 bucket policy配置问题")
+			} else {
+				status.RedirectURLError = fmt.Sprintf("返回错误状态码: HTTP %d", resp.StatusCode)
+				status.Issues = append(status.Issues, fmt.Sprintf("重定向URL返回错误状态码: HTTP %d", resp.StatusCode))
+			}
+		}
 	}
 
 	// 判断是否可以修复

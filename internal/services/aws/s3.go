@@ -318,18 +318,28 @@ func (s *S3Service) EnsureBucketPolicyForPublicAccess(bucketName string) error {
 		return fmt.Errorf("配置 Block Public Access 设置失败: %w", err)
 	}
 
-	// 构建 bucket policy，允许公开访问 redirects/* 路径
+	// 构建 bucket policy，允许公开访问 redirects/* 路径（包括所有子路径）
+	// 使用两个 Statement 来确保覆盖所有可能的路径格式
 	policy := map[string]interface{}{
 		"Version": "2012-10-17",
 		"Statement": []map[string]interface{}{
 			{
-				"Sid":    "PublicReadAccess",
+				"Sid":    "PublicReadAccessRedirects",
 				"Effect": "Allow",
 				"Principal": map[string]interface{}{
 					"AWS": "*",
 				},
 				"Action":   "s3:GetObject",
 				"Resource": fmt.Sprintf("arn:aws:s3:::%s/redirects/*", bucketName),
+			},
+			{
+				"Sid":    "PublicReadAccessRedirectsSubdirs",
+				"Effect": "Allow",
+				"Principal": map[string]interface{}{
+					"AWS": "*",
+				},
+				"Action":   "s3:GetObject",
+				"Resource": fmt.Sprintf("arn:aws:s3:::%s/redirects/*/*", bucketName),
 			},
 		},
 	}
