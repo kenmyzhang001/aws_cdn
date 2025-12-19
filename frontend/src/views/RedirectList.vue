@@ -3,7 +3,7 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>重定向管理</span>
+          <span>轮播管理</span>
           <el-button type="primary" @click="showCreateDialog = true">
             <el-icon><Plus /></el-icon>
             创建重定向规则

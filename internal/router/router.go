@@ -85,7 +85,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			domains.POST("/:id/certificate/fix", domainHandler.FixCertificate)
 		}
 
-		// 重定向管理
+		// 轮播管理
 		redirects := protected.Group("/redirects")
 		{
 			redirects.POST("", redirectHandler.CreateRedirectRule)

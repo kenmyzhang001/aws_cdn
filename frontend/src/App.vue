@@ -18,7 +18,7 @@
           </el-menu-item>
           <el-menu-item index="/redirects">
             <el-icon><RefreshRight /></el-icon>
-            <span>重定向管理</span>
+            <span>轮播管理</span>
           </el-menu-item>
           <el-menu-item index="/download-packages">
             <el-icon><Download /></el-icon>
