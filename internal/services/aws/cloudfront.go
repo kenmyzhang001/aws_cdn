@@ -70,9 +70,18 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 	origin := &cloudfront.Origin{
 		Id:         aws.String(originId),
 		DomainName: aws.String(s3Origin),
-		// 不使用 S3OriginConfig，直接访问 S3（需要 S3 bucket policy 允许公开访问）
-		// 如果 S3 bucket 通过 bucket policy 允许公开访问，CloudFront 可以直接访问
-		// 如果 bucket 不支持 ACL，文件上传时也不会设置 ACL，需要依赖 bucket policy
+		// 使用 CustomOriginConfig 来配置 S3 REST API 端点作为 origin
+		// 当使用 S3 REST API 端点（bucket.s3.amazonaws.com）时，必须使用 CustomOriginConfig
+		// 而不是 S3OriginConfig（S3OriginConfig 用于 S3 website endpoints）
+		CustomOriginConfig: &cloudfront.CustomOriginConfig{
+			HTTPPort:             aws.Int64(80),
+			HTTPSPort:            aws.Int64(443),
+			OriginProtocolPolicy: aws.String("http-only"), // S3 REST API 端点使用 HTTP
+			OriginSslProtocols: &cloudfront.OriginSslProtocols{
+				Quantity: aws.Int64(1),
+				Items:    []*string{aws.String("TLSv1.2")},
+			},
+		},
 	}
 
 	// 如果指定了路径，设置 OriginPath
