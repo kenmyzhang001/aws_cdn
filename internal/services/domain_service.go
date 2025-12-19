@@ -49,10 +49,12 @@ func (s *DomainService) TransferDomain(domainName, registrar string) (*models.Do
 	}
 
 	// 创建域名记录
+	// 注意：域名转入成功与否应该基于 Route53 Hosted Zone 是否创建成功
+	// 证书验证是独立的过程，不应该影响域名转入状态
 	domain := &models.Domain{
 		DomainName:   domainName,
 		Registrar:    registrar,
-		Status:       models.DomainStatusInProgress,
+		Status:       models.DomainStatusCompleted, // Hosted Zone 创建成功，域名已转入
 		NServers:     nsServersJSON,
 		HostedZoneID: hostedZoneID,
 	}
@@ -61,20 +63,19 @@ func (s *DomainService) TransferDomain(domainName, registrar string) (*models.Do
 		return nil, fmt.Errorf("创建域名记录失败: %w", err)
 	}
 
-	// 异步请求证书
+	// 异步请求证书（证书验证不影响域名转入状态）
 	go s.requestCertificateAsync(domain)
 
 	return domain, nil
 }
 
 // requestCertificateAsync 异步请求证书
+// 注意：证书验证失败不应该影响域名转入状态，域名转入成功与否基于 Route53 Hosted Zone 是否创建成功
 func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 	certificateARN, err := s.acmSvc.RequestCertificate(domain.DomainName)
 	if err != nil {
-		s.db.Model(domain).Updates(map[string]interface{}{
-			"certificate_status": "failed",
-			"status":             models.DomainStatusFailed,
-		})
+		// 证书请求失败，只更新证书状态，不影响域名转入状态
+		s.db.Model(domain).Update("certificate_status", "failed")
 		return
 	}
 
@@ -85,15 +86,14 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 
 	// 等待证书验证（最多等待 1 小时）
 	if err := s.acmSvc.WaitForCertificateValidation(certificateARN, 1*time.Hour); err != nil {
+		// 证书验证失败，只更新证书状态，不影响域名转入状态
 		s.db.Model(domain).Update("certificate_status", "failed")
 		return
 	}
 
-	// 证书验证成功，更新状态
-	s.db.Model(domain).Updates(map[string]interface{}{
-		"certificate_status": "issued",
-		"status":             models.DomainStatusCompleted,
-	})
+	// 证书验证成功，只更新证书状态
+	// 域名转入状态已经在创建 Hosted Zone 时设置为 completed，这里不需要再更新
+	s.db.Model(domain).Update("certificate_status", "issued")
 }
 
 // GetDomain 获取域名信息
@@ -271,11 +271,29 @@ func (s *DomainService) GetCertificateStatus(id uint) (string, error) {
 }
 
 // GetDomainStatus 获取域名转入状态
+// 如果 Hosted Zone 存在，则返回 completed（域名已成功转入）
 func (s *DomainService) GetDomainStatus(id uint) (models.DomainStatus, error) {
 	domain, err := s.GetDomain(id)
 	if err != nil {
 		return "", err
 	}
+
+	// 如果 Hosted Zone 存在，说明域名已成功转入，应该返回 completed
+	// 这样可以修复之前因为证书验证失败而状态未更新的问题
+	if domain.HostedZoneID != "" {
+		// 验证 Hosted Zone 是否真的存在
+		_, err := s.route53Svc.GetHostedZone(domain.HostedZoneID)
+		if err == nil {
+			// Hosted Zone 存在，域名已成功转入
+			if domain.Status != models.DomainStatusCompleted {
+				// 更新数据库中的状态
+				s.db.Model(domain).Update("status", models.DomainStatusCompleted)
+			}
+			return models.DomainStatusCompleted, nil
+		}
+		// 如果 Hosted Zone 不存在，可能是被删除了，保持原状态
+	}
+
 	return domain.Status, nil
 }
 
@@ -535,9 +553,7 @@ func (s *DomainService) waitForCertificateValidationAsync(domain *models.Domain)
 		return
 	}
 
-	// 证书验证成功，更新状态
-	s.db.Model(domain).Updates(map[string]interface{}{
-		"certificate_status": "issued",
-		"status":             models.DomainStatusCompleted,
-	})
+	// 证书验证成功，只更新证书状态
+	// 域名转入状态已经在创建 Hosted Zone 时设置为 completed，这里不需要再更新
+	s.db.Model(domain).Update("certificate_status", "issued")
 }
