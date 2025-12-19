@@ -112,3 +112,36 @@ func (h *DownloadPackageHandler) DeleteDownloadPackage(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "下载包删除成功"})
 }
+
+// CheckDownloadPackage 检查下载包状态
+func (h *DownloadPackageHandler) CheckDownloadPackage(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的下载包 ID"})
+		return
+	}
+
+	status, err := h.service.CheckDownloadPackage(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, status)
+}
+
+// FixDownloadPackage 修复下载包
+func (h *DownloadPackageHandler) FixDownloadPackage(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的下载包 ID"})
+		return
+	}
+
+	if err := h.service.FixDownloadPackage(uint(id)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "修复成功"})
+}

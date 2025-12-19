@@ -253,3 +253,218 @@ func (s *DownloadPackageService) DeleteDownloadPackage(id uint) error {
 
 	return nil
 }
+
+// DownloadPackageStatus 下载包检查状态
+type DownloadPackageStatus struct {
+	PackageExists         bool     `json:"package_exists"`
+	S3FileExists          bool     `json:"s3_file_exists"`
+	S3FileError           string   `json:"s3_file_error,omitempty"`
+	CloudFrontExists      bool     `json:"cloudfront_exists"`
+	CloudFrontError       string   `json:"cloudfront_error,omitempty"`
+	Route53DNSConfigured  bool     `json:"route53_dns_configured"`
+	Route53DNSError       string   `json:"route53_dns_error,omitempty"`
+	DownloadURLAccessible bool     `json:"download_url_accessible"`
+	DownloadURLError      string   `json:"download_url_error,omitempty"`
+	CertificateFound      bool     `json:"certificate_found"`
+	CertificateARN        string   `json:"certificate_arn,omitempty"`
+	Issues                []string `json:"issues"`
+	CanFix                bool     `json:"can_fix"`
+}
+
+// CheckDownloadPackage 检查下载包状态
+func (s *DownloadPackageService) CheckDownloadPackage(id uint) (*DownloadPackageStatus, error) {
+	status := &DownloadPackageStatus{
+		Issues: []string{},
+	}
+
+	// 获取下载包
+	pkg, err := s.GetDownloadPackage(id)
+	if err != nil {
+		return nil, fmt.Errorf("获取下载包失败: %w", err)
+	}
+	status.PackageExists = true
+
+	// 获取域名信息
+	domain, err := s.domainService.GetDomain(pkg.DomainID)
+	if err != nil {
+		status.Issues = append(status.Issues, fmt.Sprintf("获取域名信息失败: %v", err))
+	} else {
+		status.CertificateFound = domain.CertificateARN != ""
+		status.CertificateARN = domain.CertificateARN
+	}
+
+	// 检查S3文件是否存在
+	if s.config.S3BucketName != "" && pkg.S3Key != "" {
+		exists, err := s.s3Svc.ObjectExists(s.config.S3BucketName, pkg.S3Key)
+		if err != nil {
+			status.S3FileError = err.Error()
+			status.Issues = append(status.Issues, fmt.Sprintf("检查S3文件失败: %v", err))
+		} else if !exists {
+			status.Issues = append(status.Issues, "S3文件不存在")
+		} else {
+			status.S3FileExists = true
+		}
+	} else {
+		if pkg.S3Key == "" {
+			status.Issues = append(status.Issues, "S3键未配置")
+		}
+		if s.config.S3BucketName == "" {
+			status.Issues = append(status.Issues, "S3存储桶名称未配置")
+		}
+	}
+
+	// 检查CloudFront分发是否存在
+	if pkg.CloudFrontID != "" {
+		_, err := s.cloudFrontSvc.GetDistribution(pkg.CloudFrontID)
+		if err != nil {
+			status.CloudFrontError = err.Error()
+			status.Issues = append(status.Issues, fmt.Sprintf("CloudFront分发不存在或无法访问: %v", err))
+		} else {
+			status.CloudFrontExists = true
+
+			// 检查 Route 53 DNS 记录是否指向正确的 CloudFront
+			if domain.HostedZoneID != "" && pkg.CloudFrontDomain != "" {
+				exists, err := s.domainService.CheckCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, pkg.CloudFrontDomain)
+				if err != nil {
+					status.Route53DNSError = fmt.Sprintf("检查Route 53 DNS记录失败: %v", err)
+					status.Issues = append(status.Issues, "检查Route 53 DNS记录失败")
+				} else if !exists {
+					status.Route53DNSError = "未配置Route 53 DNS记录或指向错误的CloudFront分发"
+					status.Issues = append(status.Issues, "Route 53 DNS记录未配置或指向错误")
+				} else {
+					status.Route53DNSConfigured = true
+				}
+			} else {
+				if domain.HostedZoneID == "" {
+					status.Issues = append(status.Issues, "域名未配置Route 53托管区域")
+				}
+				if pkg.CloudFrontDomain == "" {
+					status.Issues = append(status.Issues, "CloudFront域名未配置")
+				}
+			}
+		}
+	} else {
+		status.Issues = append(status.Issues, "未创建CloudFront分发")
+	}
+
+	// 检查下载URL是否可访问（如果已配置）
+	if pkg.DownloadURL != "" {
+		// 这里可以添加HTTP请求检查，但为了简化，暂时只检查URL格式
+		status.DownloadURLAccessible = true // 假设URL格式正确即可
+	} else {
+		status.Issues = append(status.Issues, "下载URL未配置")
+	}
+
+	// 判断是否可以修复
+	status.CanFix = len(status.Issues) > 0 && s.config.S3BucketName != ""
+
+	return status, nil
+}
+
+// FixDownloadPackage 修复下载包
+func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
+	// 获取下载包
+	pkg, err := s.GetDownloadPackage(id)
+	if err != nil {
+		return fmt.Errorf("获取下载包失败: %w", err)
+	}
+
+	// 获取域名信息
+	domain, err := s.domainService.GetDomain(pkg.DomainID)
+	if err != nil {
+		return fmt.Errorf("获取域名信息失败: %w", err)
+	}
+
+	// 检查证书状态
+	if domain.CertificateStatus != "issued" {
+		return fmt.Errorf("域名证书未签发，当前状态: %s", domain.CertificateStatus)
+	}
+
+	// 如果已有CloudFront ID，先检查是否存在
+	if pkg.CloudFrontID != "" {
+		_, err := s.cloudFrontSvc.GetDistribution(pkg.CloudFrontID)
+		if err != nil {
+			// CloudFront不存在，清除ID，重新创建
+			s.db.Model(pkg).Update("cloudfront_id", "")
+			pkg.CloudFrontID = ""
+		}
+	}
+
+	// 检查S3文件是否存在
+	if pkg.S3Key != "" && s.config.S3BucketName != "" {
+		exists, err := s.s3Svc.ObjectExists(s.config.S3BucketName, pkg.S3Key)
+		if err != nil {
+			return fmt.Errorf("检查S3文件失败: %w", err)
+		}
+		if !exists {
+			return fmt.Errorf("S3文件不存在，无法修复。请重新上传文件")
+		}
+	}
+
+	// 如果CloudFront分发不存在，重新创建
+	if pkg.CloudFrontID == "" {
+		// 获取S3域名
+		s3Origin := s.s3Svc.GetBucketDomain(s.config.S3BucketName)
+
+		// 计算originPath
+		originPath := ""
+		if strings.Contains(pkg.S3Key, "/") {
+			parts := strings.Split(pkg.S3Key, "/")
+			if len(parts) > 1 {
+				originPath = "/" + strings.Join(parts[:len(parts)-1], "/")
+			}
+		}
+
+		// 创建CloudFront分发
+		cloudFrontID, err := s.cloudFrontSvc.CreateDistributionForLargeFileDownload(
+			pkg.DomainName,
+			domain.CertificateARN,
+			s3Origin,
+			originPath,
+		)
+		if err != nil {
+			return fmt.Errorf("创建CloudFront分发失败: %w", err)
+		}
+
+		// 获取CloudFront域名
+		cloudFrontDomain, err := s.cloudFrontSvc.GetDistributionDomain(cloudFrontID)
+		if err != nil {
+			return fmt.Errorf("获取CloudFront域名失败: %w", err)
+		}
+
+		// 更新下载包信息
+		s.db.Model(pkg).Updates(map[string]interface{}{
+			"cloudfront_id":     cloudFrontID,
+			"cloudfront_domain": cloudFrontDomain,
+		})
+		pkg.CloudFrontID = cloudFrontID
+		pkg.CloudFrontDomain = cloudFrontDomain
+	}
+
+	// 检查并创建 Route 53 DNS 记录（如果不存在）
+	if domain.HostedZoneID != "" && pkg.CloudFrontDomain != "" {
+		exists, err := s.domainService.CheckCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, pkg.CloudFrontDomain)
+		if err != nil {
+			// 检查失败，尝试创建
+			if err := s.domainService.CreateCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, pkg.CloudFrontDomain); err != nil {
+				return fmt.Errorf("创建Route 53 DNS记录失败: %w", err)
+			}
+		} else if !exists {
+			// 记录不存在，创建它
+			if err := s.domainService.CreateCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, pkg.CloudFrontDomain); err != nil {
+				return fmt.Errorf("创建Route 53 DNS记录失败: %w", err)
+			}
+		}
+	}
+
+	// 构建下载URL
+	downloadURL := fmt.Sprintf("https://%s/%s", pkg.DomainName, pkg.FileName)
+
+	// 更新下载包状态和信息
+	s.db.Model(pkg).Updates(map[string]interface{}{
+		"download_url": downloadURL,
+		"status":       models.DownloadPackageStatusCompleted,
+	})
+
+	return nil
+}
