@@ -84,11 +84,16 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 			"updated_at":    rule.UpdatedAt,
 		}
 
-		// 查询 CloudFront 状态
+		// 查询 CloudFront 状态和启用状态
 		if rule.CloudFrontID != "" {
 			status, err := h.service.GetCloudFrontStatus(rule.CloudFrontID)
 			if err == nil {
 				ruleMap["cloudfront_status"] = status
+			}
+
+			enabled, err := h.service.GetCloudFrontEnabled(rule.CloudFrontID)
+			if err == nil {
+				ruleMap["cloudfront_enabled"] = enabled
 			}
 		}
 

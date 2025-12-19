@@ -192,13 +192,23 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 	// 5. 构建下载URL
 	downloadURL := fmt.Sprintf("https://%s/%s", pkg.DomainName, pkg.FileName)
 
-	// 更新下载包信息
-	s.db.Model(pkg).Updates(map[string]interface{}{
-		"cloudfront_id":     cloudFrontID,
-		"cloudfront_domain": cloudFrontDomain,
-		"download_url":      downloadURL,
-		"status":            models.DownloadPackageStatusCompleted,
-	})
+		// 确保 CloudFront 分发已启用
+		enabled := true
+		if err := s.cloudFrontSvc.UpdateDistribution(cloudFrontID, nil, "", &enabled); err != nil {
+			s.db.Model(pkg).Updates(map[string]interface{}{
+				"status":        models.DownloadPackageStatusFailed,
+				"error_message": fmt.Sprintf("启用CloudFront分发失败: %v", err),
+			})
+			return
+		}
+
+		// 更新下载包信息
+		s.db.Model(pkg).Updates(map[string]interface{}{
+			"cloudfront_id":     cloudFrontID,
+			"cloudfront_domain": cloudFrontDomain,
+			"download_url":      downloadURL,
+			"status":            models.DownloadPackageStatusCompleted,
+		})
 }
 
 // GetDownloadPackage 获取下载包信息
@@ -226,6 +236,28 @@ func (s *DownloadPackageService) GetCloudFrontStatus(cloudFrontID string) (strin
 	}
 
 	return *dist.Status, nil
+}
+
+// GetCloudFrontEnabled 获取CloudFront分发启用状态
+func (s *DownloadPackageService) GetCloudFrontEnabled(cloudFrontID string) (bool, error) {
+	if cloudFrontID == "" {
+		return false, nil
+	}
+
+	dist, err := s.cloudFrontSvc.GetDistribution(cloudFrontID)
+	if err != nil {
+		return false, err
+	}
+
+	if dist == nil || dist.DistributionConfig == nil {
+		return false, fmt.Errorf("无法获取分发配置")
+	}
+
+	if dist.DistributionConfig.Enabled == nil {
+		return false, nil
+	}
+
+	return *dist.DistributionConfig.Enabled, nil
 }
 
 // ListDownloadPackages 列出所有下载包
@@ -279,6 +311,8 @@ type DownloadPackageStatus struct {
 	S3FileError           string   `json:"s3_file_error,omitempty"`
 	CloudFrontExists      bool     `json:"cloudfront_exists"`
 	CloudFrontError       string   `json:"cloudfront_error,omitempty"`
+	CloudFrontEnabled     bool     `json:"cloudfront_enabled"`
+	CloudFrontEnabledError string  `json:"cloudfront_enabled_error,omitempty"`
 	Route53DNSConfigured  bool     `json:"route53_dns_configured"`
 	Route53DNSError       string   `json:"route53_dns_error,omitempty"`
 	DownloadURLAccessible bool     `json:"download_url_accessible"`
@@ -340,6 +374,18 @@ func (s *DownloadPackageService) CheckDownloadPackage(id uint) (*DownloadPackage
 		} else {
 			status.CloudFrontExists = true
 
+			// 检查 CloudFront 是否已启用
+			enabled, err := s.GetCloudFrontEnabled(pkg.CloudFrontID)
+			if err != nil {
+				status.CloudFrontEnabledError = fmt.Sprintf("检查CloudFront启用状态失败: %v", err)
+				status.Issues = append(status.Issues, "检查CloudFront启用状态失败")
+			} else if !enabled {
+				status.CloudFrontEnabledError = "CloudFront分发已禁用"
+				status.Issues = append(status.Issues, "CloudFront分发已禁用，需要启用后才能正常使用")
+			} else {
+				status.CloudFrontEnabled = true
+			}
+
 			// 检查 Route 53 DNS 记录是否指向正确的 CloudFront
 			if domain.HostedZoneID != "" && pkg.CloudFrontDomain != "" {
 				exists, err := s.domainService.CheckCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, pkg.CloudFrontDomain)
@@ -398,13 +444,24 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 		return fmt.Errorf("域名证书未签发，当前状态: %s", domain.CertificateStatus)
 	}
 
-	// 如果已有CloudFront ID，先检查是否存在
+	// 如果已有CloudFront ID，先检查是否存在和是否已启用
 	if pkg.CloudFrontID != "" {
-		_, err := s.cloudFrontSvc.GetDistribution(pkg.CloudFrontID)
+		dist, err := s.cloudFrontSvc.GetDistribution(pkg.CloudFrontID)
 		if err != nil {
 			// CloudFront不存在，清除ID，重新创建
 			s.db.Model(pkg).Update("cloudfront_id", "")
 			pkg.CloudFrontID = ""
+		} else {
+			// 检查是否已启用，如果未启用则启用它
+			if dist != nil && dist.DistributionConfig != nil {
+				enabled := dist.DistributionConfig.Enabled
+				if enabled == nil || !*enabled {
+					enabledValue := true
+					if err := s.cloudFrontSvc.UpdateDistribution(pkg.CloudFrontID, nil, "", &enabledValue); err != nil {
+						return fmt.Errorf("启用CloudFront分发失败: %w", err)
+					}
+				}
+			}
 		}
 	}
 
@@ -478,11 +535,17 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 	// 构建下载URL
 	downloadURL := fmt.Sprintf("https://%s/%s", pkg.DomainName, pkg.FileName)
 
-	// 更新下载包状态和信息
-	s.db.Model(pkg).Updates(map[string]interface{}{
-		"download_url": downloadURL,
-		"status":       models.DownloadPackageStatusCompleted,
-	})
+		// 确保 CloudFront 分发已启用
+		enabled := true
+		if err := s.cloudFrontSvc.UpdateDistribution(pkg.CloudFrontID, nil, "", &enabled); err != nil {
+			return fmt.Errorf("启用CloudFront分发失败: %w", err)
+		}
 
-	return nil
+		// 更新下载包状态和信息
+		s.db.Model(pkg).Updates(map[string]interface{}{
+			"download_url": downloadURL,
+			"status":       models.DownloadPackageStatusCompleted,
+		})
+
+		return nil
 }

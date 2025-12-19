@@ -194,4 +194,3 @@ func (h *DomainHandler) FixCertificate(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "证书修复请求已提交"})
 }
-

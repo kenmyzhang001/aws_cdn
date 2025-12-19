@@ -81,21 +81,22 @@ func (h *DownloadPackageHandler) GetDownloadPackage(c *gin.Context) {
 
 // DownloadPackageResponse 下载包响应结构（包含CloudFront状态）
 type DownloadPackageResponse struct {
-	ID               uint   `json:"id"`
-	DomainID         uint   `json:"domain_id"`
-	DomainName       string `json:"domain_name"`
-	FileName         string `json:"file_name"`
-	FileSize         int64  `json:"file_size"`
-	FileType         string `json:"file_type"`
-	S3Key            string `json:"s3_key"`
-	CloudFrontID     string `json:"cloudfront_id"`
-	CloudFrontDomain string `json:"cloudfront_domain"`
-	CloudFrontStatus string `json:"cloudfront_status"` // CloudFront部署状态
-	DownloadURL      string `json:"download_url"`
-	Status           string `json:"status"`
-	ErrorMessage     string `json:"error_message"`
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
+	ID                uint   `json:"id"`
+	DomainID          uint   `json:"domain_id"`
+	DomainName        string `json:"domain_name"`
+	FileName          string `json:"file_name"`
+	FileSize          int64  `json:"file_size"`
+	FileType          string `json:"file_type"`
+	S3Key             string `json:"s3_key"`
+	CloudFrontID      string `json:"cloudfront_id"`
+	CloudFrontDomain  string `json:"cloudfront_domain"`
+	CloudFrontStatus  string `json:"cloudfront_status"`  // CloudFront部署状态
+	CloudFrontEnabled bool   `json:"cloudfront_enabled"`  // CloudFront启用状态
+	DownloadURL       string `json:"download_url"`
+	Status            string `json:"status"`
+	ErrorMessage      string `json:"error_message"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 // ListDownloadPackages 列出所有下载包
@@ -129,7 +130,7 @@ func (h *DownloadPackageHandler) ListDownloadPackages(c *gin.Context) {
 			UpdatedAt:        pkg.UpdatedAt.Format(time.RFC3339),
 		}
 
-		// 获取CloudFront状态
+		// 获取CloudFront状态和启用状态
 		if pkg.CloudFrontID != "" {
 			status, err := h.service.GetCloudFrontStatus(pkg.CloudFrontID)
 			if err != nil {
@@ -137,8 +138,16 @@ func (h *DownloadPackageHandler) ListDownloadPackages(c *gin.Context) {
 			} else {
 				responses[i].CloudFrontStatus = status
 			}
+
+			enabled, err := h.service.GetCloudFrontEnabled(pkg.CloudFrontID)
+			if err != nil {
+				responses[i].CloudFrontEnabled = false
+			} else {
+				responses[i].CloudFrontEnabled = enabled
+			}
 		} else {
 			responses[i].CloudFrontStatus = ""
+			responses[i].CloudFrontEnabled = false
 		}
 	}
 

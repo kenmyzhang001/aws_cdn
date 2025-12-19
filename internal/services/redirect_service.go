@@ -596,6 +596,28 @@ func (s *RedirectService) GetCloudFrontStatus(cloudFrontID string) (string, erro
 	return *dist.Status, nil
 }
 
+// GetCloudFrontEnabled 获取CloudFront分发启用状态
+func (s *RedirectService) GetCloudFrontEnabled(cloudFrontID string) (bool, error) {
+	if cloudFrontID == "" {
+		return false, nil
+	}
+
+	dist, err := s.cloudFrontSvc.GetDistribution(cloudFrontID)
+	if err != nil {
+		return false, err
+	}
+
+	if dist == nil || dist.DistributionConfig == nil {
+		return false, fmt.Errorf("无法获取分发配置")
+	}
+
+	if dist.DistributionConfig.Enabled == nil {
+		return false, nil
+	}
+
+	return *dist.DistributionConfig.Enabled, nil
+}
+
 // AddTarget 添加重定向目标并重新部署
 func (s *RedirectService) AddTarget(ruleID uint, targetURL string) error {
 	target := &models.RedirectTarget{
@@ -817,6 +839,8 @@ type RedirectRuleStatus struct {
 	S3BucketPolicyError      string   `json:"s3_bucket_policy_error,omitempty"`
 	CloudFrontExists         bool     `json:"cloudfront_exists"`
 	CloudFrontError          string   `json:"cloudfront_error,omitempty"`
+	CloudFrontEnabled        bool     `json:"cloudfront_enabled"`
+	CloudFrontEnabledError   string   `json:"cloudfront_enabled_error,omitempty"`
 	Route53DNSConfigured     bool     `json:"route53_dns_configured"`
 	Route53DNSError          string   `json:"route53_dns_error,omitempty"`
 	WWWCNAMEConfigured       bool     `json:"www_cname_configured"`
@@ -878,6 +902,18 @@ func (s *RedirectService) CheckRedirectRule(ruleID uint) (*RedirectRuleStatus, e
 			status.Issues = append(status.Issues, fmt.Sprintf("CloudFront分发不存在或无法访问: %v", err))
 		} else {
 			status.CloudFrontExists = true
+
+			// 检查 CloudFront 是否已启用
+			enabled, err := s.GetCloudFrontEnabled(rule.CloudFrontID)
+			if err != nil {
+				status.CloudFrontEnabledError = fmt.Sprintf("检查CloudFront启用状态失败: %v", err)
+				status.Issues = append(status.Issues, "检查CloudFront启用状态失败")
+			} else if !enabled {
+				status.CloudFrontEnabledError = "CloudFront分发已禁用"
+				status.Issues = append(status.Issues, "CloudFront分发已禁用，需要启用后才能正常使用")
+			} else {
+				status.CloudFrontEnabled = true
+			}
 
 			// 检查 Route 53 DNS 记录是否指向正确的 CloudFront
 			dnsStatus := s.CheckRoute53RecordStatus(rule.SourceDomain, rule.CloudFrontID)
@@ -950,13 +986,24 @@ func (s *RedirectService) FixRedirectRule(ruleID uint) (*CreateRedirectRuleResul
 	// 查找证书
 	certificateARN := s.findCertificateARN(rule.SourceDomain)
 
-	// 如果已有CloudFront ID，先检查是否存在
+	// 如果已有CloudFront ID，先检查是否存在和是否已启用
 	if rule.CloudFrontID != "" {
-		_, err := s.cloudFrontSvc.GetDistribution(rule.CloudFrontID)
+		dist, err := s.cloudFrontSvc.GetDistribution(rule.CloudFrontID)
 		if err != nil {
 			// CloudFront不存在，清除ID，重新创建
 			rule.CloudFrontID = ""
 			s.db.Save(rule)
+		} else {
+			// 检查是否已启用，如果未启用则启用它
+			if dist != nil && dist.DistributionConfig != nil {
+				enabled := dist.DistributionConfig.Enabled
+				if enabled == nil || !*enabled {
+					enabledValue := true
+					if err := s.cloudFrontSvc.UpdateDistribution(rule.CloudFrontID, nil, "", &enabledValue); err != nil {
+						return nil, fmt.Errorf("启用CloudFront分发失败: %w", err)
+					}
+				}
+			}
 		}
 	}
 
@@ -972,6 +1019,13 @@ func (s *RedirectService) FixRedirectRule(ruleID uint) (*CreateRedirectRuleResul
 	if certificateARN != "" {
 		// 如果已有CloudFront ID，只重新上传HTML
 		if rule.CloudFrontID != "" {
+			// 确保 CloudFront 分发已启用
+			enabled := true
+			if err := s.cloudFrontSvc.UpdateDistribution(rule.CloudFrontID, nil, "", &enabled); err != nil {
+				warningMsg := fmt.Sprintf("启用CloudFront分发失败: %v", err)
+				deploymentWarnings = append(deploymentWarnings, warningMsg)
+			}
+
 			if err := s.redeployHTML(rule); err != nil {
 				warningMsg := fmt.Sprintf("重新部署HTML文件失败: %v", err)
 				deploymentWarnings = append(deploymentWarnings, warningMsg)
@@ -989,6 +1043,14 @@ func (s *RedirectService) FixRedirectRule(ruleID uint) (*CreateRedirectRuleResul
 				deploymentWarnings = append(deploymentWarnings, warningMsg)
 			}
 			// deployRedirectRule 内部已经会创建 DNS 记录，这里不需要重复创建
+			// 确保新创建的分发已启用（deployRedirectRule 中已设置 Enabled: true，但这里再次确认）
+			if rule.CloudFrontID != "" {
+				enabled := true
+				if err := s.cloudFrontSvc.UpdateDistribution(rule.CloudFrontID, nil, "", &enabled); err != nil {
+					warningMsg := fmt.Sprintf("启用CloudFront分发失败: %v", err)
+					deploymentWarnings = append(deploymentWarnings, warningMsg)
+				}
+			}
 		}
 	} else {
 		// 没有证书，只上传HTML文件
