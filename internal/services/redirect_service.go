@@ -143,6 +143,16 @@ func (s *RedirectService) deployRedirectRule(rule *models.RedirectRule, certific
 		}
 	}
 
+	// 验证 S3 bucket 配置
+	if s.config.S3BucketName == "" {
+		return fmt.Errorf("S3存储桶名称未配置")
+	}
+
+	// 确保 S3 bucket 存在（如果不存在则创建）
+	if err := s.s3Svc.EnsureBucketExists(s.config.S3BucketName); err != nil {
+		return fmt.Errorf("确保S3存储桶存在失败: %w", err)
+	}
+
 	// 先上传HTML文件
 	if err := s.uploadHTMLOnly(rule); err != nil {
 		return err

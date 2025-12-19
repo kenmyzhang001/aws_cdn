@@ -159,7 +159,13 @@ func (s *S3Service) UploadFileWithACL(bucketName, key string, body io.ReadSeeker
 }
 
 // GetBucketDomain 获取存储桶的域名
+// 对于 CloudFront Origin，使用标准的 S3 REST API 端点格式
 func (s *S3Service) GetBucketDomain(bucketName string) string {
+	// us-east-1 区域使用特殊格式（没有区域标识）
+	if s.config.Region == "us-east-1" {
+		return fmt.Sprintf("%s.s3.amazonaws.com", bucketName)
+	}
+	// 其他区域使用标准格式
 	return fmt.Sprintf("%s.s3.%s.amazonaws.com", bucketName, s.config.Region)
 }
 
