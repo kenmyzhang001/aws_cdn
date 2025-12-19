@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <span>下载域名管理</span>
-          <el-button type="primary" @click="showAddDomainDialog = true">
+          <el-button type="primary" @click="openAddDomainDialog">
             <el-icon><Plus /></el-icon>
             添加下载域名
           </el-button>
@@ -341,6 +341,7 @@ const showAddDomainDialog = ref(false)
 const addDomainLoading = ref(false)
 const addDomainForm = ref({
   domain_id: '',
+  file_name: '',
   file: null,
 })
 const addDomainFormRef = ref(null)
@@ -408,43 +409,50 @@ const loadDomains = async () => {
     })
     const allPackages = packageResponse.data || []
 
-    // 3. 按域名组织数据
+    // 3. 按域名组织数据（只处理有文件的域名）
     const domainMap = {}
+    const domainInfoMap = {} // 用于存储域名信息
     
-    // 先初始化所有可用域名
+    // 创建域名信息映射
     allDomains.forEach((domain) => {
-      domainMap[domain.id] = {
-        id: domain.id,
-        domain_name: domain.domain_name,
-        certificate_status: domain.certificate_status,
-        file_count: 0,
-        files: [],
-        cloudfront_id: null,
-        cloudfront_domain: null,
-        cloudfront_status: null,
-        cloudfront_enabled: false,
-      }
+      domainInfoMap[domain.id] = domain
     })
 
-    // 将文件分配到对应域名
+    // 只处理有文件的域名
     allPackages.forEach((pkg) => {
-      if (domainMap[pkg.domain_id]) {
-        domainMap[pkg.domain_id].files.push(pkg)
-        domainMap[pkg.domain_id].file_count++
-        // 更新CloudFront信息（使用第一个文件的CloudFront信息）
-        if (pkg.cloudfront_id && !domainMap[pkg.domain_id].cloudfront_id) {
-          domainMap[pkg.domain_id].cloudfront_id = pkg.cloudfront_id
-          domainMap[pkg.domain_id].cloudfront_domain = pkg.cloudfront_domain
-          domainMap[pkg.domain_id].cloudfront_status = pkg.cloudfront_status
-          domainMap[pkg.domain_id].cloudfront_enabled = pkg.cloudfront_enabled
+      const domainInfo = domainInfoMap[pkg.domain_id]
+      if (!domainInfo) return // 如果域名不存在，跳过
+      
+      if (!domainMap[pkg.domain_id]) {
+        // 初始化域名信息
+        domainMap[pkg.domain_id] = {
+          id: domainInfo.id,
+          domain_name: domainInfo.domain_name,
+          certificate_status: domainInfo.certificate_status,
+          file_count: 0,
+          files: [],
+          cloudfront_id: null,
+          cloudfront_domain: null,
+          cloudfront_status: null,
+          cloudfront_enabled: false,
         }
       }
+      
+      // 添加文件
+      domainMap[pkg.domain_id].files.push(pkg)
+      domainMap[pkg.domain_id].file_count++
+      
+      // 更新CloudFront信息（使用第一个文件的CloudFront信息）
+      if (pkg.cloudfront_id && !domainMap[pkg.domain_id].cloudfront_id) {
+        domainMap[pkg.domain_id].cloudfront_id = pkg.cloudfront_id
+        domainMap[pkg.domain_id].cloudfront_domain = pkg.cloudfront_domain
+        domainMap[pkg.domain_id].cloudfront_status = pkg.cloudfront_status
+        domainMap[pkg.domain_id].cloudfront_enabled = pkg.cloudfront_enabled
+      }
     })
 
-    // 只显示有文件的域名，或者所有可用域名（让用户可以添加第一个文件）
-    domainList.value = Object.values(domainMap).filter(
-      (d) => d.file_count > 0 || true // 显示所有可用域名，即使还没有文件
-    )
+    // 只显示有文件的域名
+    domainList.value = Object.values(domainMap)
   } catch (error) {
     ElMessage.error('加载下载域名列表失败: ' + (error.response?.data?.error || error.message))
   } finally {
@@ -466,6 +474,92 @@ const loadAvailableDomains = async () => {
     availableDomains.value = allAvailable.filter((d) => !existingDomainIds.has(d.id))
   } catch (error) {
     console.error('加载域名列表失败:', error)
+  }
+}
+
+// 打开添加下载域名对话框
+const openAddDomainDialog = async () => {
+  // 重置表单
+  addDomainForm.value = {
+    domain_id: '',
+    file_name: '',
+    file: null,
+  }
+  addDomainFileList.value = []
+  addDomainSelectedFile.value = null
+  
+  // 加载可用域名列表
+  await loadAvailableDomains()
+  
+  // 显示对话框
+  showAddDomainDialog.value = true
+}
+
+// 处理添加域名时的文件选择
+const handleAddDomainFileChange = (file) => {
+  addDomainSelectedFile.value = file.raw
+  addDomainForm.value.file_name = file.name
+  addDomainForm.value.file = file.raw
+}
+
+// 添加下载域名
+const handleAddDomain = async () => {
+  if (!addDomainFormRef.value) return
+
+  // 先进行表单验证
+  try {
+    await addDomainFormRef.value.validate()
+  } catch (error) {
+    return
+  }
+
+  // 如果没有选择文件，只添加域名（不创建下载包）
+  if (!addDomainSelectedFile.value) {
+    ElMessage.success('域名已添加，您可以稍后上传文件')
+    showAddDomainDialog.value = false
+    addDomainForm.value = {
+      domain_id: '',
+      file_name: '',
+      file: null,
+    }
+    addDomainFileList.value = []
+    addDomainSelectedFile.value = null
+    loadDomains()
+    loadAvailableDomains()
+    return
+  }
+
+  // 如果有文件，上传文件（会自动创建域名关联）
+  addDomainLoading.value = true
+
+  try {
+    const formData = new FormData()
+    formData.append('domain_id', addDomainForm.value.domain_id)
+    formData.append('file_name', addDomainForm.value.file_name)
+    formData.append('file', addDomainSelectedFile.value)
+
+    await request.post('/download-packages', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 300000,
+    })
+
+    ElMessage.success('上传成功，正在处理中...')
+    showAddDomainDialog.value = false
+    addDomainForm.value = {
+      domain_id: '',
+      file_name: '',
+      file: null,
+    }
+    addDomainFileList.value = []
+    addDomainSelectedFile.value = null
+    loadDomains()
+    loadAvailableDomains()
+  } catch (error) {
+    ElMessage.error('上传失败: ' + (error.response?.data?.error || error.message))
+  } finally {
+    addDomainLoading.value = false
   }
 }
 
