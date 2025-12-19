@@ -250,8 +250,53 @@ func (s *S3Service) ObjectExists(bucketName, key string) (bool, error) {
 	return true, nil
 }
 
+// EnsurePublicAccessBlockDisabled 确保 Block Public Access 设置允许公共策略
+func (s *S3Service) EnsurePublicAccessBlockDisabled(bucketName string) error {
+	// 检查当前的 Block Public Access 设置
+	getInput := &s3.GetPublicAccessBlockInput{
+		Bucket: aws.String(bucketName),
+	}
+
+	publicAccessBlock, err := s.client.GetPublicAccessBlock(getInput)
+	if err != nil {
+		// 如果没有设置，说明 Block Public Access 是关闭的，可以直接返回
+		if strings.Contains(err.Error(), "NoSuchPublicAccessBlockConfiguration") {
+			return nil
+		}
+		// 其他错误返回
+		return fmt.Errorf("获取 Block Public Access 设置失败: %w", err)
+	}
+
+	// 如果 BlockPublicPolicy 是启用的，需要禁用它
+	if publicAccessBlock.PublicAccessBlockConfiguration != nil &&
+		aws.BoolValue(publicAccessBlock.PublicAccessBlockConfiguration.BlockPublicPolicy) {
+		// 禁用 Block Public Policy，但保留其他设置
+		putInput := &s3.PutPublicAccessBlockInput{
+			Bucket: aws.String(bucketName),
+			PublicAccessBlockConfiguration: &s3.PublicAccessBlockConfiguration{
+				BlockPublicAcls:       publicAccessBlock.PublicAccessBlockConfiguration.BlockPublicAcls,
+				IgnorePublicAcls:      publicAccessBlock.PublicAccessBlockConfiguration.IgnorePublicAcls,
+				BlockPublicPolicy:     aws.Bool(false), // 禁用 Block Public Policy
+				RestrictPublicBuckets: publicAccessBlock.PublicAccessBlockConfiguration.RestrictPublicBuckets,
+			},
+		}
+
+		_, err = s.client.PutPublicAccessBlock(putInput)
+		if err != nil {
+			return fmt.Errorf("禁用 Block Public Policy 失败: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // EnsureBucketPolicyForPublicAccess 确保存储桶策略允许公开访问 redirects/* 路径
 func (s *S3Service) EnsureBucketPolicyForPublicAccess(bucketName string) error {
+	// 首先确保 Block Public Access 设置允许公共策略
+	if err := s.EnsurePublicAccessBlockDisabled(bucketName); err != nil {
+		return fmt.Errorf("配置 Block Public Access 设置失败: %w", err)
+	}
+
 	// 构建 bucket policy，允许公开访问 redirects/* 路径
 	policy := map[string]interface{}{
 		"Version": "2012-10-17",
