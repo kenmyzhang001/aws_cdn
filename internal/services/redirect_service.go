@@ -832,29 +832,29 @@ func (s *RedirectService) BindDomainToCloudFront(ruleID uint, distributionID str
 
 // CheckRedirectRuleStatus 检查重定向规则的状态
 type RedirectRuleStatus struct {
-	RuleExists               bool     `json:"rule_exists"`
-	HTMLUploaded             bool     `json:"html_uploaded"`
-	HTMLUploadError          string   `json:"html_upload_error,omitempty"`
-	S3BucketPolicyConfigured bool     `json:"s3_bucket_policy_configured"`
-	S3BucketPolicyError      string   `json:"s3_bucket_policy_error,omitempty"`
-	CloudFrontExists         bool     `json:"cloudfront_exists"`
-	CloudFrontError          string   `json:"cloudfront_error,omitempty"`
-	CloudFrontEnabled        bool     `json:"cloudfront_enabled"`
-	CloudFrontEnabledError   string   `json:"cloudfront_enabled_error,omitempty"`
-	CloudFrontOriginPathMatch bool    `json:"cloudfront_origin_path_match"`
-	CloudFrontOriginPathError string  `json:"cloudfront_origin_path_error,omitempty"`
-	CloudFrontOriginPathCurrent string `json:"cloudfront_origin_path_current,omitempty"`
-	CloudFrontOriginPathExpected string `json:"cloudfront_origin_path_expected,omitempty"`
-	Route53DNSConfigured     bool     `json:"route53_dns_configured"`
-	Route53DNSError          string   `json:"route53_dns_error,omitempty"`
-	WWWCNAMEConfigured       bool     `json:"www_cname_configured"`
-	WWWCNAMEError            string   `json:"www_cname_error,omitempty"`
-	CertificateFound         bool     `json:"certificate_found"`
-	CertificateARN           string   `json:"certificate_arn,omitempty"`
-	RedirectURLAccessible    bool     `json:"redirect_url_accessible"`
-	RedirectURLError         string   `json:"redirect_url_error,omitempty"`
-	Issues                   []string `json:"issues"`
-	CanFix                   bool     `json:"can_fix"`
+	RuleExists                   bool     `json:"rule_exists"`
+	HTMLUploaded                 bool     `json:"html_uploaded"`
+	HTMLUploadError              string   `json:"html_upload_error,omitempty"`
+	S3BucketPolicyConfigured     bool     `json:"s3_bucket_policy_configured"`
+	S3BucketPolicyError          string   `json:"s3_bucket_policy_error,omitempty"`
+	CloudFrontExists             bool     `json:"cloudfront_exists"`
+	CloudFrontError              string   `json:"cloudfront_error,omitempty"`
+	CloudFrontEnabled            bool     `json:"cloudfront_enabled"`
+	CloudFrontEnabledError       string   `json:"cloudfront_enabled_error,omitempty"`
+	CloudFrontOriginPathMatch    bool     `json:"cloudfront_origin_path_match"`
+	CloudFrontOriginPathError    string   `json:"cloudfront_origin_path_error,omitempty"`
+	CloudFrontOriginPathCurrent  string   `json:"cloudfront_origin_path_current,omitempty"`
+	CloudFrontOriginPathExpected string   `json:"cloudfront_origin_path_expected,omitempty"`
+	Route53DNSConfigured         bool     `json:"route53_dns_configured"`
+	Route53DNSError              string   `json:"route53_dns_error,omitempty"`
+	WWWCNAMEConfigured           bool     `json:"www_cname_configured"`
+	WWWCNAMEError                string   `json:"www_cname_error,omitempty"`
+	CertificateFound             bool     `json:"certificate_found"`
+	CertificateARN               string   `json:"certificate_arn,omitempty"`
+	RedirectURLAccessible        bool     `json:"redirect_url_accessible"`
+	RedirectURLError             string   `json:"redirect_url_error,omitempty"`
+	Issues                       []string `json:"issues"`
+	CanFix                       bool     `json:"can_fix"`
 }
 
 // CheckRedirectRule 检查重定向规则的状态

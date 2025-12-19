@@ -318,25 +318,25 @@ func (s *DownloadPackageService) DeleteDownloadPackage(id uint) error {
 
 // DownloadPackageStatus 下载包检查状态
 type DownloadPackageStatus struct {
-	PackageExists          bool     `json:"package_exists"`
-	S3FileExists           bool     `json:"s3_file_exists"`
-	S3FileError            string   `json:"s3_file_error,omitempty"`
-	CloudFrontExists       bool     `json:"cloudfront_exists"`
-	CloudFrontError        string   `json:"cloudfront_error,omitempty"`
-	CloudFrontEnabled      bool     `json:"cloudfront_enabled"`
-	CloudFrontEnabledError string   `json:"cloudfront_enabled_error,omitempty"`
-	CloudFrontOriginPathMatch bool  `json:"cloudfront_origin_path_match"`
-	CloudFrontOriginPathError string `json:"cloudfront_origin_path_error,omitempty"`
-	CloudFrontOriginPathCurrent string `json:"cloudfront_origin_path_current,omitempty"`
-	CloudFrontOriginPathExpected string `json:"cloudfront_origin_path_expected,omitempty"`
-	Route53DNSConfigured   bool     `json:"route53_dns_configured"`
-	Route53DNSError        string   `json:"route53_dns_error,omitempty"`
-	DownloadURLAccessible  bool     `json:"download_url_accessible"`
-	DownloadURLError       string   `json:"download_url_error,omitempty"`
-	CertificateFound       bool     `json:"certificate_found"`
-	CertificateARN         string   `json:"certificate_arn,omitempty"`
-	Issues                 []string `json:"issues"`
-	CanFix                 bool     `json:"can_fix"`
+	PackageExists                bool     `json:"package_exists"`
+	S3FileExists                 bool     `json:"s3_file_exists"`
+	S3FileError                  string   `json:"s3_file_error,omitempty"`
+	CloudFrontExists             bool     `json:"cloudfront_exists"`
+	CloudFrontError              string   `json:"cloudfront_error,omitempty"`
+	CloudFrontEnabled            bool     `json:"cloudfront_enabled"`
+	CloudFrontEnabledError       string   `json:"cloudfront_enabled_error,omitempty"`
+	CloudFrontOriginPathMatch    bool     `json:"cloudfront_origin_path_match"`
+	CloudFrontOriginPathError    string   `json:"cloudfront_origin_path_error,omitempty"`
+	CloudFrontOriginPathCurrent  string   `json:"cloudfront_origin_path_current,omitempty"`
+	CloudFrontOriginPathExpected string   `json:"cloudfront_origin_path_expected,omitempty"`
+	Route53DNSConfigured         bool     `json:"route53_dns_configured"`
+	Route53DNSError              string   `json:"route53_dns_error,omitempty"`
+	DownloadURLAccessible        bool     `json:"download_url_accessible"`
+	DownloadURLError             string   `json:"download_url_error,omitempty"`
+	CertificateFound             bool     `json:"certificate_found"`
+	CertificateARN               string   `json:"certificate_arn,omitempty"`
+	Issues                       []string `json:"issues"`
+	CanFix                       bool     `json:"can_fix"`
 }
 
 // CheckDownloadPackage 检查下载包状态
