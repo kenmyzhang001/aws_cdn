@@ -101,6 +101,79 @@ type DownloadPackageResponse struct {
 	UpdatedAt                    string `json:"updated_at"`
 }
 
+// ListDownloadPackagesByDomain 列出指定域名下的所有下载包
+func (h *DownloadPackageHandler) ListDownloadPackagesByDomain(c *gin.Context) {
+	domainIDStr := c.Query("domain_id")
+	if domainIDStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "domain_id 参数是必需的"})
+		return
+	}
+
+	domainID, err := strconv.ParseUint(domainIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 domain_id"})
+		return
+	}
+
+	packages, err := h.service.ListDownloadPackagesByDomain(uint(domainID))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 为每个下载包获取CloudFront状态
+	responses := make([]DownloadPackageResponse, len(packages))
+	for i, pkg := range packages {
+		responses[i] = DownloadPackageResponse{
+			ID:               pkg.ID,
+			DomainID:         pkg.DomainID,
+			DomainName:       pkg.DomainName,
+			FileName:         pkg.FileName,
+			FileSize:         pkg.FileSize,
+			FileType:         pkg.FileType,
+			S3Key:            pkg.S3Key,
+			CloudFrontID:     pkg.CloudFrontID,
+			CloudFrontDomain: pkg.CloudFrontDomain,
+			DownloadURL:      pkg.DownloadURL,
+			Status:           string(pkg.Status),
+			ErrorMessage:     pkg.ErrorMessage,
+			CreatedAt:        pkg.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:        pkg.UpdatedAt.Format(time.RFC3339),
+		}
+
+		// 获取CloudFront状态和启用状态
+		if pkg.CloudFrontID != "" {
+			status, err := h.service.GetCloudFrontStatus(pkg.CloudFrontID)
+			if err != nil {
+				responses[i].CloudFrontStatus = "unknown"
+			} else {
+				responses[i].CloudFrontStatus = status
+			}
+
+			enabled, err := h.service.GetCloudFrontEnabled(pkg.CloudFrontID)
+			if err != nil {
+				responses[i].CloudFrontEnabled = false
+			} else {
+				responses[i].CloudFrontEnabled = enabled
+			}
+		} else {
+			responses[i].CloudFrontStatus = ""
+			responses[i].CloudFrontEnabled = false
+		}
+
+		// 获取 CloudFront OriginPath 信息
+		currentPath, expectedPath, err := h.service.GetCloudFrontOriginPathInfo(&pkg)
+		if err == nil {
+			responses[i].CloudFrontOriginPathCurrent = currentPath
+			responses[i].CloudFrontOriginPathExpected = expectedPath
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": responses,
+	})
+}
+
 // ListDownloadPackages 列出所有下载包
 func (h *DownloadPackageHandler) ListDownloadPackages(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))

@@ -114,6 +114,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		{
 			downloadPackages.POST("", downloadPackageHandler.CreateDownloadPackage)
 			downloadPackages.GET("", downloadPackageHandler.ListDownloadPackages)
+			downloadPackages.GET("/by-domain", downloadPackageHandler.ListDownloadPackagesByDomain)
 			downloadPackages.GET("/:id", downloadPackageHandler.GetDownloadPackage)
 			downloadPackages.DELETE("/:id", downloadPackageHandler.DeleteDownloadPackage)
 			downloadPackages.GET("/:id/check", downloadPackageHandler.CheckDownloadPackage)

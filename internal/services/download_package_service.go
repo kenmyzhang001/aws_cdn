@@ -9,7 +9,6 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -148,40 +147,48 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 	// 2. 获取S3域名
 	s3Origin := s.s3Svc.GetBucketDomain(s.config.S3BucketName)
 
-	// 3. 创建CloudFront分发（使用大文件下载优化配置）
-	// 计算originPath（去掉文件名，只保留目录路径）
-	originPath := ""
-	if strings.Contains(pkg.S3Key, "/") {
-		parts := strings.Split(pkg.S3Key, "/")
-		if len(parts) > 1 {
-			originPath = "/" + strings.Join(parts[:len(parts)-1], "/")
+	// 3. 检查该域名是否已有CloudFront分发（用于支持同一域名下多个文件）
+	var cloudFrontID string
+	var cloudFrontDomain string
+	
+	// 查找该域名下是否已有其他下载包（已完成状态）
+	var existingPackage models.DownloadPackage
+	err := s.db.Where("domain_name = ? AND cloudfront_id != '' AND status = ?", pkg.DomainName, models.DownloadPackageStatusCompleted).
+		First(&existingPackage).Error
+	
+	if err == nil && existingPackage.CloudFrontID != "" {
+		// 已存在该域名的CloudFront分发，复用它
+		cloudFrontID = existingPackage.CloudFrontID
+		cloudFrontDomain = existingPackage.CloudFrontDomain
+	} else {
+		// 不存在，创建新的CloudFront分发
+		// 计算originPath：同一域名下的所有文件都使用相同的目录路径 downloads/{domain_name}/
+		originPath := fmt.Sprintf("/downloads/%s", pkg.DomainName)
+
+		cloudFrontID, err = s.cloudFrontSvc.CreateDistributionForLargeFileDownload(
+			pkg.DomainName,
+			domain.CertificateARN,
+			s3Origin,
+			originPath,
+		)
+		if err != nil {
+			s.db.Model(pkg).Updates(map[string]interface{}{
+				"status":        models.DownloadPackageStatusFailed,
+				"error_message": fmt.Sprintf("创建CloudFront分发失败: %v", err),
+			})
+			return
+		}
+
+		// 获取CloudFront域名
+		cloudFrontDomain, err = s.cloudFrontSvc.GetDistributionDomain(cloudFrontID)
+		if err != nil {
+			s.db.Model(pkg).Updates(map[string]interface{}{
+				"status":        models.DownloadPackageStatusFailed,
+				"error_message": fmt.Sprintf("获取CloudFront域名失败: %v", err),
+			})
+			return
 		}
 	}
-
-	cloudFrontID, err := s.cloudFrontSvc.CreateDistributionForLargeFileDownload(
-		pkg.DomainName,
-		domain.CertificateARN,
-		s3Origin,
-		originPath,
-	)
-	if err != nil {
-		s.db.Model(pkg).Updates(map[string]interface{}{
-			"status":        models.DownloadPackageStatusFailed,
-			"error_message": fmt.Sprintf("创建CloudFront分发失败: %v", err),
-		})
-		return
-	}
-
-	// 获取CloudFront域名
-	cloudFrontDomain, err := s.cloudFrontSvc.GetDistributionDomain(cloudFrontID)
-	if err != nil {
-		s.db.Model(pkg).Updates(map[string]interface{}{
-			"status":        models.DownloadPackageStatusFailed,
-			"error_message": fmt.Sprintf("获取CloudFront域名失败: %v", err),
-		})
-		return
-	}
-
 	// 4. 将域名绑定到CloudFront（创建Route53 A记录）
 	if domain.HostedZoneID != "" {
 		// 等待一下让CloudFront分发完全部署
@@ -274,13 +281,8 @@ func (s *DownloadPackageService) GetCloudFrontEnabled(cloudFrontID string) (bool
 
 // GetCloudFrontOriginPathInfo 获取CloudFront OriginPath信息（当前路径和期望路径）
 func (s *DownloadPackageService) GetCloudFrontOriginPathInfo(pkg *models.DownloadPackage) (currentPath, expectedPath string, err error) {
-	// 计算期望的 originPath
-	if strings.Contains(pkg.S3Key, "/") {
-		parts := strings.Split(pkg.S3Key, "/")
-		if len(parts) > 1 {
-			expectedPath = "/" + strings.Join(parts[:len(parts)-1], "/")
-		}
-	}
+	// 计算期望的 originPath：同一域名下的所有文件都使用相同的目录路径 downloads/{domain_name}/
+	expectedPath = fmt.Sprintf("/downloads/%s", pkg.DomainName)
 
 	// 获取当前的 OriginPath
 	if pkg.CloudFrontID != "" {
@@ -311,6 +313,20 @@ func (s *DownloadPackageService) ListDownloadPackages(page, pageSize int) ([]mod
 	return packages, total, nil
 }
 
+// ListDownloadPackagesByDomain 列出指定域名下的所有下载包
+func (s *DownloadPackageService) ListDownloadPackagesByDomain(domainID uint) ([]models.DownloadPackage, error) {
+	var packages []models.DownloadPackage
+
+	if err := s.db.Preload("Domain").
+		Where("domain_id = ?", domainID).
+		Order("created_at DESC").
+		Find(&packages).Error; err != nil {
+		return nil, err
+	}
+
+	return packages, nil
+}
+
 // DeleteDownloadPackage 删除下载包
 func (s *DownloadPackageService) DeleteDownloadPackage(id uint) error {
 	pkg, err := s.GetDownloadPackage(id)
@@ -326,8 +342,16 @@ func (s *DownloadPackageService) DeleteDownloadPackage(id uint) error {
 		}
 	}
 
+	// 检查该CloudFront分发下是否还有其他文件
+	// 如果这是该域名下最后一个文件，可以选择保留CloudFront分发（因为可能还会添加新文件）
+	// 或者删除CloudFront分发（这里选择保留，因为删除CloudFront分发需要先禁用，然后等待，比较复杂）
+	var otherPackagesCount int64
+	s.db.Model(&models.DownloadPackage{}).
+		Where("cloudfront_id = ? AND id != ? AND deleted_at IS NULL", pkg.CloudFrontID, pkg.ID).
+		Count(&otherPackagesCount)
+
 	// 注意：CloudFront分发可能被其他下载包使用，所以不删除
-	// 如果需要删除，应该检查是否有其他下载包使用同一个分发
+	// 即使这是最后一个文件，也保留CloudFront分发，方便后续添加新文件
 
 	// 从数据库删除（软删除）
 	if err := s.db.Delete(pkg).Error; err != nil {
@@ -424,14 +448,8 @@ func (s *DownloadPackageService) CheckDownloadPackage(id uint) (*DownloadPackage
 			}
 
 			// 检查 CloudFront OriginPath 是否匹配
-			// 计算期望的 originPath
-			expectedOriginPath := ""
-			if strings.Contains(pkg.S3Key, "/") {
-				parts := strings.Split(pkg.S3Key, "/")
-				if len(parts) > 1 {
-					expectedOriginPath = "/" + strings.Join(parts[:len(parts)-1], "/")
-				}
-			}
+			// 计算期望的 originPath：同一域名下的所有文件都使用相同的目录路径 downloads/{domain_name}/
+			expectedOriginPath := fmt.Sprintf("/downloads/%s", pkg.DomainName)
 			status.CloudFrontOriginPathExpected = expectedOriginPath
 
 			// 获取当前的 OriginPath
@@ -546,14 +564,8 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 			}
 
 			// 检查并更新 OriginPath
-			// 计算期望的 originPath
-			expectedOriginPath := ""
-			if strings.Contains(pkg.S3Key, "/") {
-				parts := strings.Split(pkg.S3Key, "/")
-				if len(parts) > 1 {
-					expectedOriginPath = "/" + strings.Join(parts[:len(parts)-1], "/")
-				}
-			}
+			// 计算期望的 originPath：同一域名下的所有文件都使用相同的目录路径 downloads/{domain_name}/
+			expectedOriginPath := fmt.Sprintf("/downloads/%s", pkg.DomainName)
 
 			// 获取当前的 OriginPath
 			currentOriginPath, err := s.cloudFrontSvc.GetDistributionOriginPath(pkg.CloudFrontID)
@@ -593,14 +605,8 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 		// 获取S3域名
 		s3Origin := s.s3Svc.GetBucketDomain(s.config.S3BucketName)
 
-		// 计算originPath
-		originPath := ""
-		if strings.Contains(pkg.S3Key, "/") {
-			parts := strings.Split(pkg.S3Key, "/")
-			if len(parts) > 1 {
-				originPath = "/" + strings.Join(parts[:len(parts)-1], "/")
-			}
-		}
+		// 计算originPath：同一域名下的所有文件都使用相同的目录路径 downloads/{domain_name}/
+		originPath := fmt.Sprintf("/downloads/%s", pkg.DomainName)
 
 		// 创建CloudFront分发
 		cloudFrontID, err := s.cloudFrontSvc.CreateDistributionForLargeFileDownload(
