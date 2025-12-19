@@ -27,6 +27,14 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="cloudfront_status" label="CloudFront状态" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.cloudfront_status" :type="getCloudFrontStatusType(row.cloudfront_status)">
+              {{ getCloudFrontStatusText(row.cloudfront_status) }}
+            </el-tag>
+            <span v-else style="color: #909399">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="download_url" label="下载URL">
           <template #default="{ row }">
             <el-link
@@ -498,6 +506,26 @@ const getStatusText = (status) => {
     failed: '失败',
   }
   return statusMap[status] || status
+}
+
+// 获取CloudFront状态类型
+const getCloudFrontStatusType = (status) => {
+  const statusMap = {
+    InProgress: 'warning',
+    Deployed: 'success',
+    Disabled: 'info',
+  }
+  return statusMap[status] || 'info'
+}
+
+// 获取CloudFront状态文本
+const getCloudFrontStatusText = (status) => {
+  const statusTextMap = {
+    InProgress: '部署中',
+    Deployed: '已部署',
+    Disabled: '已禁用',
+  }
+  return statusTextMap[status] || status || '未知'
 }
 
 onMounted(() => {
