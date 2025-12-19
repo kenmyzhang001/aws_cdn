@@ -45,8 +45,24 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200">
+        <el-table-column label="操作" width="280">
           <template #default="{ row }">
+            <el-button
+              size="small"
+              type="primary"
+              :loading="row.checking"
+              @click="checkPackage(row)"
+            >
+              检查
+            </el-button>
+            <el-button
+              size="small"
+              type="warning"
+              :loading="row.fixing"
+              @click="fixPackage(row)"
+            >
+              修复
+            </el-button>
             <el-button
               v-if="row.download_url"
               size="small"
@@ -126,6 +142,83 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 检查状态对话框 -->
+    <el-dialog v-model="showCheckDialog" title="检查下载包状态" width="700px">
+      <div v-if="checkStatus">
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="下载包记录">
+            <el-tag :type="checkStatus.package_exists ? 'success' : 'danger'">
+              {{ checkStatus.package_exists ? '存在' : '不存在' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="S3文件">
+            <el-tag :type="checkStatus.s3_file_exists ? 'success' : 'danger'">
+              {{ checkStatus.s3_file_exists ? '存在' : '不存在' }}
+            </el-tag>
+            <span v-if="checkStatus.s3_file_error" style="color: #f56c6c; margin-left: 10px">
+              {{ checkStatus.s3_file_error }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFront分发">
+            <el-tag :type="checkStatus.cloudfront_exists ? 'success' : 'danger'">
+              {{ checkStatus.cloudfront_exists ? '存在' : '不存在' }}
+            </el-tag>
+            <span v-if="checkStatus.cloudfront_error" style="color: #f56c6c; margin-left: 10px">
+              {{ checkStatus.cloudfront_error }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="Route53 DNS记录">
+            <el-tag :type="checkStatus.route53_dns_configured ? 'success' : 'danger'">
+              {{ checkStatus.route53_dns_configured ? '已配置' : '未配置' }}
+            </el-tag>
+            <span v-if="checkStatus.route53_dns_error" style="color: #f56c6c; margin-left: 10px">
+              {{ checkStatus.route53_dns_error }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="下载URL">
+            <el-tag :type="checkStatus.download_url_accessible ? 'success' : 'danger'">
+              {{ checkStatus.download_url_accessible ? '可访问' : '不可访问' }}
+            </el-tag>
+            <span v-if="checkStatus.download_url_error" style="color: #f56c6c; margin-left: 10px">
+              {{ checkStatus.download_url_error }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="证书">
+            <el-tag :type="checkStatus.certificate_found ? 'success' : 'danger'">
+              {{ checkStatus.certificate_found ? '已找到' : '未找到' }}
+            </el-tag>
+            <span v-if="checkStatus.certificate_arn" style="margin-left: 10px; font-size: 12px; color: #909399">
+              {{ checkStatus.certificate_arn }}
+            </span>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <div v-if="checkStatus.issues && checkStatus.issues.length > 0" style="margin-top: 20px">
+          <h4 style="color: #f56c6c; margin-bottom: 10px">发现的问题：</h4>
+          <ul>
+            <li v-for="(issue, index) in checkStatus.issues" :key="index" style="color: #f56c6c; margin-bottom: 5px">
+              {{ issue }}
+            </li>
+          </ul>
+        </div>
+
+        <div v-else style="margin-top: 20px">
+          <el-alert type="success" :closable="false">所有检查项均正常</el-alert>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showCheckDialog = false">关闭</el-button>
+        <el-button
+          v-if="checkStatus && checkStatus.can_fix"
+          type="primary"
+          @click="handleFix"
+          :loading="fixLoading"
+        >
+          修复
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -135,6 +228,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import request from '@/api/request'
 import { domainApi } from '@/api/domain'
+import { downloadPackageApi } from '@/api/download_package'
 
 const loading = ref(false)
 const packageList = ref([])
@@ -152,6 +246,12 @@ const uploadFormRef = ref(null)
 const fileList = ref([])
 const selectedFile = ref(null)
 const availableDomains = ref([])
+
+// 检查修复相关
+const showCheckDialog = ref(false)
+const checkStatus = ref(null)
+const checkPackageId = ref(null)
+const fixLoading = ref(false)
 
 const uploadRules = {
   domain_id: [{ required: true, message: '请选择下载域名', trigger: 'change' }],
@@ -297,6 +397,66 @@ const copyDownloadUrl = (row) => {
     document.execCommand('copy')
     document.body.removeChild(textarea)
     ElMessage.success('链接已复制到剪贴板')
+  }
+}
+
+// 检查下载包
+const checkPackage = async (row) => {
+  row.checking = true
+  checkPackageId.value = row.id
+  try {
+    const res = await downloadPackageApi.checkDownloadPackage(row.id)
+    checkStatus.value = res
+    showCheckDialog.value = true
+  } catch (error) {
+    ElMessage.error('检查失败: ' + (error.response?.data?.error || error.message))
+  } finally {
+    row.checking = false
+  }
+}
+
+// 修复下载包
+const fixPackage = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要修复这个下载包吗？修复将重新创建CloudFront分发和DNS记录。',
+      '提示',
+      {
+        type: 'warning',
+      }
+    )
+    row.fixing = true
+
+    // 如果还没有检查状态，先检查一下
+    if (!checkStatus.value || checkPackageId.value !== row.id) {
+      await checkPackage(row)
+    }
+
+    await downloadPackageApi.fixDownloadPackage(row.id)
+    ElMessage.success('修复成功')
+
+    // 重新检查状态
+    if (checkPackageId.value === row.id) {
+      const res = await downloadPackageApi.checkDownloadPackage(row.id)
+      checkStatus.value = res
+    }
+
+    loadPackages()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('修复失败: ' + (error.response?.data?.error || error.message))
+    }
+  } finally {
+    row.fixing = false
+  }
+}
+
+// 在检查对话框中点击修复
+const handleFix = async () => {
+  if (!checkPackageId.value) return
+  const row = packageList.value.find((p) => p.id === checkPackageId.value)
+  if (row) {
+    await fixPackage(row)
   }
 }
 

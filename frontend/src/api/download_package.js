@@ -1,0 +1,39 @@
+import request from './request'
+
+export const downloadPackageApi = {
+  // 获取下载包列表
+  getDownloadPackageList(params) {
+    return request.get('/download-packages', { params })
+  },
+
+  // 获取下载包详情
+  getDownloadPackage(id) {
+    return request.get(`/download-packages/${id}`)
+  },
+
+  // 创建下载包（上传文件）
+  createDownloadPackage(formData) {
+    return request.post('/download-packages', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 300000, // 5分钟超时
+    })
+  },
+
+  // 删除下载包
+  deleteDownloadPackage(id) {
+    return request.delete(`/download-packages/${id}`)
+  },
+
+  // 检查下载包状态
+  checkDownloadPackage(id) {
+    return request.get(`/download-packages/${id}/check`)
+  },
+
+  // 修复下载包
+  fixDownloadPackage(id) {
+    return request.post(`/download-packages/${id}/fix`)
+  },
+}
+
