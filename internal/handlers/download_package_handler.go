@@ -20,11 +20,10 @@ func NewDownloadPackageHandler(service *services.DownloadPackageService) *Downlo
 func (h *DownloadPackageHandler) CreateDownloadPackage(c *gin.Context) {
 	// 获取表单数据
 	domainIDStr := c.PostForm("domain_id")
-	domainName := c.PostForm("domain_name")
 	fileName := c.PostForm("file_name")
 
-	if domainIDStr == "" || domainName == "" || fileName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "domain_id, domain_name 和 file_name 是必需的"})
+	if domainIDStr == "" || fileName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "domain_id 和 file_name 是必需的"})
 		return
 	}
 
@@ -52,8 +51,8 @@ func (h *DownloadPackageHandler) CreateDownloadPackage(c *gin.Context) {
 	// 获取文件大小
 	fileSize := file.Size
 
-	// 创建下载包
-	pkg, err := h.service.CreateDownloadPackage(uint(domainID), domainName, fileName, fileReader, fileSize)
+	// 创建下载包（使用domainID，服务层会从域名获取domain_name）
+	pkg, err := h.service.CreateDownloadPackage(uint(domainID), fileName, fileReader, fileSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -113,5 +112,3 @@ func (h *DownloadPackageHandler) DeleteDownloadPackage(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "下载包删除成功"})
 }
-
-

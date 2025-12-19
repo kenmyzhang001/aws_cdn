@@ -45,7 +45,7 @@ func NewDownloadPackageService(
 // 1. 上传文件到S3
 // 2. 创建CloudFront分发
 // 3. 将域名绑定到CloudFront
-func (s *DownloadPackageService) CreateDownloadPackage(domainID uint, domainName string, fileName string, fileReader io.ReadSeeker, fileSize int64) (*models.DownloadPackage, error) {
+func (s *DownloadPackageService) CreateDownloadPackage(domainID uint, fileName string, fileReader io.ReadSeeker, fileSize int64) (*models.DownloadPackage, error) {
 	// 验证域名是否存在
 	domain, err := s.domainService.GetDomain(domainID)
 	if err != nil {
@@ -56,6 +56,9 @@ func (s *DownloadPackageService) CreateDownloadPackage(domainID uint, domainName
 	if domain.CertificateStatus != "issued" {
 		return nil, fmt.Errorf("域名证书未签发，当前状态: %s", domain.CertificateStatus)
 	}
+
+	// 使用域名的domain_name作为下载域名
+	domainName := domain.DomainName
 
 	// 生成S3键（使用downloads/前缀）
 	s3Key := fmt.Sprintf("downloads/%s/%s", domainName, fileName)
@@ -101,7 +104,7 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 	// 上传文件到S3（使用public-read ACL以便CloudFront访问）
 	if err := s.s3Svc.UploadFileWithACL(s.config.S3BucketName, pkg.S3Key, fileReader, contentType, "public-read"); err != nil {
 		s.db.Model(pkg).Updates(map[string]interface{}{
-			"status":       models.DownloadPackageStatusFailed,
+			"status":        models.DownloadPackageStatusFailed,
 			"error_message": fmt.Sprintf("上传文件到S3失败: %v", err),
 		})
 		return
@@ -131,7 +134,7 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 	)
 	if err != nil {
 		s.db.Model(pkg).Updates(map[string]interface{}{
-			"status":       models.DownloadPackageStatusFailed,
+			"status":        models.DownloadPackageStatusFailed,
 			"error_message": fmt.Sprintf("创建CloudFront分发失败: %v", err),
 		})
 		return
@@ -141,7 +144,7 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 	cloudFrontDomain, err := s.cloudFrontSvc.GetDistributionDomain(cloudFrontID)
 	if err != nil {
 		s.db.Model(pkg).Updates(map[string]interface{}{
-			"status":       models.DownloadPackageStatusFailed,
+			"status":        models.DownloadPackageStatusFailed,
 			"error_message": fmt.Sprintf("获取CloudFront域名失败: %v", err),
 		})
 		return
@@ -158,7 +161,7 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 			// 创建A记录指向CloudFront
 			if err := s.domainService.CreateCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, cloudFrontDomain); err != nil {
 				s.db.Model(pkg).Updates(map[string]interface{}{
-					"status":       models.DownloadPackageStatusFailed,
+					"status":        models.DownloadPackageStatusFailed,
 					"error_message": fmt.Sprintf("创建Route53记录失败: %v", err),
 				})
 				return
@@ -230,4 +233,3 @@ func (s *DownloadPackageService) DeleteDownloadPackage(id uint) error {
 
 	return nil
 }
-
