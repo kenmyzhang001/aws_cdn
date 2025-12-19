@@ -1031,6 +1031,23 @@ func (s *RedirectService) FixRedirectRule(ruleID uint) (*CreateRedirectRuleResul
 					}
 				}
 			}
+
+			// 检查并更新 OriginPath
+			// 计算期望的 originPath
+			expectedOriginPath := fmt.Sprintf("/redirects/%s", rule.SourceDomain)
+
+			// 获取当前的 OriginPath
+			currentOriginPath, err := s.cloudFrontSvc.GetDistributionOriginPath(rule.CloudFrontID)
+			if err != nil {
+				warningMsg := fmt.Sprintf("获取 CloudFront OriginPath 失败: %v", err)
+				deploymentWarnings = append(deploymentWarnings, warningMsg)
+			} else if currentOriginPath != expectedOriginPath {
+				// 如果路径不匹配，更新它
+				if err := s.cloudFrontSvc.UpdateDistributionOriginPath(rule.CloudFrontID, expectedOriginPath); err != nil {
+					warningMsg := fmt.Sprintf("更新 CloudFront OriginPath 失败: %v", err)
+					deploymentWarnings = append(deploymentWarnings, warningMsg)
+				}
+			}
 		}
 	}
 

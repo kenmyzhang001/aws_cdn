@@ -493,6 +493,29 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 					}
 				}
 			}
+
+			// 检查并更新 OriginPath
+			// 计算期望的 originPath
+			expectedOriginPath := ""
+			if strings.Contains(pkg.S3Key, "/") {
+				parts := strings.Split(pkg.S3Key, "/")
+				if len(parts) > 1 {
+					expectedOriginPath = "/" + strings.Join(parts[:len(parts)-1], "/")
+				}
+			}
+
+			// 获取当前的 OriginPath
+			currentOriginPath, err := s.cloudFrontSvc.GetDistributionOriginPath(pkg.CloudFrontID)
+			if err != nil {
+				return fmt.Errorf("获取 CloudFront OriginPath 失败: %w", err)
+			}
+
+			// 如果路径不匹配，更新它
+			if currentOriginPath != expectedOriginPath {
+				if err := s.cloudFrontSvc.UpdateDistributionOriginPath(pkg.CloudFrontID, expectedOriginPath); err != nil {
+					return fmt.Errorf("更新 CloudFront OriginPath 失败: %w", err)
+				}
+			}
 		}
 	}
 

@@ -50,7 +50,32 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 		return "", fmt.Errorf("检查现有分发失败: %w", err)
 	}
 	if existingID != "" {
-		// 已存在相同域名的分发，返回现有分发ID
+		// 已存在相同域名的分发，检查并更新 OriginPath
+		// 格式化期望的 originPath
+		expectedPath := originPath
+		if expectedPath != "" {
+			if !strings.HasPrefix(expectedPath, "/") {
+				expectedPath = "/" + expectedPath
+			}
+			if expectedPath != "/" && strings.HasSuffix(expectedPath, "/") {
+				expectedPath = strings.TrimSuffix(expectedPath, "/")
+			}
+			expectedPath = strings.ReplaceAll(expectedPath, "//", "/")
+		}
+
+		// 获取当前的 OriginPath
+		currentPath, err := s.GetDistributionOriginPath(existingID)
+		if err != nil {
+			return "", fmt.Errorf("获取现有分发 OriginPath 失败: %w", err)
+		}
+
+		// 如果路径不匹配，更新它
+		if currentPath != expectedPath {
+			if err := s.UpdateDistributionOriginPath(existingID, expectedPath); err != nil {
+				return "", fmt.Errorf("更新现有分发 OriginPath 失败: %w", err)
+			}
+		}
+
 		return existingID, nil
 	}
 
@@ -165,6 +190,32 @@ func (s *CloudFrontService) CreateDistributionForLargeFileDownload(domainName st
 		return "", fmt.Errorf("检查现有分发失败: %w", err)
 	}
 	if existingID != "" {
+		// 已存在相同域名的分发，检查并更新 OriginPath
+		// 格式化期望的 originPath
+		expectedPath := originPath
+		if expectedPath != "" {
+			if !strings.HasPrefix(expectedPath, "/") {
+				expectedPath = "/" + expectedPath
+			}
+			if expectedPath != "/" && strings.HasSuffix(expectedPath, "/") {
+				expectedPath = strings.TrimSuffix(expectedPath, "/")
+			}
+			expectedPath = strings.ReplaceAll(expectedPath, "//", "/")
+		}
+
+		// 获取当前的 OriginPath
+		currentPath, err := s.GetDistributionOriginPath(existingID)
+		if err != nil {
+			return "", fmt.Errorf("获取现有分发 OriginPath 失败: %w", err)
+		}
+
+		// 如果路径不匹配，更新它
+		if currentPath != expectedPath {
+			if err := s.UpdateDistributionOriginPath(existingID, expectedPath); err != nil {
+				return "", fmt.Errorf("更新现有分发 OriginPath 失败: %w", err)
+			}
+		}
+
 		return existingID, nil
 	}
 
@@ -432,6 +483,78 @@ func (s *CloudFrontService) UpdateDistributionAliases(distributionID string, ali
 	_, err = s.client.UpdateDistribution(updateInput)
 	if err != nil {
 		return fmt.Errorf("更新分发配置失败: %w", err)
+	}
+
+	return nil
+}
+
+// GetDistributionOriginPath 获取 CloudFront 分发的 OriginPath
+func (s *CloudFrontService) GetDistributionOriginPath(distributionID string) (string, error) {
+	dist, err := s.GetDistribution(distributionID)
+	if err != nil {
+		return "", err
+	}
+
+	if dist.DistributionConfig == nil || dist.DistributionConfig.Origins == nil {
+		return "", nil
+	}
+
+	// 获取第一个 Origin 的 OriginPath
+	for _, origin := range dist.DistributionConfig.Origins.Items {
+		if origin != nil && origin.OriginPath != nil {
+			return *origin.OriginPath, nil
+		}
+	}
+
+	return "", nil
+}
+
+// UpdateDistributionOriginPath 更新 CloudFront 分发的 OriginPath
+func (s *CloudFrontService) UpdateDistributionOriginPath(distributionID string, originPath string) error {
+	// 获取当前配置
+	getInput := &cloudfront.GetDistributionInput{
+		Id: aws.String(distributionID),
+	}
+	getResult, err := s.client.GetDistribution(getInput)
+	if err != nil {
+		return fmt.Errorf("获取分发配置失败: %w", err)
+	}
+
+	config := getResult.Distribution.DistributionConfig
+
+	// 格式化 originPath
+	path := originPath
+	if path != "" {
+		// 确保以 / 开头
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		// 去掉末尾的 /（除非是根路径）
+		if path != "/" && strings.HasSuffix(path, "/") {
+			path = strings.TrimSuffix(path, "/")
+		}
+		// 确保没有连续的 /
+		path = strings.ReplaceAll(path, "//", "/")
+	}
+
+	// 更新第一个 Origin 的 OriginPath
+	if config.Origins != nil && len(config.Origins.Items) > 0 && config.Origins.Items[0] != nil {
+		if path == "" {
+			config.Origins.Items[0].OriginPath = nil
+		} else {
+			config.Origins.Items[0].OriginPath = aws.String(path)
+		}
+	}
+
+	updateInput := &cloudfront.UpdateDistributionInput{
+		Id:                 aws.String(distributionID),
+		DistributionConfig: config,
+		IfMatch:            getResult.ETag,
+	}
+
+	_, err = s.client.UpdateDistribution(updateInput)
+	if err != nil {
+		return fmt.Errorf("更新分发 OriginPath 失败: %w", err)
 	}
 
 	return nil
