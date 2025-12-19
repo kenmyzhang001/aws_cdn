@@ -914,6 +914,14 @@ func (s *RedirectService) FixRedirectRule(ruleID uint) (*CreateRedirectRuleResul
 		}
 	}
 
+	// 确保 S3 bucket policy 允许公开访问（修复时自动配置）
+	if s.config.S3BucketName != "" {
+		if err := s.s3Svc.EnsureBucketPolicyForPublicAccess(s.config.S3BucketName); err != nil {
+			warningMsg := fmt.Sprintf("配置 S3 bucket policy 失败: %v", err)
+			deploymentWarnings = append(deploymentWarnings, warningMsg)
+		}
+	}
+
 	// 自动部署到S3和CloudFront
 	if certificateARN != "" {
 		// 如果已有CloudFront ID，只重新上传HTML
