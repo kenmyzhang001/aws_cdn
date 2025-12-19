@@ -105,8 +105,38 @@ func (s *DomainService) GetDomain(id uint) (*models.Domain, error) {
 	return &domain, nil
 }
 
+// DomainWithUsage 带使用状态的域名信息
+type DomainWithUsage struct {
+	models.Domain
+	UsedByRedirect        bool `json:"used_by_redirect"`         // 是否被重定向使用
+	UsedByDownloadPackage bool `json:"used_by_download_package"` // 是否被下载包使用
+}
+
+// CheckDomainUsage 检查域名的使用情况
+func (s *DomainService) CheckDomainUsage(domainName string) (usedByRedirect bool, usedByDownloadPackage bool, err error) {
+	// 检查是否被重定向规则使用
+	var redirectCount int64
+	if err := s.db.Model(&models.RedirectRule{}).
+		Where("source_domain = ?", domainName).
+		Count(&redirectCount).Error; err != nil {
+		return false, false, err
+	}
+	usedByRedirect = redirectCount > 0
+
+	// 检查是否被下载包使用
+	var downloadPackageCount int64
+	if err := s.db.Model(&models.DownloadPackage{}).
+		Where("domain_name = ?", domainName).
+		Count(&downloadPackageCount).Error; err != nil {
+		return false, false, err
+	}
+	usedByDownloadPackage = downloadPackageCount > 0
+
+	return usedByRedirect, usedByDownloadPackage, nil
+}
+
 // ListDomains 列出所有域名
-func (s *DomainService) ListDomains(page, pageSize int) ([]models.Domain, int64, error) {
+func (s *DomainService) ListDomains(page, pageSize int) ([]DomainWithUsage, int64, error) {
 	var domains []models.Domain
 	var total int64
 
@@ -120,8 +150,10 @@ func (s *DomainService) ListDomains(page, pageSize int) ([]models.Domain, int64,
 		return nil, 0, err
 	}
 
-	// 为每个有证书的域名查询最新的证书状态
+	// 转换为带使用状态的域名列表
+	result := make([]DomainWithUsage, len(domains))
 	for i := range domains {
+		// 为每个有证书的域名查询最新的证书状态
 		if domains[i].CertificateARN != "" {
 			status, err := s.acmSvc.GetCertificateStatus(domains[i].CertificateARN)
 			if err == nil {
@@ -137,9 +169,22 @@ func (s *DomainService) ListDomains(page, pageSize int) ([]models.Domain, int64,
 				}
 			}
 		}
+
+		// 检查域名使用情况
+		usedByRedirect, usedByDownloadPackage, err := s.CheckDomainUsage(domains[i].DomainName)
+		if err != nil {
+			// 如果检查失败，记录错误但不阻止返回
+			fmt.Printf("检查域名 %s 使用状态失败: %v\n", domains[i].DomainName, err)
+		}
+
+		result[i] = DomainWithUsage{
+			Domain:                domains[i],
+			UsedByRedirect:        usedByRedirect,
+			UsedByDownloadPackage: usedByDownloadPackage,
+		}
 	}
 
-	return domains, total, nil
+	return result, total, nil
 }
 
 // GetNServers 获取域名的 NS 服务器配置
