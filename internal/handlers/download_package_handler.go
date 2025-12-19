@@ -4,6 +4,7 @@ import (
 	"aws_cdn/internal/services"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -78,6 +79,25 @@ func (h *DownloadPackageHandler) GetDownloadPackage(c *gin.Context) {
 	c.JSON(http.StatusOK, pkg)
 }
 
+// DownloadPackageResponse 下载包响应结构（包含CloudFront状态）
+type DownloadPackageResponse struct {
+	ID               uint   `json:"id"`
+	DomainID         uint   `json:"domain_id"`
+	DomainName       string `json:"domain_name"`
+	FileName         string `json:"file_name"`
+	FileSize         int64  `json:"file_size"`
+	FileType         string `json:"file_type"`
+	S3Key            string `json:"s3_key"`
+	CloudFrontID     string `json:"cloudfront_id"`
+	CloudFrontDomain string `json:"cloudfront_domain"`
+	CloudFrontStatus string `json:"cloudfront_status"` // CloudFront部署状态
+	DownloadURL      string `json:"download_url"`
+	Status           string `json:"status"`
+	ErrorMessage     string `json:"error_message"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
+}
+
 // ListDownloadPackages 列出所有下载包
 func (h *DownloadPackageHandler) ListDownloadPackages(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -89,8 +109,41 @@ func (h *DownloadPackageHandler) ListDownloadPackages(c *gin.Context) {
 		return
 	}
 
+	// 为每个下载包获取CloudFront状态
+	responses := make([]DownloadPackageResponse, len(packages))
+	for i, pkg := range packages {
+		responses[i] = DownloadPackageResponse{
+			ID:               pkg.ID,
+			DomainID:         pkg.DomainID,
+			DomainName:       pkg.DomainName,
+			FileName:         pkg.FileName,
+			FileSize:         pkg.FileSize,
+			FileType:         pkg.FileType,
+			S3Key:            pkg.S3Key,
+			CloudFrontID:     pkg.CloudFrontID,
+			CloudFrontDomain: pkg.CloudFrontDomain,
+			DownloadURL:      pkg.DownloadURL,
+			Status:           string(pkg.Status),
+			ErrorMessage:     pkg.ErrorMessage,
+			CreatedAt:        pkg.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:        pkg.UpdatedAt.Format(time.RFC3339),
+		}
+
+		// 获取CloudFront状态
+		if pkg.CloudFrontID != "" {
+			status, err := h.service.GetCloudFrontStatus(pkg.CloudFrontID)
+			if err != nil {
+				responses[i].CloudFrontStatus = "unknown"
+			} else {
+				responses[i].CloudFrontStatus = status
+			}
+		} else {
+			responses[i].CloudFrontStatus = ""
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"data":  packages,
+		"data":  responses,
 		"total": total,
 		"page":  page,
 		"size":  pageSize,

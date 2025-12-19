@@ -210,6 +210,24 @@ func (s *DownloadPackageService) GetDownloadPackage(id uint) (*models.DownloadPa
 	return &pkg, nil
 }
 
+// GetCloudFrontStatus 获取CloudFront分发状态
+func (s *DownloadPackageService) GetCloudFrontStatus(cloudFrontID string) (string, error) {
+	if cloudFrontID == "" {
+		return "", nil
+	}
+
+	dist, err := s.cloudFrontSvc.GetDistribution(cloudFrontID)
+	if err != nil {
+		return "", err
+	}
+
+	if dist == nil || dist.Status == nil {
+		return "", fmt.Errorf("无法获取分发状态")
+	}
+
+	return *dist.Status, nil
+}
+
 // ListDownloadPackages 列出所有下载包
 func (s *DownloadPackageService) ListDownloadPackages(page, pageSize int) ([]models.DownloadPackage, int64, error) {
 	var packages []models.DownloadPackage
