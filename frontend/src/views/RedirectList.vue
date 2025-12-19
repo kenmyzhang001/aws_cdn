@@ -52,11 +52,16 @@
                 {{ row.cloudfront_id }}
               </div>
               <div v-else style="color: #c0c4cc; font-size: 12px;">未绑定</div>
-              <div style="display: flex; align-items: center;">
+              <div style="display: flex; align-items: center; gap: 6px;">
                 <el-tag v-if="row.cloudfront_status" :type="getCloudFrontStatusType(row.cloudfront_status)" size="small">
                   {{ getCloudFrontStatusText(row.cloudfront_status) }}
                 </el-tag>
                 <span v-else style="color: #c0c4cc; font-size: 12px;">未部署</span>
+              </div>
+              <div v-if="row.cloudfront_id" style="display: flex; align-items: center;">
+                <el-tag :type="row.cloudfront_enabled ? 'success' : 'danger'" size="small">
+                  {{ row.cloudfront_enabled ? '已启用' : '已禁用' }}
+                </el-tag>
               </div>
             </div>
           </template>
@@ -263,6 +268,14 @@
             </el-tag>
             <span v-if="checkStatus.cloudfront_error" style="color: #f56c6c; margin-left: 10px">
               ({{ checkStatus.cloudfront_error }})
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFront启用状态">
+            <el-tag :type="checkStatus.cloudfront_enabled ? 'success' : 'danger'">
+              {{ checkStatus.cloudfront_enabled ? '已启用' : '已禁用' }}
+            </el-tag>
+            <span v-if="checkStatus.cloudfront_enabled_error" style="color: #f56c6c; margin-left: 10px">
+              ({{ checkStatus.cloudfront_enabled_error }})
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="Route 53 DNS记录">

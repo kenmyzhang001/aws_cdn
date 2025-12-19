@@ -192,23 +192,23 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 	// 5. 构建下载URL
 	downloadURL := fmt.Sprintf("https://%s/%s", pkg.DomainName, pkg.FileName)
 
-		// 确保 CloudFront 分发已启用
-		enabled := true
-		if err := s.cloudFrontSvc.UpdateDistribution(cloudFrontID, nil, "", &enabled); err != nil {
-			s.db.Model(pkg).Updates(map[string]interface{}{
-				"status":        models.DownloadPackageStatusFailed,
-				"error_message": fmt.Sprintf("启用CloudFront分发失败: %v", err),
-			})
-			return
-		}
-
-		// 更新下载包信息
+	// 确保 CloudFront 分发已启用
+	enabled := true
+	if err := s.cloudFrontSvc.UpdateDistribution(cloudFrontID, nil, "", &enabled); err != nil {
 		s.db.Model(pkg).Updates(map[string]interface{}{
-			"cloudfront_id":     cloudFrontID,
-			"cloudfront_domain": cloudFrontDomain,
-			"download_url":      downloadURL,
-			"status":            models.DownloadPackageStatusCompleted,
+			"status":        models.DownloadPackageStatusFailed,
+			"error_message": fmt.Sprintf("启用CloudFront分发失败: %v", err),
 		})
+		return
+	}
+
+	// 更新下载包信息
+	s.db.Model(pkg).Updates(map[string]interface{}{
+		"cloudfront_id":     cloudFrontID,
+		"cloudfront_domain": cloudFrontDomain,
+		"download_url":      downloadURL,
+		"status":            models.DownloadPackageStatusCompleted,
+	})
 }
 
 // GetDownloadPackage 获取下载包信息
@@ -306,21 +306,21 @@ func (s *DownloadPackageService) DeleteDownloadPackage(id uint) error {
 
 // DownloadPackageStatus 下载包检查状态
 type DownloadPackageStatus struct {
-	PackageExists         bool     `json:"package_exists"`
-	S3FileExists          bool     `json:"s3_file_exists"`
-	S3FileError           string   `json:"s3_file_error,omitempty"`
-	CloudFrontExists      bool     `json:"cloudfront_exists"`
-	CloudFrontError       string   `json:"cloudfront_error,omitempty"`
-	CloudFrontEnabled     bool     `json:"cloudfront_enabled"`
-	CloudFrontEnabledError string  `json:"cloudfront_enabled_error,omitempty"`
-	Route53DNSConfigured  bool     `json:"route53_dns_configured"`
-	Route53DNSError       string   `json:"route53_dns_error,omitempty"`
-	DownloadURLAccessible bool     `json:"download_url_accessible"`
-	DownloadURLError      string   `json:"download_url_error,omitempty"`
-	CertificateFound      bool     `json:"certificate_found"`
-	CertificateARN        string   `json:"certificate_arn,omitempty"`
-	Issues                []string `json:"issues"`
-	CanFix                bool     `json:"can_fix"`
+	PackageExists          bool     `json:"package_exists"`
+	S3FileExists           bool     `json:"s3_file_exists"`
+	S3FileError            string   `json:"s3_file_error,omitempty"`
+	CloudFrontExists       bool     `json:"cloudfront_exists"`
+	CloudFrontError        string   `json:"cloudfront_error,omitempty"`
+	CloudFrontEnabled      bool     `json:"cloudfront_enabled"`
+	CloudFrontEnabledError string   `json:"cloudfront_enabled_error,omitempty"`
+	Route53DNSConfigured   bool     `json:"route53_dns_configured"`
+	Route53DNSError        string   `json:"route53_dns_error,omitempty"`
+	DownloadURLAccessible  bool     `json:"download_url_accessible"`
+	DownloadURLError       string   `json:"download_url_error,omitempty"`
+	CertificateFound       bool     `json:"certificate_found"`
+	CertificateARN         string   `json:"certificate_arn,omitempty"`
+	Issues                 []string `json:"issues"`
+	CanFix                 bool     `json:"can_fix"`
 }
 
 // CheckDownloadPackage 检查下载包状态
@@ -535,17 +535,17 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 	// 构建下载URL
 	downloadURL := fmt.Sprintf("https://%s/%s", pkg.DomainName, pkg.FileName)
 
-		// 确保 CloudFront 分发已启用
-		enabled := true
-		if err := s.cloudFrontSvc.UpdateDistribution(pkg.CloudFrontID, nil, "", &enabled); err != nil {
-			return fmt.Errorf("启用CloudFront分发失败: %w", err)
-		}
+	// 确保 CloudFront 分发已启用
+	enabled := true
+	if err := s.cloudFrontSvc.UpdateDistribution(pkg.CloudFrontID, nil, "", &enabled); err != nil {
+		return fmt.Errorf("启用CloudFront分发失败: %w", err)
+	}
 
-		// 更新下载包状态和信息
-		s.db.Model(pkg).Updates(map[string]interface{}{
-			"download_url": downloadURL,
-			"status":       models.DownloadPackageStatusCompleted,
-		})
+	// 更新下载包状态和信息
+	s.db.Model(pkg).Updates(map[string]interface{}{
+		"download_url": downloadURL,
+		"status":       models.DownloadPackageStatusCompleted,
+	})
 
-		return nil
+	return nil
 }

@@ -27,12 +27,21 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="cloudfront_status" label="CloudFront状态" width="120">
+        <el-table-column label="CloudFront状态" width="180">
           <template #default="{ row }">
-            <el-tag v-if="row.cloudfront_status" :type="getCloudFrontStatusType(row.cloudfront_status)">
-              {{ getCloudFrontStatusText(row.cloudfront_status) }}
-            </el-tag>
-            <span v-else style="color: #909399">-</span>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div v-if="row.cloudfront_status">
+                <el-tag :type="getCloudFrontStatusType(row.cloudfront_status)" size="small">
+                  {{ getCloudFrontStatusText(row.cloudfront_status) }}
+                </el-tag>
+              </div>
+              <div v-else style="color: #909399; font-size: 12px">未部署</div>
+              <div v-if="row.cloudfront_id">
+                <el-tag :type="row.cloudfront_enabled ? 'success' : 'danger'" size="small">
+                  {{ row.cloudfront_enabled ? '已启用' : '已禁用' }}
+                </el-tag>
+              </div>
+            </div>
           </template>
         </el-table-column>
         <el-table-column prop="download_url" label="下载URL">
@@ -174,6 +183,14 @@
             </el-tag>
             <span v-if="checkStatus.cloudfront_error" style="color: #f56c6c; margin-left: 10px">
               {{ checkStatus.cloudfront_error }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFront启用状态">
+            <el-tag :type="checkStatus.cloudfront_enabled ? 'success' : 'danger'">
+              {{ checkStatus.cloudfront_enabled ? '已启用' : '已禁用' }}
+            </el-tag>
+            <span v-if="checkStatus.cloudfront_enabled_error" style="color: #f56c6c; margin-left: 10px">
+              {{ checkStatus.cloudfront_enabled_error }}
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="Route53 DNS记录">

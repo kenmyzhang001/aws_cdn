@@ -91,7 +91,7 @@ type DownloadPackageResponse struct {
 	CloudFrontID      string `json:"cloudfront_id"`
 	CloudFrontDomain  string `json:"cloudfront_domain"`
 	CloudFrontStatus  string `json:"cloudfront_status"`  // CloudFront部署状态
-	CloudFrontEnabled bool   `json:"cloudfront_enabled"`  // CloudFront启用状态
+	CloudFrontEnabled bool   `json:"cloudfront_enabled"` // CloudFront启用状态
 	DownloadURL       string `json:"download_url"`
 	Status            string `json:"status"`
 	ErrorMessage      string `json:"error_message"`
