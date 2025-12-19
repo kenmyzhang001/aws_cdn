@@ -443,6 +443,25 @@ func (s *RedirectService) CheckWWWCNAMERecordStatus(domainName string) string {
 	return "not_configured"
 }
 
+// CheckS3BucketPolicyStatus 检查 S3 bucket policy 状态
+// 返回 "configured"（已配置）、"not_configured"（未配置）或 "error"（错误）
+func (s *RedirectService) CheckS3BucketPolicyStatus() string {
+	if s.config.S3BucketName == "" {
+		return "not_configured"
+	}
+
+	policyConfigured, err := s.s3Svc.CheckBucketPolicyForPublicAccess(s.config.S3BucketName)
+	if err != nil {
+		return "error"
+	}
+
+	if policyConfigured {
+		return "configured"
+	}
+
+	return "not_configured"
+}
+
 // createRoute53RecordForCloudFront 为 CloudFront 分发创建 Route 53 DNS 记录
 // 如果记录已存在，会更新为指向正确的 CloudFront 分发
 func (s *RedirectService) createRoute53RecordForCloudFront(domainName, distributionID string) error {

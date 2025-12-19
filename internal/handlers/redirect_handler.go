@@ -101,6 +101,12 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 			ruleMap["certificate_status"] = certStatus
 		}
 
+		// 检查 S3 bucket policy 状态
+		s3BucketPolicyStatus := h.service.CheckS3BucketPolicyStatus()
+		if s3BucketPolicyStatus != "" {
+			ruleMap["s3_bucket_policy_status"] = s3BucketPolicyStatus
+		}
+
 		// 查询 Route 53 DNS 记录状态（验证是否指向正确的 CloudFront）
 		if rule.CloudFrontID != "" {
 			dnsStatus := h.service.CheckRoute53RecordStatus(rule.SourceDomain, rule.CloudFrontID)
