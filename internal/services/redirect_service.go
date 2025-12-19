@@ -223,12 +223,32 @@ type CreateRedirectRuleResult struct {
 	Warnings []string
 }
 
+// CheckDomainUsedByDownloadPackage 检查域名是否被下载包使用（排除软删除的记录）
+func (s *RedirectService) CheckDomainUsedByDownloadPackage(domainName string) (bool, error) {
+	var count int64
+	if err := s.db.Model(&models.DownloadPackage{}).
+		Where("domain_name = ?", domainName).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // CreateRedirectRule 创建重定向规则并自动部署
 func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []string, certificateARN string) (*CreateRedirectRuleResult, error) {
 	// 检查源域名是否已存在（排除软删除的记录）
 	var existingRule models.RedirectRule
 	if err := s.db.Where("source_domain = ?", sourceDomain).First(&existingRule).Error; err == nil {
 		return nil, fmt.Errorf("源域名 %s 的重定向规则已存在", sourceDomain)
+	}
+
+	// 检查域名是否已被下载包使用
+	isUsed, err := s.CheckDomainUsedByDownloadPackage(sourceDomain)
+	if err != nil {
+		return nil, fmt.Errorf("检查域名使用状态失败: %w", err)
+	}
+	if isUsed {
+		return nil, fmt.Errorf("域名 %s 已被下载包使用，请先删除下载包后再使用", sourceDomain)
 	}
 
 	// 检查是否存在软删除的记录，如果存在则先真正删除它

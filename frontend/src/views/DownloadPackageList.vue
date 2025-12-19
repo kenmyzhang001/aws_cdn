@@ -81,10 +81,10 @@
     <!-- 上传下载包对话框 -->
     <el-dialog v-model="showUploadDialog" title="上传下载包" width="600px">
       <el-form :model="uploadForm" label-width="120px" :rules="uploadRules" ref="uploadFormRef">
-        <el-form-item label="选择域名" prop="domain_id" required>
+        <el-form-item label="选择下载域名" prop="domain_id" required>
           <el-select
             v-model="uploadForm.domain_id"
-            placeholder="请选择域名"
+            placeholder="请选择已签发证书的域名"
             style="width: 100%"
             filterable
           >
@@ -93,30 +93,12 @@
               :key="domain.id"
               :label="domain.domain_name"
               :value="domain.id"
-              :disabled="domain.certificate_status !== 'issued'"
             >
               <span>{{ domain.domain_name }}</span>
-              <el-tag
-                v-if="domain.certificate_status !== 'issued'"
-                size="small"
-                type="warning"
-                style="margin-left: 10px"
-              >
-                证书未签发
-              </el-tag>
             </el-option>
           </el-select>
           <div style="margin-top: 5px; color: #909399; font-size: 12px">
-            只能选择证书已签发的域名
-          </div>
-        </el-form-item>
-        <el-form-item label="下载域名" prop="domain_name" required>
-          <el-input
-            v-model="uploadForm.domain_name"
-            placeholder="例如: download.example.com"
-          />
-          <div style="margin-top: 5px; color: #909399; font-size: 12px">
-            用于访问下载文件的域名，需要是已转入的域名或其子域名
+            选择已签发证书的域名作为下载域名
           </div>
         </el-form-item>
         <el-form-item label="选择文件" prop="file" required>
@@ -164,7 +146,6 @@ const showUploadDialog = ref(false)
 const uploadLoading = ref(false)
 const uploadForm = ref({
   domain_id: '',
-  domain_name: '',
 })
 const uploadFormRef = ref(null)
 const fileList = ref([])
@@ -172,8 +153,7 @@ const selectedFile = ref(null)
 const availableDomains = ref([])
 
 const uploadRules = {
-  domain_id: [{ required: true, message: '请选择域名', trigger: 'change' }],
-  domain_name: [{ required: true, message: '请输入下载域名', trigger: 'blur' }],
+  domain_id: [{ required: true, message: '请选择下载域名', trigger: 'change' }],
   file: [{ required: true, message: '请选择文件', trigger: 'change' }],
 }
 
@@ -232,7 +212,6 @@ const handleUpload = async () => {
     try {
       const formData = new FormData()
       formData.append('domain_id', uploadForm.value.domain_id)
-      formData.append('domain_name', uploadForm.value.domain_name)
       formData.append('file_name', uploadForm.value.file_name)
       formData.append('file', selectedFile.value)
 
@@ -246,7 +225,6 @@ const handleUpload = async () => {
       showUploadDialog.value = false
       uploadForm.value = {
         domain_id: '',
-        domain_name: '',
       }
       fileList.value = []
       selectedFile.value = null

@@ -41,6 +41,17 @@ func NewDownloadPackageService(
 	}
 }
 
+// CheckDomainUsedByRedirect 检查域名是否被重定向规则使用（排除软删除的记录）
+func (s *DownloadPackageService) CheckDomainUsedByRedirect(domainName string) (bool, error) {
+	var count int64
+	if err := s.db.Model(&models.RedirectRule{}).
+		Where("source_domain = ?", domainName).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // CreateDownloadPackage 创建下载包
 // 1. 上传文件到S3
 // 2. 创建CloudFront分发
@@ -59,6 +70,15 @@ func (s *DownloadPackageService) CreateDownloadPackage(domainID uint, fileName s
 
 	// 使用域名的domain_name作为下载域名
 	domainName := domain.DomainName
+
+	// 检查域名是否已被重定向规则使用
+	isUsed, err := s.CheckDomainUsedByRedirect(domainName)
+	if err != nil {
+		return nil, fmt.Errorf("检查域名使用状态失败: %w", err)
+	}
+	if isUsed {
+		return nil, fmt.Errorf("域名 %s 已被重定向规则使用，请先删除重定向规则后再使用", domainName)
+	}
 
 	// 生成S3键（使用downloads/前缀）
 	s3Key := fmt.Sprintf("downloads/%s/%s", domainName, fileName)
