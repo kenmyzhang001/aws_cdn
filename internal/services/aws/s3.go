@@ -405,3 +405,122 @@ func (s *S3Service) CheckBucketPolicyForPublicAccess(bucketName string) (bool, e
 
 	return false, nil
 }
+
+// EnsureBucketPolicyForDownloads 确保存储桶策略允许公开访问 downloads/* 路径
+func (s *S3Service) EnsureBucketPolicyForDownloads(bucketName string) error {
+	// 首先确保 Block Public Access 设置允许公共策略
+	if err := s.EnsurePublicAccessBlockDisabled(bucketName); err != nil {
+		return fmt.Errorf("配置 Block Public Access 设置失败: %w", err)
+	}
+
+	// 获取现有的 bucket policy
+	getPolicyInput := &s3.GetBucketPolicyInput{
+		Bucket: aws.String(bucketName),
+	}
+	existingPolicy, err := s.client.GetBucketPolicy(getPolicyInput)
+	
+	var policy map[string]interface{}
+	var statements []map[string]interface{}
+
+	if err == nil && existingPolicy.Policy != nil {
+		// 如果已有 policy，解析并合并
+		existingPolicyStr := *existingPolicy.Policy
+		if err := json.Unmarshal([]byte(existingPolicyStr), &policy); err == nil {
+			if existingStatements, ok := policy["Statement"].([]interface{}); ok {
+				// 检查是否已包含 downloads/* 的访问规则
+				hasDownloadsPolicy := false
+				for _, stmt := range existingStatements {
+					if stmtMap, ok := stmt.(map[string]interface{}); ok {
+						if resource, ok := stmtMap["Resource"].(string); ok {
+							if strings.Contains(resource, "downloads/*") {
+								hasDownloadsPolicy = true
+								break
+							}
+						}
+					}
+				}
+				if hasDownloadsPolicy {
+					// 已包含 downloads/* 的访问规则，不需要更新
+					return nil
+				}
+				// 转换现有 statements
+				for _, stmt := range existingStatements {
+					if stmtMap, ok := stmt.(map[string]interface{}); ok {
+						statements = append(statements, stmtMap)
+					}
+				}
+			}
+		}
+	}
+
+	// 添加 downloads/* 路径的访问规则
+	statements = append(statements, map[string]interface{}{
+		"Sid":    "PublicReadAccessDownloads",
+		"Effect": "Allow",
+		"Principal": map[string]interface{}{
+			"AWS": "*",
+		},
+		"Action":   "s3:GetObject",
+		"Resource": fmt.Sprintf("arn:aws:s3:::%s/downloads/*", bucketName),
+	})
+	statements = append(statements, map[string]interface{}{
+		"Sid":    "PublicReadAccessDownloadsSubdirs",
+		"Effect": "Allow",
+		"Principal": map[string]interface{}{
+			"AWS": "*",
+		},
+		"Action":   "s3:GetObject",
+		"Resource": fmt.Sprintf("arn:aws:s3:::%s/downloads/*/*", bucketName),
+	})
+
+	// 构建新的 policy
+	policy = map[string]interface{}{
+		"Version":   "2012-10-17",
+		"Statement": statements,
+	}
+
+	policyJSON, err := json.Marshal(policy)
+	if err != nil {
+		return fmt.Errorf("序列化 bucket policy 失败: %w", err)
+	}
+
+	policyString := string(policyJSON)
+
+	// 设置 bucket policy
+	putPolicyInput := &s3.PutBucketPolicyInput{
+		Bucket: aws.String(bucketName),
+		Policy: aws.String(policyString),
+	}
+
+	_, err = s.client.PutBucketPolicy(putPolicyInput)
+	if err != nil {
+		return fmt.Errorf("设置 bucket policy 失败: %w", err)
+	}
+
+	return nil
+}
+
+// CheckBucketPolicyForDownloads 检查存储桶策略是否允许公开访问 downloads/* 路径
+func (s *S3Service) CheckBucketPolicyForDownloads(bucketName string) (bool, error) {
+	// 检查是否已有 bucket policy
+	getPolicyInput := &s3.GetBucketPolicyInput{
+		Bucket: aws.String(bucketName),
+	}
+	existingPolicy, err := s.client.GetBucketPolicy(getPolicyInput)
+	if err != nil {
+		// 如果没有 policy 或获取失败，返回 false
+		return false, nil
+	}
+
+	if existingPolicy.Policy == nil {
+		return false, nil
+	}
+
+	// 检查 policy 是否包含 downloads/* 的访问规则
+	existingPolicyStr := *existingPolicy.Policy
+	if strings.Contains(existingPolicyStr, "downloads/*") {
+		return true, nil
+	}
+
+	return false, nil
+}

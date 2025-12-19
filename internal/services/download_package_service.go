@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -108,6 +109,17 @@ func (s *DownloadPackageService) CreateDownloadPackage(domainID uint, fileName s
 func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.DownloadPackage, fileReader io.ReadSeeker, domain *models.Domain) {
 	// 更新状态为上传中
 	s.db.Model(pkg).Update("status", models.DownloadPackageStatusUploading)
+
+	// 确保 S3 bucket policy 允许公开访问 downloads/* 路径
+	if s.config.S3BucketName != "" {
+		if err := s.s3Svc.EnsureBucketPolicyForDownloads(s.config.S3BucketName); err != nil {
+			s.db.Model(pkg).Updates(map[string]interface{}{
+				"status":        models.DownloadPackageStatusFailed,
+				"error_message": fmt.Sprintf("配置 S3 bucket policy 失败: %v", err),
+			})
+			return
+		}
+	}
 
 	// 1. 上传文件到S3
 	// 确保文件读取器位置在开始
@@ -413,8 +425,27 @@ func (s *DownloadPackageService) CheckDownloadPackage(id uint) (*DownloadPackage
 
 	// 检查下载URL是否可访问（如果已配置）
 	if pkg.DownloadURL != "" {
-		// 这里可以添加HTTP请求检查，但为了简化，暂时只检查URL格式
-		status.DownloadURLAccessible = true // 假设URL格式正确即可
+		// 实际测试下载 URL 的可访问性
+		client := &http.Client{
+			Timeout: 10 * time.Second,
+		}
+
+		resp, err := client.Head(pkg.DownloadURL)
+		if err != nil {
+			status.DownloadURLError = fmt.Sprintf("无法访问下载URL: %v", err)
+			status.Issues = append(status.Issues, fmt.Sprintf("下载URL无法访问: %v", err))
+		} else {
+			defer resp.Body.Close()
+			if resp.StatusCode == 200 || resp.StatusCode == 206 {
+				status.DownloadURLAccessible = true
+			} else if resp.StatusCode == 403 {
+				status.DownloadURLError = fmt.Sprintf("访问被拒绝 (HTTP %d)，可能是S3 bucket policy配置问题", resp.StatusCode)
+				status.Issues = append(status.Issues, "下载URL返回403错误，可能是S3 bucket policy配置问题")
+			} else {
+				status.DownloadURLError = fmt.Sprintf("返回错误状态码: HTTP %d", resp.StatusCode)
+				status.Issues = append(status.Issues, fmt.Sprintf("下载URL返回错误状态码: HTTP %d", resp.StatusCode))
+			}
+		}
 	} else {
 		status.Issues = append(status.Issues, "下载URL未配置")
 	}
@@ -462,6 +493,13 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 					}
 				}
 			}
+		}
+	}
+
+	// 确保 S3 bucket policy 允许公开访问 downloads/* 路径
+	if s.config.S3BucketName != "" {
+		if err := s.s3Svc.EnsureBucketPolicyForDownloads(s.config.S3BucketName); err != nil {
+			return fmt.Errorf("配置 S3 bucket policy 失败: %w", err)
 		}
 	}
 
