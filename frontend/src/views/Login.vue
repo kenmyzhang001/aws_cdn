@@ -30,7 +30,7 @@
             @keyup.enter="handleLogin"
           />
         </el-form-item>
-        <el-form-item label="验证码" prop="otpCode" v-if="needOTP">
+        <el-form-item label="验证码" prop="otpCode" >
           <el-input
             v-model="loginForm.otpCode"
             placeholder="请输入谷歌验证码（如已启用）"

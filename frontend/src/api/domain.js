@@ -40,6 +40,16 @@ export const domainApi = {
   deleteDomain(id) {
     return request.delete(`/domains/${id}`)
   },
+
+  // 检查证书配置
+  checkCertificate(id) {
+    return request.get(`/domains/${id}/certificate/check`)
+  },
+
+  // 修复证书配置
+  fixCertificate(id) {
+    return request.post(`/domains/${id}/certificate/fix`)
+  },
 }
 
 

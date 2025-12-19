@@ -29,7 +29,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="350">
+        <el-table-column label="操作" width="450">
           <template #default="{ row }">
             <el-button size="small" @click="viewNServers(row)">查看 NS</el-button>
             <el-button
@@ -39,6 +39,14 @@
               :disabled="row.certificate_status === 'issued'"
             >
               生成证书
+            </el-button>
+            <el-button
+              size="small"
+              type="warning"
+              @click="checkCertificate(row)"
+              :loading="row.checking"
+            >
+              检查
             </el-button>
             <el-button size="small" @click="refreshStatus(row)">刷新状态</el-button>
             <el-button
@@ -99,6 +107,73 @@
         <el-button @click="showNSDialog = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 证书检查结果对话框 -->
+    <el-dialog v-model="showCheckDialog" title="证书检查结果" width="700px">
+      <div v-if="checkResult">
+        <el-alert
+          :type="checkResult.has_issues ? 'warning' : 'success'"
+          :closable="false"
+          style="margin-bottom: 20px"
+        >
+          <template #title>
+            <span>{{ checkResult.has_issues ? '发现问题' : '检查通过' }}</span>
+          </template>
+        </el-alert>
+
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="证书状态">
+            <el-tag :type="getCertificateStatusType(checkResult.certificate_status)">
+              {{ getCertificateStatusText(checkResult.certificate_status) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="证书是否存在">
+            {{ checkResult.certificate_exists ? '是' : '否' }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <div v-if="checkResult.validation_records && checkResult.validation_records.length > 0" style="margin-top: 20px">
+          <h4>验证记录：</h4>
+          <el-table :data="checkResult.validation_records.map(r => ({ record: r }))" border style="margin-top: 10px">
+            <el-table-column label="CNAME 记录" prop="record" />
+          </el-table>
+        </div>
+
+        <div v-if="checkResult.missing_cname_records && checkResult.missing_cname_records.length > 0" style="margin-top: 20px">
+          <h4 style="color: #e6a23c">缺失的 CNAME 记录：</h4>
+          <el-table :data="checkResult.missing_cname_records.map(r => ({ record: r }))" border style="margin-top: 10px">
+            <el-table-column label="CNAME 记录" prop="record" />
+          </el-table>
+        </div>
+
+        <div v-if="checkResult.incorrect_cname_records && checkResult.incorrect_cname_records.length > 0" style="margin-top: 20px">
+          <h4 style="color: #f56c6c">值不正确的 CNAME 记录：</h4>
+          <el-table :data="checkResult.incorrect_cname_records.map(r => ({ record: r }))" border style="margin-top: 10px">
+            <el-table-column label="CNAME 记录" prop="record" />
+          </el-table>
+        </div>
+
+        <div v-if="checkResult.issues && checkResult.issues.length > 0" style="margin-top: 20px">
+          <h4 style="color: #f56c6c">问题列表：</h4>
+          <ul style="margin-top: 10px; padding-left: 20px">
+            <li v-for="(issue, index) in checkResult.issues" :key="index" style="margin-bottom: 5px">
+              {{ issue }}
+            </li>
+          </ul>
+        </div>
+      </div>
+      <template #footer>
+        <el-button
+          v-if="checkResult && checkResult.has_issues"
+          type="primary"
+          @click="fixCertificate"
+          :loading="fixing"
+        >
+          修复
+        </el-button>
+        <el-button @click="showCheckDialog = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -124,6 +199,11 @@ const transferForm = ref({
 const showNSDialog = ref(false)
 const nsServers = ref([])
 const currentDomainId = ref(null)
+
+const showCheckDialog = ref(false)
+const checkResult = ref(null)
+const currentCheckDomainId = ref(null)
+const fixing = ref(false)
 
 onMounted(() => {
   loadDomains()
@@ -279,6 +359,43 @@ const getCertificateStatusText = (status) => {
     not_requested: '未申请',
   }
   return map[status] || status || '未知'
+}
+
+const checkCertificate = async (row) => {
+  // 设置检查状态
+  row.checking = true
+  currentCheckDomainId.value = row.id
+
+  try {
+    const res = await domainApi.checkCertificate(row.id)
+    checkResult.value = res
+    showCheckDialog.value = true
+  } catch (error) {
+    ElMessage.error('检查证书配置失败')
+  } finally {
+    row.checking = false
+  }
+}
+
+const fixCertificate = async () => {
+  if (!currentCheckDomainId.value) {
+    return
+  }
+
+  fixing.value = true
+  try {
+    await domainApi.fixCertificate(currentCheckDomainId.value)
+    ElMessage.success('证书修复请求已提交，请稍后查看状态')
+    showCheckDialog.value = false
+    // 刷新列表
+    setTimeout(() => {
+      loadDomains()
+    }, 2000)
+  } catch (error) {
+    // 错误已在拦截器中处理
+  } finally {
+    fixing.value = false
+  }
 }
 </script>
 
