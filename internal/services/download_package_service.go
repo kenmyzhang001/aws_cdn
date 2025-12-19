@@ -325,6 +325,10 @@ type DownloadPackageStatus struct {
 	CloudFrontError        string   `json:"cloudfront_error,omitempty"`
 	CloudFrontEnabled      bool     `json:"cloudfront_enabled"`
 	CloudFrontEnabledError string   `json:"cloudfront_enabled_error,omitempty"`
+	CloudFrontOriginPathMatch bool  `json:"cloudfront_origin_path_match"`
+	CloudFrontOriginPathError string `json:"cloudfront_origin_path_error,omitempty"`
+	CloudFrontOriginPathCurrent string `json:"cloudfront_origin_path_current,omitempty"`
+	CloudFrontOriginPathExpected string `json:"cloudfront_origin_path_expected,omitempty"`
 	Route53DNSConfigured   bool     `json:"route53_dns_configured"`
 	Route53DNSError        string   `json:"route53_dns_error,omitempty"`
 	DownloadURLAccessible  bool     `json:"download_url_accessible"`
@@ -396,6 +400,32 @@ func (s *DownloadPackageService) CheckDownloadPackage(id uint) (*DownloadPackage
 				status.Issues = append(status.Issues, "CloudFront分发已禁用，需要启用后才能正常使用")
 			} else {
 				status.CloudFrontEnabled = true
+			}
+
+			// 检查 CloudFront OriginPath 是否匹配
+			// 计算期望的 originPath
+			expectedOriginPath := ""
+			if strings.Contains(pkg.S3Key, "/") {
+				parts := strings.Split(pkg.S3Key, "/")
+				if len(parts) > 1 {
+					expectedOriginPath = "/" + strings.Join(parts[:len(parts)-1], "/")
+				}
+			}
+			status.CloudFrontOriginPathExpected = expectedOriginPath
+
+			// 获取当前的 OriginPath
+			currentOriginPath, err := s.cloudFrontSvc.GetDistributionOriginPath(pkg.CloudFrontID)
+			if err != nil {
+				status.CloudFrontOriginPathError = fmt.Sprintf("获取 CloudFront OriginPath 失败: %v", err)
+				status.Issues = append(status.Issues, "检查 CloudFront OriginPath 失败")
+			} else {
+				status.CloudFrontOriginPathCurrent = currentOriginPath
+				if currentOriginPath != expectedOriginPath {
+					status.CloudFrontOriginPathError = fmt.Sprintf("OriginPath 不匹配: 当前=%s, 期望=%s", currentOriginPath, expectedOriginPath)
+					status.Issues = append(status.Issues, fmt.Sprintf("CloudFront OriginPath 不匹配，当前指向 %s，期望指向 %s", currentOriginPath, expectedOriginPath))
+				} else {
+					status.CloudFrontOriginPathMatch = true
+				}
 			}
 
 			// 检查 Route 53 DNS 记录是否指向正确的 CloudFront
