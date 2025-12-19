@@ -443,6 +443,12 @@ func (s *CloudFrontService) UpdateDistribution(distributionID string, aliases []
 		config.Enabled = aws.Bool(*enabled)
 	}
 
+	// 确保 DefaultRootObject 被设置（如果未设置，设置为 "index.html"）
+	// 这对于重定向规则很重要，确保访问根路径时能自动返回 index.html
+	if config.DefaultRootObject == nil || *config.DefaultRootObject == "" {
+		config.DefaultRootObject = aws.String("index.html")
+	}
+
 	updateInput := &cloudfront.UpdateDistributionInput{
 		Id:                 aws.String(distributionID),
 		DistributionConfig: config,
@@ -544,6 +550,12 @@ func (s *CloudFrontService) UpdateDistributionOriginPath(distributionID string, 
 		} else {
 			config.Origins.Items[0].OriginPath = aws.String(path)
 		}
+	}
+
+	// 确保 DefaultRootObject 设置为 "index.html"（用于重定向规则）
+	// 这样访问根路径时会自动返回 index.html
+	if config.DefaultRootObject == nil || *config.DefaultRootObject != "index.html" {
+		config.DefaultRootObject = aws.String("index.html")
 	}
 
 	updateInput := &cloudfront.UpdateDistributionInput{
