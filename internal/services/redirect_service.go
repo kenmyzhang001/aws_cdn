@@ -160,6 +160,22 @@ func (s *RedirectService) deployRedirectRule(rule *models.RedirectRule, certific
 
 	// 获取S3域名
 	s3Origin := s.s3Svc.GetBucketDomain(s.config.S3BucketName)
+	if s3Origin == "" {
+		return fmt.Errorf("无法获取S3存储桶域名")
+	}
+
+	// 验证 S3 bucket 是否可访问（通过检查 bucket 是否存在）
+	exists, err := s.s3Svc.BucketExists(s.config.S3BucketName)
+	if err != nil {
+		return fmt.Errorf("验证S3存储桶可访问性失败: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("S3存储桶 %s 不存在或不可访问", s.config.S3BucketName)
+	}
+
+	// 输出调试信息
+	fmt.Printf("创建CloudFront分发 - S3 Bucket: %s, S3 Origin: %s, Region: %s\n",
+		s.config.S3BucketName, s3Origin, s.config.Region)
 
 	// S3目录路径（OriginPath会在CreateDistributionWithPath中自动格式化）
 	s3Path := fmt.Sprintf("redirects/%s", rule.SourceDomain)

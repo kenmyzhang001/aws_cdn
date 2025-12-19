@@ -57,6 +57,16 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 	callerRef := fmt.Sprintf("%s-%d", domainName, time.Now().Unix())
 	originId := fmt.Sprintf("S3-%s-%s", s.config.S3BucketName, domainName)
 
+	// 验证 S3 origin 域名格式
+	if s3Origin == "" {
+		return "", fmt.Errorf("S3 origin 域名不能为空")
+	}
+
+	// 验证域名格式（应该是 bucket.s3.region.amazonaws.com 或 bucket.s3.amazonaws.com）
+	if !strings.Contains(s3Origin, ".s3") || !strings.HasSuffix(s3Origin, ".amazonaws.com") {
+		return "", fmt.Errorf("S3 origin 域名格式不正确: %s，应该是 bucket.s3.region.amazonaws.com 或 bucket.s3.amazonaws.com 格式", s3Origin)
+	}
+
 	origin := &cloudfront.Origin{
 		Id:         aws.String(originId),
 		DomainName: aws.String(s3Origin),
@@ -130,7 +140,8 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 
 	result, err := s.client.CreateDistribution(input)
 	if err != nil {
-		return "", fmt.Errorf("创建 CloudFront 分发失败: %w", err)
+		// 提供更详细的错误信息，包括使用的 origin 域名
+		return "", fmt.Errorf("创建 CloudFront 分发失败 (Origin: %s, OriginPath: %s): %w", s3Origin, originPath, err)
 	}
 
 	return *result.Distribution.Id, nil
