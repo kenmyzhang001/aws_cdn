@@ -150,12 +150,12 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 	// 3. 检查该域名是否已有CloudFront分发（用于支持同一域名下多个文件）
 	var cloudFrontID string
 	var cloudFrontDomain string
-	
+
 	// 查找该域名下是否已有其他下载包（已完成状态）
 	var existingPackage models.DownloadPackage
 	err := s.db.Where("domain_name = ? AND cloudfront_id != '' AND status = ?", pkg.DomainName, models.DownloadPackageStatusCompleted).
 		First(&existingPackage).Error
-	
+
 	if err == nil && existingPackage.CloudFrontID != "" {
 		// 已存在该域名的CloudFront分发，复用它
 		cloudFrontID = existingPackage.CloudFrontID

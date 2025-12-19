@@ -6,6 +6,13 @@ export const downloadPackageApi = {
     return request.get('/download-packages', { params })
   },
 
+  // 获取指定域名下的所有下载包
+  getDownloadPackagesByDomain(domainId) {
+    return request.get('/download-packages/by-domain', {
+      params: { domain_id: domainId },
+    })
+  },
+
   // 获取下载包详情
   getDownloadPackage(id) {
     return request.get(`/download-packages/${id}`)
