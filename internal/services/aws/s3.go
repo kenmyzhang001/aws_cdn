@@ -318,30 +318,81 @@ func (s *S3Service) EnsureBucketPolicyForPublicAccess(bucketName string) error {
 		return fmt.Errorf("配置 Block Public Access 设置失败: %w", err)
 	}
 
-	// 构建 bucket policy，允许公开访问 redirects/* 路径（包括所有子路径）
-	// 使用两个 Statement 来确保覆盖所有可能的路径格式
-	policy := map[string]interface{}{
-		"Version": "2012-10-17",
-		"Statement": []map[string]interface{}{
-			{
-				"Sid":    "PublicReadAccessRedirects",
-				"Effect": "Allow",
-				"Principal": map[string]interface{}{
-					"AWS": "*",
-				},
-				"Action":   "s3:GetObject",
-				"Resource": fmt.Sprintf("arn:aws:s3:::%s/redirects/*", bucketName),
-			},
-			{
-				"Sid":    "PublicReadAccessRedirectsSubdirs",
-				"Effect": "Allow",
-				"Principal": map[string]interface{}{
-					"AWS": "*",
-				},
-				"Action":   "s3:GetObject",
-				"Resource": fmt.Sprintf("arn:aws:s3:::%s/redirects/*/*", bucketName),
-			},
+	// 检查是否已有 bucket policy，如果有则合并而不是替换
+	getPolicyInput := &s3.GetBucketPolicyInput{
+		Bucket: aws.String(bucketName),
+	}
+	existingPolicy, err := s.client.GetBucketPolicy(getPolicyInput)
+
+	var statements []map[string]interface{}
+
+	if err == nil && existingPolicy.Policy != nil {
+		// 如果已有 policy，解析并合并
+		existingPolicyStr := *existingPolicy.Policy
+		var existingPolicyMap map[string]interface{}
+		if err := json.Unmarshal([]byte(existingPolicyStr), &existingPolicyMap); err == nil {
+			if existingStatements, ok := existingPolicyMap["Statement"].([]interface{}); ok {
+				// 检查是否已包含 redirects/* 的访问规则
+				hasRedirectsPolicy := false
+				for _, stmt := range existingStatements {
+					if stmtMap, ok := stmt.(map[string]interface{}); ok {
+						if resource, ok := stmtMap["Resource"].(string); ok {
+							if strings.Contains(resource, "redirects/*") {
+								hasRedirectsPolicy = true
+								break
+							}
+						}
+					}
+				}
+				if hasRedirectsPolicy {
+					// 已包含 redirects/* 的访问规则，不需要更新
+					return nil
+				}
+				// 转换现有 statements
+				for _, stmt := range existingStatements {
+					if stmtMap, ok := stmt.(map[string]interface{}); ok {
+						statements = append(statements, stmtMap)
+					}
+				}
+			}
+		}
+	}
+
+	// 添加 redirects/* 路径的访问规则（包括所有子路径和文件）
+	// 使用多个 Statement 来确保覆盖所有可能的路径格式
+	// 注意：S3 bucket policy 的 Resource ARN 支持通配符，但需要明确指定所有可能的路径模式
+	statements = append(statements, map[string]interface{}{
+		"Sid":    "PublicReadAccessRedirectsAll",
+		"Effect": "Allow",
+		"Principal": map[string]interface{}{
+			"AWS": "*",
 		},
+		"Action":   "s3:GetObject",
+		"Resource": fmt.Sprintf("arn:aws:s3:::%s/redirects/*", bucketName),
+	})
+	statements = append(statements, map[string]interface{}{
+		"Sid":    "PublicReadAccessRedirectsSubdirs",
+		"Effect": "Allow",
+		"Principal": map[string]interface{}{
+			"AWS": "*",
+		},
+		"Action":   "s3:GetObject",
+		"Resource": fmt.Sprintf("arn:aws:s3:::%s/redirects/*/*", bucketName),
+	})
+	statements = append(statements, map[string]interface{}{
+		"Sid":    "PublicReadAccessRedirectsDeep",
+		"Effect": "Allow",
+		"Principal": map[string]interface{}{
+			"AWS": "*",
+		},
+		"Action":   "s3:GetObject",
+		"Resource": fmt.Sprintf("arn:aws:s3:::%s/redirects/*/*/*", bucketName),
+	})
+
+	// 构建新的 policy
+	policy := map[string]interface{}{
+		"Version":   "2012-10-17",
+		"Statement": statements,
 	}
 
 	policyJSON, err := json.Marshal(policy)
@@ -350,22 +401,6 @@ func (s *S3Service) EnsureBucketPolicyForPublicAccess(bucketName string) error {
 	}
 
 	policyString := string(policyJSON)
-
-	// 检查是否已有 bucket policy
-	getPolicyInput := &s3.GetBucketPolicyInput{
-		Bucket: aws.String(bucketName),
-	}
-	existingPolicy, err := s.client.GetBucketPolicy(getPolicyInput)
-	if err == nil && existingPolicy.Policy != nil {
-		// 如果已有 policy，检查是否包含我们需要的规则
-		existingPolicyStr := *existingPolicy.Policy
-		if strings.Contains(existingPolicyStr, "redirects/*") {
-			// 已包含 redirects/* 的访问规则，不需要更新
-			return nil
-		}
-		// 如果已有 policy 但不包含我们的规则，合并策略（这里简化处理，直接使用新策略）
-		// 注意：实际生产环境应该合并策略而不是替换
-	}
 
 	// 设置 bucket policy
 	putPolicyInput := &s3.PutBucketPolicyInput{
@@ -397,7 +432,7 @@ func (s *S3Service) CheckBucketPolicyForPublicAccess(bucketName string) (bool, e
 		return false, nil
 	}
 
-	// 检查 policy 是否包含 redirects/* 的访问规则
+	// 检查 policy 是否包含 redirects/* 的访问规则（包括多层嵌套）
 	existingPolicyStr := *existingPolicy.Policy
 	if strings.Contains(existingPolicyStr, "redirects/*") {
 		return true, nil
@@ -418,7 +453,7 @@ func (s *S3Service) EnsureBucketPolicyForDownloads(bucketName string) error {
 		Bucket: aws.String(bucketName),
 	}
 	existingPolicy, err := s.client.GetBucketPolicy(getPolicyInput)
-	
+
 	var policy map[string]interface{}
 	var statements []map[string]interface{}
 
