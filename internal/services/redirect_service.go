@@ -653,11 +653,8 @@ func (s *RedirectService) AddTarget(ruleID uint, targetURL string) error {
 		return err
 	}
 
-	// 如果已有CloudFront分发，重新部署HTML文件
-	if rule.CloudFrontID != "" {
-		if err := s.redeployHTML(rule); err != nil {
-			fmt.Printf("警告: 重新部署HTML文件失败: %v\n", err)
-		}
+	if err := s.redeployHTML(rule); err != nil {
+		fmt.Printf("警告: 重新部署HTML文件失败: %v\n", err)
 	}
 
 	return nil
@@ -712,11 +709,9 @@ func (s *RedirectService) RemoveTarget(targetID uint) error {
 		return err
 	}
 
-	// 如果已有CloudFront分发，重新部署HTML文件
-	if rule.CloudFrontID != "" {
-		if err := s.redeployHTML(rule); err != nil {
-			fmt.Printf("警告: 重新部署HTML文件失败: %v\n", err)
-		}
+	// 自动更新S3中的index.html（无论是否有CloudFront分发）
+	if err := s.redeployHTML(rule); err != nil {
+		fmt.Printf("警告: 重新部署HTML文件失败: %v\n", err)
 	}
 
 	return nil
