@@ -113,10 +113,37 @@
     </el-card>
 
     <!-- 创建重定向规则对话框 -->
-    <el-dialog v-model="showCreateDialog" title="创建重定向规则" width="700px" @close="resetCreateForm">
+    <el-dialog v-model="showCreateDialog" title="创建重定向规则" width="700px" @close="resetCreateForm" @open="loadAvailableDomains">
       <el-form :model="createForm" label-width="120px">
         <el-form-item label="源域名" required>
-          <el-input v-model="createForm.source_domain" placeholder="例如: example.com" />
+          <el-select
+            v-model="createForm.source_domain"
+            placeholder="选择或输入域名"
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+          >
+            <el-option
+              v-for="domain in availableDomains"
+              :key="domain.id"
+              :label="domain.domain_name"
+              :value="domain.domain_name"
+            >
+              <span>{{ domain.domain_name }}</span>
+              <el-tag
+                v-if="domain.certificate_status === 'issued'"
+                size="small"
+                type="success"
+                style="margin-left: 10px"
+              >
+                证书已签发
+              </el-tag>
+            </el-option>
+          </el-select>
+          <div style="margin-top: 5px; color: #909399; font-size: 12px">
+            下拉列表只显示未被下载包使用的域名，也可以手动输入新域名
+          </div>
         </el-form-item>
         <el-form-item label="目标 URL" required>
           <el-input
@@ -302,6 +329,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { redirectApi } from '@/api/redirect'
+import { domainApi } from '@/api/domain'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 
@@ -335,10 +363,25 @@ const checkLoading = ref(false)
 const fixLoading = ref(false)
 const checkRuleId = ref(null)
 
+const availableDomains = ref([])
 
 onMounted(() => {
   loadRedirects()
 })
+
+// 加载可用域名列表（只显示未被下载包使用的域名）
+const loadAvailableDomains = async () => {
+  try {
+    const response = await domainApi.getDomainList({ page: 1, page_size: 1000 })
+    // 过滤：只显示未被下载包使用的域名（允许手动输入，所以不过滤证书状态）
+    // 但下拉列表中只显示未被下载包使用的域名
+    availableDomains.value = (response.data || []).filter(
+      (d) => !d.used_by_download_package
+    )
+  } catch (error) {
+    console.error('加载域名列表失败:', error)
+  }
+}
 
 const loadRedirects = async () => {
   loading.value = true

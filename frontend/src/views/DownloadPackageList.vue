@@ -98,7 +98,7 @@
             </el-option>
           </el-select>
           <div style="margin-top: 5px; color: #909399; font-size: 12px">
-            选择已签发证书的域名作为下载域名
+            只显示证书已签发且未被重定向使用的域名
           </div>
         </el-form-item>
         <el-form-item label="选择文件" prop="file" required>
@@ -176,13 +176,13 @@ const loadPackages = async () => {
   }
 }
 
-// 加载可用域名列表
+// 加载可用域名列表（只显示未被重定向使用的域名）
 const loadAvailableDomains = async () => {
   try {
     const response = await domainApi.getDomainList({ page: 1, page_size: 1000 })
-    // response 已经是 response.data，所以直接使用 response.data
+    // 过滤：只显示证书已签发且未被重定向使用的域名
     availableDomains.value = (response.data || []).filter(
-      (d) => d.certificate_status === 'issued'
+      (d) => d.certificate_status === 'issued' && !d.used_by_redirect
     )
   } catch (error) {
     console.error('加载域名列表失败:', error)

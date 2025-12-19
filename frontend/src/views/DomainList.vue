@@ -29,6 +29,29 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="使用状态" width="200">
+          <template #default="{ row }">
+            <div style="display: flex; flex-direction: column; gap: 5px;">
+              <el-tag
+                v-if="row.used_by_redirect"
+                size="small"
+                type="warning"
+              >
+                重定向使用中
+              </el-tag>
+              <el-tag
+                v-if="row.used_by_download_package"
+                size="small"
+                type="success"
+              >
+                下载包使用中
+              </el-tag>
+              <span v-if="!row.used_by_redirect && !row.used_by_download_package" style="color: #c0c4cc; font-size: 12px;">
+                未使用
+              </span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="450">
           <template #default="{ row }">
             <el-button size="small" @click="viewNServers(row)">查看 NS</el-button>
