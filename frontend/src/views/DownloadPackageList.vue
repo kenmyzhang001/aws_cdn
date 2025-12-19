@@ -79,14 +79,23 @@
                 </el-table-column>
                 <el-table-column label="下载URL" min-width="300">
                   <template #default="{ row }">
-                    <el-link
-                      v-if="row.download_url"
-                      :href="row.download_url"
-                      target="_blank"
-                      type="primary"
-                    >
-                      {{ row.download_url }}
-                    </el-link>
+                    <div v-if="row.download_url" style="display: flex; align-items: center; gap: 8px;">
+                      <el-link
+                        :href="row.download_url"
+                        target="_blank"
+                        type="primary"
+                        style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                      >
+                        {{ row.download_url }}
+                      </el-link>
+                      <el-button
+                        size="small"
+                        :icon="CopyDocument"
+                        circle
+                        @click="copyDownloadUrl(row)"
+                        title="复制链接"
+                      />
+                    </div>
                     <span v-else style="color: #909399">-</span>
                   </template>
                 </el-table-column>
@@ -328,7 +337,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Document } from '@element-plus/icons-vue'
+import { Plus, Document, CopyDocument } from '@element-plus/icons-vue'
 import request from '@/api/request'
 import { domainApi } from '@/api/domain'
 import { downloadPackageApi } from '@/api/download_package'
