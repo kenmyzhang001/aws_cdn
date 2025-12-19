@@ -151,7 +151,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { request } from '@/api/request'
+import request from '@/api/request'
 import { domainApi } from '@/api/domain'
 
 const loading = ref(false)
@@ -181,14 +181,14 @@ const uploadRules = {
 const loadPackages = async () => {
   loading.value = true
   try {
-    const response = await request.get('/api/v1/download-packages', {
+    const response = await request.get('/download-packages', {
       params: {
         page: currentPage.value,
         page_size: pageSize.value,
       },
     })
-    packageList.value = response.data.data
-    total.value = response.data.total
+    packageList.value = response.data
+    total.value = response.total
   } catch (error) {
     ElMessage.error('加载下载包列表失败: ' + (error.response?.data?.error || error.message))
   } finally {
@@ -200,7 +200,8 @@ const loadPackages = async () => {
 const loadAvailableDomains = async () => {
   try {
     const response = await domainApi.getDomainList({ page: 1, page_size: 1000 })
-    availableDomains.value = response.data.data.filter(
+    // response 已经是 response.data，所以直接使用 response.data
+    availableDomains.value = (response.data || []).filter(
       (d) => d.certificate_status === 'issued'
     )
   } catch (error) {
@@ -235,7 +236,7 @@ const handleUpload = async () => {
       formData.append('file_name', uploadForm.value.file_name)
       formData.append('file', selectedFile.value)
 
-      const response = await request.post('/api/v1/download-packages', formData, {
+      const response = await request.post('/download-packages', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -267,7 +268,7 @@ const handleDelete = async (row) => {
       type: 'warning',
     })
 
-    await request.delete(`/api/v1/download-packages/${row.id}`)
+    await request.delete(`/download-packages/${row.id}`)
     ElMessage.success('删除成功')
     loadPackages()
   } catch (error) {
