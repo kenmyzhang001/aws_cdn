@@ -185,15 +185,29 @@
             <div>文件名: {{ addDomainSelectedFile.name }}</div>
             <div>文件大小: {{ formatFileSize(addDomainSelectedFile.size) }}</div>
           </div>
+          <div v-if="addDomainLoading" style="margin-top: 15px">
+            <el-progress
+              v-if="addDomainUploadProgress > 0"
+              :percentage="addDomainUploadProgress"
+              :status="addDomainUploadProgress === 100 ? 'success' : null"
+              :stroke-width="8"
+            />
+            <div v-else style="text-align: center; color: #909399; font-size: 12px">
+              准备上传...
+            </div>
+            <div v-if="addDomainUploadProgress > 0" style="text-align: center; margin-top: 5px; color: #909399; font-size: 12px">
+              上传中... {{ addDomainUploadProgress }}%
+            </div>
+          </div>
           <div style="margin-top: 5px; color: #909399; font-size: 12px">
             可选：可以先添加域名，稍后再上传文件
           </div>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showAddDomainDialog = false">取消</el-button>
+        <el-button @click="showAddDomainDialog = false" :disabled="addDomainLoading">取消</el-button>
         <el-button type="primary" @click="handleAddDomain" :loading="addDomainLoading">
-          确定
+          {{ addDomainLoading ? '上传中...' : '确定' }}
         </el-button>
       </template>
     </el-dialog>
@@ -221,12 +235,26 @@
             <div>文件名: {{ addFileSelectedFile.name }}</div>
             <div>文件大小: {{ formatFileSize(addFileSelectedFile.size) }}</div>
           </div>
+          <div v-if="addFileLoading" style="margin-top: 15px">
+            <el-progress
+              v-if="addFileUploadProgress > 0"
+              :percentage="addFileUploadProgress"
+              :status="addFileUploadProgress === 100 ? 'success' : null"
+              :stroke-width="8"
+            />
+            <div v-else style="text-align: center; color: #909399; font-size: 12px">
+              准备上传...
+            </div>
+            <div v-if="addFileUploadProgress > 0" style="text-align: center; margin-top: 5px; color: #909399; font-size: 12px">
+              上传中... {{ addFileUploadProgress }}%
+            </div>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showAddFileDialog = false">取消</el-button>
+        <el-button @click="showAddFileDialog = false" :disabled="addFileLoading">取消</el-button>
         <el-button type="primary" @click="handleAddFile" :loading="addFileLoading">
-          开始上传
+          {{ addFileLoading ? '上传中...' : '开始上传' }}
         </el-button>
       </template>
     </el-dialog>
@@ -341,6 +369,7 @@ import { Plus, Document, CopyDocument } from '@element-plus/icons-vue'
 import request from '@/api/request'
 import { domainApi } from '@/api/domain'
 import { downloadPackageApi } from '@/api/download_package'
+import { uploadFile } from '@/utils/upload'
 
 const loading = ref(false)
 const domainList = ref([]) // 域名列表，每个域名包含其下的文件列表
@@ -348,6 +377,7 @@ const domainList = ref([]) // 域名列表，每个域名包含其下的文件�
 // 添加下载域名
 const showAddDomainDialog = ref(false)
 const addDomainLoading = ref(false)
+const addDomainUploadProgress = ref(0)
 const addDomainForm = ref({
   domain_id: '',
   file_name: '',
@@ -362,6 +392,7 @@ const availableDomains = ref([]) // 可用于添加的域名列表
 // 添加文件到已有域名
 const showAddFileDialog = ref(false)
 const addFileLoading = ref(false)
+const addFileUploadProgress = ref(0)
 const addFileForm = ref({
   domain_id: '',
   domain_name: '',
@@ -540,6 +571,7 @@ const handleAddDomain = async () => {
 
   // 如果有文件，上传文件（会自动创建域名关联）
   addDomainLoading.value = true
+  addDomainUploadProgress.value = 0
 
   try {
     const formData = new FormData()
@@ -547,12 +579,14 @@ const handleAddDomain = async () => {
     formData.append('file_name', addDomainForm.value.file_name)
     formData.append('file', addDomainSelectedFile.value)
 
-    await request.post('/download-packages', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      timeout: 300000,
-    })
+    await uploadFile(
+      '/download-packages',
+      formData,
+      { timeout: 600000 },
+      (progress) => {
+        addDomainUploadProgress.value = progress
+      }
+    )
 
     ElMessage.success('上传成功，正在处理中...')
     showAddDomainDialog.value = false
@@ -563,12 +597,14 @@ const handleAddDomain = async () => {
     }
     addDomainFileList.value = []
     addDomainSelectedFile.value = null
+    addDomainUploadProgress.value = 0
     loadDomains()
     loadAvailableDomains()
   } catch (error) {
     ElMessage.error('上传失败: ' + (error.response?.data?.error || error.message))
   } finally {
     addDomainLoading.value = false
+    addDomainUploadProgress.value = 0
   }
 }
 
@@ -613,6 +649,7 @@ const handleAddFile = async () => {
   }
 
   addFileLoading.value = true
+  addFileUploadProgress.value = 0
 
   try {
     const formData = new FormData()
@@ -620,12 +657,14 @@ const handleAddFile = async () => {
     formData.append('file_name', addFileForm.value.file_name)
     formData.append('file', addFileSelectedFile.value)
 
-    await request.post('/download-packages', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      timeout: 300000, // 5分钟超时
-    })
+    await uploadFile(
+      '/download-packages',
+      formData,
+      { timeout: 600000 },
+      (progress) => {
+        addFileUploadProgress.value = progress
+      }
+    )
 
     ElMessage.success('上传成功，正在处理中...')
     showAddFileDialog.value = false
@@ -636,11 +675,13 @@ const handleAddFile = async () => {
     }
     addFileList.value = []
     addFileSelectedFile.value = null
+    addFileUploadProgress.value = 0
     loadDomains()
   } catch (error) {
     ElMessage.error('上传失败: ' + (error.response?.data?.error || error.message))
   } finally {
     addFileLoading.value = false
+    addFileUploadProgress.value = 0
   }
 }
 

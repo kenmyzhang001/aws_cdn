@@ -19,6 +19,9 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	r := gin.Default()
 
+	// 增加请求体大小限制（支持大文件上传，例如 10GB）
+	r.MaxMultipartMemory = 10 << 30 // 10GB
+
 	// CORS 配置
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
