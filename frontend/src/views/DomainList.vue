@@ -290,6 +290,16 @@ const generateCert = async (row) => {
   try {
     await domainApi.generateCertificate(row.id)
     ElMessage.success('证书生成请求已提交，请稍后查看状态')
+    
+    // 自动调用修复接口
+    try {
+      await domainApi.fixCertificate(row.id)
+      ElMessage.success('证书修复请求已提交')
+    } catch (fixError) {
+      // 修复接口的错误已在拦截器中处理
+      console.error('修复证书失败:', fixError)
+    }
+    
     setTimeout(() => {
       loadDomains()
     }, 2000)
