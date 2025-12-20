@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"aws_cdn/internal/services"
+	"bytes"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -52,8 +54,24 @@ func (h *DownloadPackageHandler) CreateDownloadPackage(c *gin.Context) {
 	// 获取文件大小
 	fileSize := file.Size
 
+	// 将文件内容读取到内存中，以便在异步goroutine中安全使用
+	// 这样可以避免文件读取器在goroutine使用前被关闭
+	fileData := make([]byte, fileSize)
+	n, err := io.ReadFull(fileReader, fileData)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取文件内容失败: " + err.Error()})
+		return
+	}
+	if int64(n) != fileSize {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件读取不完整"})
+		return
+	}
+
+	// 使用bytes.Reader创建可重定位的读取器
+	fileDataReader := bytes.NewReader(fileData)
+
 	// 创建下载包（使用domainID，服务层会从域名获取domain_name）
-	pkg, err := h.service.CreateDownloadPackage(uint(domainID), fileName, fileReader, fileSize)
+	pkg, err := h.service.CreateDownloadPackage(uint(domainID), fileName, fileDataReader, fileSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
