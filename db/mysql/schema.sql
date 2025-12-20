@@ -135,6 +135,40 @@ CREATE TABLE IF NOT EXISTS `download_packages` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='下载包表';
 
 
+/*
+ * 6. 审计日志表：audit_logs
+ *    - 记录所有后台操作的变更和操作时间
+ */
+CREATE TABLE IF NOT EXISTS `audit_logs` (
+  `id`           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `user_id`      BIGINT UNSIGNED NOT NULL COMMENT '操作用户ID',
+  `username`     VARCHAR(191) NOT NULL COMMENT '操作用户名',
+  `action`       VARCHAR(100) NOT NULL COMMENT '操作类型',
+  `resource`     VARCHAR(100) DEFAULT NULL COMMENT '资源类型',
+  `resource_id` VARCHAR(100) DEFAULT NULL COMMENT '资源ID',
+  `method`       VARCHAR(10) DEFAULT NULL COMMENT 'HTTP方法',
+  `path`         VARCHAR(500) DEFAULT NULL COMMENT '请求路径',
+  `ip`           VARCHAR(50) DEFAULT NULL COMMENT '客户端IP',
+  `user_agent`   VARCHAR(500) DEFAULT NULL COMMENT '用户代理',
+  `request`      TEXT DEFAULT NULL COMMENT '请求数据（JSON格式）',
+  `response`     TEXT DEFAULT NULL COMMENT '响应数据（JSON格式）',
+  `status`       INT DEFAULT NULL COMMENT 'HTTP状态码',
+  `message`      TEXT DEFAULT NULL COMMENT '操作描述',
+  `error`        TEXT DEFAULT NULL COMMENT '错误信息',
+  `duration`     BIGINT DEFAULT NULL COMMENT '操作耗时（毫秒）',
+  `created_at`   DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+  PRIMARY KEY (`id`),
+  KEY `idx_audit_logs_user_id` (`user_id`),
+  KEY `idx_audit_logs_username` (`username`),
+  KEY `idx_audit_logs_action` (`action`),
+  KEY `idx_audit_logs_resource` (`resource`),
+  KEY `idx_audit_logs_resource_id` (`resource_id`),
+  KEY `idx_audit_logs_ip` (`ip`),
+  KEY `idx_audit_logs_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='审计日志表';
+
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 
