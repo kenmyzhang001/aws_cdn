@@ -141,6 +141,24 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 		return
 	}
 
+	// 验证文件是否真的存在于S3中（等待一下让S3完成写入）
+	time.Sleep(1 * time.Second)
+	exists, err := s.s3Svc.ObjectExists(s.config.S3BucketName, pkg.S3Key)
+	if err != nil {
+		s.db.Model(pkg).Updates(map[string]interface{}{
+			"status":        models.DownloadPackageStatusFailed,
+			"error_message": fmt.Sprintf("验证S3文件存在性失败: %v", err),
+		})
+		return
+	}
+	if !exists {
+		s.db.Model(pkg).Updates(map[string]interface{}{
+			"status":        models.DownloadPackageStatusFailed,
+			"error_message": fmt.Sprintf("文件上传后验证失败：S3中不存在文件 %s", pkg.S3Key),
+		})
+		return
+	}
+
 	// 更新状态为处理中
 	s.db.Model(pkg).Update("status", models.DownloadPackageStatusProcessing)
 
@@ -153,7 +171,7 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 
 	// 查找该域名下是否已有其他下载包（已完成状态）
 	var existingPackage models.DownloadPackage
-	err := s.db.Where("domain_name = ? AND cloudfront_id != '' AND status = ?", pkg.DomainName, models.DownloadPackageStatusCompleted).
+	err = s.db.Where("domain_name = ? AND cloudfront_id != '' AND status = ?", pkg.DomainName, models.DownloadPackageStatusCompleted).
 		First(&existingPackage).Error
 
 	if err == nil && existingPackage.CloudFrontID != "" {
