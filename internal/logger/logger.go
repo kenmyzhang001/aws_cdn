@@ -45,30 +45,8 @@ func InitLogger(logDir, logFileName string, maxSize, maxBackups int, maxAge int)
 		LocalTime:  true,       // 使用本地时间
 	}
 
-	// 使用MultiWriter同时输出到文件和控制台
-	multiWriter := &MultiWriter{
-		fileWriter:    writer,
-		consoleWriter: os.Stdout,
-	}
-	Log.SetOutput(multiWriter)
-}
-
-// MultiWriter 实现同时写入文件和控制台
-type MultiWriter struct {
-	fileWriter    *lumberjack.Logger
-	consoleWriter *os.File
-}
-
-func (m *MultiWriter) Write(p []byte) (n int, err error) {
-	// 写入文件
-	if m.fileWriter != nil {
-		m.fileWriter.Write(p)
-	}
-	// 写入控制台
-	if m.consoleWriter != nil {
-		m.consoleWriter.Write(p)
-	}
-	return len(p), nil
+	// 只输出到文件，不输出到控制台
+	Log.SetOutput(writer)
 }
 
 // GetLogger 获取日志实例

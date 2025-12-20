@@ -1,6 +1,7 @@
 package services
 
 import (
+	"aws_cdn/internal/logger"
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/aws"
 	"fmt"
@@ -30,21 +31,39 @@ func NewDomainService(db *gorm.DB, route53Svc *aws.Route53Service, acmSvc *aws.A
 
 // TransferDomain 转入域名到 AWS
 func (s *DomainService) TransferDomain(domainName, registrar string) (*models.Domain, error) {
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
+		"domain_name": domainName,
+		"registrar":   registrar,
+	}).Info("开始转入域名")
+
 	// 检查域名是否已存在
 	var existingDomain models.Domain
 	if err := s.db.Where("domain_name = ?", domainName).First(&existingDomain).Error; err == nil {
+		log.WithFields(map[string]interface{}{
+			"domain_name": domainName,
+			"existing_id": existingDomain.ID,
+		}).Warn("域名已存在")
 		return nil, fmt.Errorf("域名 %s 已存在", domainName)
 	}
 
 	// 创建托管区域
+	log.WithField("domain_name", domainName).Info("开始创建Route53托管区域")
 	hostedZoneID, nsServers, err := s.route53Svc.CreateHostedZone(domainName)
 	if err != nil {
+		log.WithError(err).WithField("domain_name", domainName).Error("创建托管区域失败")
 		return nil, fmt.Errorf("创建托管区域失败: %w", err)
 	}
+	log.WithFields(map[string]interface{}{
+		"domain_name":   domainName,
+		"hosted_zone_id": hostedZoneID,
+		"ns_servers":    nsServers,
+	}).Info("Route53托管区域创建成功")
 
 	// 格式化 NS 服务器为 JSON
 	nsServersJSON, err := aws.FormatNServersJSON(nsServers)
 	if err != nil {
+		log.WithError(err).WithField("domain_name", domainName).Error("格式化NS服务器失败")
 		return nil, fmt.Errorf("格式化 NS 服务器失败: %w", err)
 	}
 
@@ -60,8 +79,18 @@ func (s *DomainService) TransferDomain(domainName, registrar string) (*models.Do
 	}
 
 	if err := s.db.Create(domain).Error; err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"domain_name":   domainName,
+			"hosted_zone_id": hostedZoneID,
+		}).Error("创建域名记录失败")
 		return nil, fmt.Errorf("创建域名记录失败: %w", err)
 	}
+
+	log.WithFields(map[string]interface{}{
+		"domain_id":     domain.ID,
+		"domain_name":   domainName,
+		"hosted_zone_id": hostedZoneID,
+	}).Info("域名记录创建成功，开始异步请求证书")
 
 	// 异步请求证书（证书验证不影响域名转入状态）
 	go s.requestCertificateAsync(domain)
@@ -72,12 +101,28 @@ func (s *DomainService) TransferDomain(domainName, registrar string) (*models.Do
 // requestCertificateAsync 异步请求证书
 // 注意：证书验证失败不应该影响域名转入状态，域名转入成功与否基于 Route53 Hosted Zone 是否创建成功
 func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
+		"domain_id":   domain.ID,
+		"domain_name": domain.DomainName,
+	}).Info("开始异步请求证书")
+
 	certificateARN, err := s.acmSvc.RequestCertificate(domain.DomainName)
 	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"domain_id":   domain.ID,
+			"domain_name": domain.DomainName,
+		}).Error("证书请求失败")
 		// 证书请求失败，只更新证书状态，不影响域名转入状态
 		s.db.Model(domain).Update("certificate_status", "failed")
 		return
 	}
+
+	log.WithFields(map[string]interface{}{
+		"domain_id":      domain.ID,
+		"domain_name":    domain.DomainName,
+		"certificate_arn": certificateARN,
+	}).Info("证书请求成功，等待验证")
 
 	s.db.Model(domain).Updates(map[string]interface{}{
 		"certificate_arn":    certificateARN,
@@ -85,12 +130,26 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 	})
 
 	// 等待证书验证（最多等待 1 小时）
+	log.WithFields(map[string]interface{}{
+		"domain_id":      domain.ID,
+		"certificate_arn": certificateARN,
+		"timeout":        "1小时",
+	}).Info("开始等待证书验证")
 	if err := s.acmSvc.WaitForCertificateValidation(certificateARN, 1*time.Hour); err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"domain_id":      domain.ID,
+			"certificate_arn": certificateARN,
+		}).Error("证书验证失败")
 		// 证书验证失败，只更新证书状态，不影响域名转入状态
 		s.db.Model(domain).Update("certificate_status", "failed")
 		return
 	}
 
+	log.WithFields(map[string]interface{}{
+		"domain_id":      domain.ID,
+		"domain_name":    domain.DomainName,
+		"certificate_arn": certificateARN,
+	}).Info("证书验证成功")
 	// 证书验证成功，只更新证书状态
 	// 域名转入状态已经在创建 Hosted Zone 时设置为 completed，这里不需要再更新
 	s.db.Model(domain).Update("certificate_status", "issued")
@@ -209,8 +268,12 @@ func (s *DomainService) GetNServers(id uint) ([]string, error) {
 
 // GenerateCertificate 生成域名证书
 func (s *DomainService) GenerateCertificate(id uint) error {
+	log := logger.GetLogger()
+	log.WithField("domain_id", id).Info("开始生成证书")
+
 	domain, err := s.GetDomain(id)
 	if err != nil {
+		log.WithError(err).WithField("domain_id", id).Error("获取域名信息失败")
 		return err
 	}
 
@@ -218,31 +281,64 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 	if domain.CertificateARN != "" {
 		// 证书已存在，检查状态
 		certificateARN = domain.CertificateARN
+		log.WithFields(map[string]interface{}{
+			"domain_id":      id,
+			"domain_name":    domain.DomainName,
+			"certificate_arn": certificateARN,
+		}).Info("证书已存在，检查状态")
 		status, err := s.acmSvc.GetCertificateStatus(certificateARN)
 		if err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"domain_id":      id,
+				"certificate_arn": certificateARN,
+			}).Error("获取证书状态失败")
 			return fmt.Errorf("获取证书状态失败: %w", err)
 		}
 
 		// 如果证书状态是 PENDING_VALIDATION，需要添加验证记录
 		if status == "PENDING_VALIDATION" {
 			if domain.HostedZoneID == "" {
+				log.WithFields(map[string]interface{}{
+					"domain_id":      id,
+					"certificate_arn": certificateARN,
+				}).Error("证书已存在但缺少托管区域ID")
 				return fmt.Errorf("证书已存在但缺少托管区域ID，无法添加验证记录")
 			}
 
 			// 获取证书验证记录
 			validationRecords, err := s.acmSvc.GetCertificateValidationRecords(certificateARN)
 			if err != nil {
+				log.WithError(err).WithFields(map[string]interface{}{
+					"domain_id":      id,
+					"certificate_arn": certificateARN,
+				}).Error("获取证书验证记录失败")
 				return fmt.Errorf("获取证书验证记录失败: %w", err)
 			}
+
+			log.WithFields(map[string]interface{}{
+				"domain_id":      id,
+				"certificate_arn": certificateARN,
+				"record_count":    len(validationRecords),
+			}).Info("开始添加证书验证记录到Route53")
 
 			// 将验证记录添加到 Route 53
 			for _, record := range validationRecords {
 				if record.Type == "CNAME" {
 					if err := s.route53Svc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value); err != nil {
+						log.WithError(err).WithFields(map[string]interface{}{
+							"domain_id":      id,
+							"record_name":    record.Name,
+							"record_value":   record.Value,
+						}).Error("添加CNAME验证记录失败")
 						return fmt.Errorf("添加 CNAME 验证记录失败: %w", err)
 					}
 				}
 			}
+
+			log.WithFields(map[string]interface{}{
+				"domain_id":      id,
+				"certificate_arn": certificateARN,
+			}).Info("证书验证记录添加成功，开始异步等待验证")
 
 			// 更新证书状态
 			s.db.Model(domain).Update("certificate_status", "pending_validation")
@@ -254,14 +350,32 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 		}
 
 		// 如果证书已经是 ISSUED 或其他状态，直接返回
+		log.WithFields(map[string]interface{}{
+			"domain_id":      id,
+			"certificate_arn": certificateARN,
+			"status":         status,
+		}).Info("证书已存在且状态为: " + status)
 		return fmt.Errorf("证书已存在: %s (状态: %s)", certificateARN, status)
 	}
 
 	// 证书不存在，创建新证书
+	log.WithFields(map[string]interface{}{
+		"domain_id":   id,
+		"domain_name": domain.DomainName,
+	}).Info("证书不存在，开始创建新证书")
 	certificateARN, err = s.acmSvc.RequestCertificate(domain.DomainName)
 	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"domain_id":   id,
+			"domain_name": domain.DomainName,
+		}).Error("请求证书失败")
 		return fmt.Errorf("请求证书失败: %w", err)
 	}
+
+	log.WithFields(map[string]interface{}{
+		"domain_id":      id,
+		"certificate_arn": certificateARN,
+	}).Info("证书请求成功")
 
 	s.db.Model(domain).Updates(map[string]interface{}{
 		"certificate_arn":    certificateARN,
@@ -270,17 +384,28 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 
 	// 获取证书验证记录并添加到 Route 53
 	if domain.HostedZoneID != "" {
+		log.WithFields(map[string]interface{}{
+			"domain_id":      id,
+			"certificate_arn": certificateARN,
+		}).Info("等待AWS生成验证记录")
 		// 等待一下让 AWS 生成验证记录
 		time.Sleep(2 * time.Second)
 
 		validationRecords, err := s.acmSvc.GetCertificateValidationRecords(certificateARN)
 		if err == nil && len(validationRecords) > 0 {
+			log.WithFields(map[string]interface{}{
+				"domain_id":    id,
+				"record_count": len(validationRecords),
+			}).Info("开始添加验证记录到Route53")
 			// 将验证记录添加到 Route 53
 			for _, record := range validationRecords {
 				if record.Type == "CNAME" {
 					if err := s.route53Svc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value); err != nil {
-						// 记录错误但不阻止流程继续
-						// 可以记录日志，这里简化处理
+						log.WithError(err).WithFields(map[string]interface{}{
+							"domain_id":    id,
+							"record_name":  record.Name,
+							"record_value": record.Value,
+						}).Error("添加验证记录失败")
 					}
 				}
 			}
@@ -350,32 +475,72 @@ func (s *DomainService) UpdateDomainStatus(id uint, status models.DomainStatus) 
 // DeleteDomain 删除域名
 // 删除域名时会同时删除相关的 AWS 资源（Route53 Hosted Zone 和 ACM 证书）
 func (s *DomainService) DeleteDomain(id uint) error {
+	log := logger.GetLogger()
+	log.WithField("domain_id", id).Info("开始删除域名")
+
 	// 获取域名信息
 	domain, err := s.GetDomain(id)
 	if err != nil {
+		log.WithError(err).WithField("domain_id", id).Error("获取域名信息失败")
 		return err
 	}
 
+	log.WithFields(map[string]interface{}{
+		"domain_id":   id,
+		"domain_name": domain.DomainName,
+		"certificate_arn": domain.CertificateARN,
+		"hosted_zone_id":  domain.HostedZoneID,
+	}).Info("获取域名信息成功，开始删除相关资源")
+
 	// 删除 ACM 证书（如果存在）
 	if domain.CertificateARN != "" {
+		log.WithFields(map[string]interface{}{
+			"domain_id":      id,
+			"certificate_arn": domain.CertificateARN,
+		}).Info("开始删除ACM证书")
 		if err := s.acmSvc.DeleteCertificate(domain.CertificateARN); err != nil {
-			// 记录错误但不阻止删除，因为证书可能已经被删除或不存在
-			// 可以记录日志，这里简化处理
+			log.WithError(err).WithFields(map[string]interface{}{
+				"domain_id":      id,
+				"certificate_arn": domain.CertificateARN,
+			}).Warn("删除ACM证书失败（可能已不存在）")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain_id":      id,
+				"certificate_arn": domain.CertificateARN,
+			}).Info("ACM证书删除成功")
 		}
 	}
 
 	// 删除 Route53 Hosted Zone（如果存在）
 	if domain.HostedZoneID != "" {
+		log.WithFields(map[string]interface{}{
+			"domain_id":     id,
+			"hosted_zone_id": domain.HostedZoneID,
+		}).Info("开始删除Route53托管区域")
 		if err := s.route53Svc.DeleteHostedZone(domain.HostedZoneID); err != nil {
-			// 记录错误但不阻止删除，因为托管区域可能已经被删除或不存在
-			// 可以记录日志，这里简化处理
+			log.WithError(err).WithFields(map[string]interface{}{
+				"domain_id":     id,
+				"hosted_zone_id": domain.HostedZoneID,
+			}).Warn("删除Route53托管区域失败（可能已不存在）")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain_id":     id,
+				"hosted_zone_id": domain.HostedZoneID,
+			}).Info("Route53托管区域删除成功")
 		}
 	}
 
 	// 从数据库删除域名记录（软删除）
+	log.WithField("domain_id", id).Info("开始从数据库删除域名记录")
 	if err := s.db.Delete(domain).Error; err != nil {
+		log.WithError(err).WithField("domain_id", id).Error("删除域名记录失败")
 		return fmt.Errorf("删除域名记录失败: %w", err)
 	}
+
+	log.WithFields(map[string]interface{}{
+		"domain_id":   id,
+		"domain_name": domain.DomainName,
+	}).Info("域名删除成功")
 
 	return nil
 }

@@ -3,10 +3,10 @@ package router
 import (
 	"aws_cdn/internal/config"
 	"aws_cdn/internal/handlers"
+	"aws_cdn/internal/logger"
 	"aws_cdn/internal/middleware"
 	"aws_cdn/internal/services"
 	"aws_cdn/internal/services/aws"
-	"log"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -38,18 +38,20 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	s3Svc, _ := aws.NewS3Service(&cfg.AWS)
 
 	var s3Origin string
+	log := logger.GetLogger()
 	if cfg.AWS.S3BucketName != "" {
 		// 自动检查并创建存储桶（如果不存在）
 		if err := s3Svc.EnsureBucketExists(cfg.AWS.S3BucketName); err != nil {
 			// 记录错误但不阻止服务启动，因为可能是权限问题
-			log.Printf("警告: 无法确保S3存储桶 '%s' 存在: %v", cfg.AWS.S3BucketName, err)
+			log.WithError(err).WithField("bucket_name", cfg.AWS.S3BucketName).Warn("无法确保S3存储桶存在")
 		} else {
-			log.Printf("S3存储桶 '%s' 已确认存在", cfg.AWS.S3BucketName)
+			log.WithField("bucket_name", cfg.AWS.S3BucketName).Info("S3存储桶已确认存在")
 		}
 		s3Origin = s3Svc.GetBucketDomain(cfg.AWS.S3BucketName)
 	}
 
 	// 初始化服务
+	auditService := services.NewAuditService(db)
 	domainService := services.NewDomainService(db, route53Svc, acmSvc, cloudFrontSvc, s3Svc)
 	redirectService := services.NewRedirectService(db, cloudFrontSvc, s3Svc, domainService, &cfg.AWS)
 	authService := services.NewAuthService(db, &cfg.JWT)
@@ -62,6 +64,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authHandler := handlers.NewAuthHandler(authService)
 	cloudFrontHandler := handlers.NewCloudFrontHandler(cloudFrontService)
 	downloadPackageHandler := handlers.NewDownloadPackageHandler(downloadPackageService)
+	auditHandler := handlers.NewAuditHandler(auditService)
 
 	// API 路由
 	api := r.Group("/api/v1")
@@ -72,6 +75,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	// 需要登录的受保护路由
 	protected := api.Group("")
 	protected.Use(middleware.JWTAuth(cfg.JWT.Secret))
+	protected.Use(middleware.AuditMiddleware(auditService))
 	{
 		// 域名管理
 		domains := protected.Group("/domains")
@@ -122,6 +126,12 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			downloadPackages.DELETE("/:id", downloadPackageHandler.DeleteDownloadPackage)
 			downloadPackages.GET("/:id/check", downloadPackageHandler.CheckDownloadPackage)
 			downloadPackages.POST("/:id/fix", downloadPackageHandler.FixDownloadPackage)
+		}
+
+		// 审计日志管理
+		audit := protected.Group("/audit-logs")
+		{
+			audit.GET("", auditHandler.ListAuditLogs)
 		}
 	}
 
