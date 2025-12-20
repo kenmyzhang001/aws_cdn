@@ -2,6 +2,7 @@ package services
 
 import (
 	"aws_cdn/internal/config"
+	"aws_cdn/internal/logger"
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/aws"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -57,14 +59,27 @@ func (s *DownloadPackageService) CheckDomainUsedByRedirect(domainName string) (b
 // 2. 创建CloudFront分发
 // 3. 将域名绑定到CloudFront
 func (s *DownloadPackageService) CreateDownloadPackage(domainID uint, fileName string, fileReader io.ReadSeeker, fileSize int64) (*models.DownloadPackage, error) {
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
+		"domain_id": domainID,
+		"file_name": fileName,
+		"file_size": fileSize,
+	}).Info("开始创建下载包")
+
 	// 验证域名是否存在
 	domain, err := s.domainService.GetDomain(domainID)
 	if err != nil {
+		log.WithError(err).WithField("domain_id", domainID).Error("域名不存在")
 		return nil, fmt.Errorf("域名不存在: %w", err)
 	}
 
 	// 检查域名证书状态
 	if domain.CertificateStatus != "issued" {
+		log.WithFields(map[string]interface{}{
+			"domain_id":          domainID,
+			"domain_name":        domain.DomainName,
+			"certificate_status": domain.CertificateStatus,
+		}).Error("域名证书未签发")
 		return nil, fmt.Errorf("域名证书未签发，当前状态: %s", domain.CertificateStatus)
 	}
 
@@ -74,9 +89,11 @@ func (s *DownloadPackageService) CreateDownloadPackage(domainID uint, fileName s
 	// 检查域名是否已被重定向规则使用
 	isUsed, err := s.CheckDomainUsedByRedirect(domainName)
 	if err != nil {
+		log.WithError(err).WithField("domain_name", domainName).Error("检查域名使用状态失败")
 		return nil, fmt.Errorf("检查域名使用状态失败: %w", err)
 	}
 	if isUsed {
+		log.WithField("domain_name", domainName).Error("域名已被重定向规则使用")
 		return nil, fmt.Errorf("域名 %s 已被重定向规则使用，请先删除重定向规则后再使用", domainName)
 	}
 
@@ -95,8 +112,20 @@ func (s *DownloadPackageService) CreateDownloadPackage(domainID uint, fileName s
 	}
 
 	if err := s.db.Create(downloadPackage).Error; err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"domain_id": domainID,
+			"file_name": fileName,
+			"s3_key":    s3Key,
+		}).Error("创建下载包记录失败")
 		return nil, fmt.Errorf("创建下载包记录失败: %w", err)
 	}
+
+	log.WithFields(map[string]interface{}{
+		"package_id": downloadPackage.ID,
+		"domain_id":  domainID,
+		"file_name":  fileName,
+		"s3_key":     s3Key,
+	}).Info("下载包记录创建成功，开始异步处理")
 
 	// 异步处理上传和配置
 	go s.processDownloadPackageAsync(downloadPackage, fileReader, domain)
@@ -106,18 +135,33 @@ func (s *DownloadPackageService) CreateDownloadPackage(domainID uint, fileName s
 
 // processDownloadPackageAsync 异步处理下载包
 func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.DownloadPackage, fileReader io.ReadSeeker, domain *models.Domain) {
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
+		"package_id": pkg.ID,
+		"domain_id":  pkg.DomainID,
+		"file_name":  pkg.FileName,
+		"s3_key":     pkg.S3Key,
+		"file_size":  pkg.FileSize,
+	}).Info("开始异步处理下载包")
+
 	// 更新状态为上传中
 	s.db.Model(pkg).Update("status", models.DownloadPackageStatusUploading)
 
 	// 确保 S3 bucket policy 允许公开访问 downloads/* 路径
 	if s.config.S3BucketName != "" {
+		log.WithField("bucket_name", s.config.S3BucketName).Info("检查S3 bucket policy配置")
 		if err := s.s3Svc.EnsureBucketPolicyForDownloads(s.config.S3BucketName); err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"package_id":  pkg.ID,
+				"bucket_name": s.config.S3BucketName,
+			}).Error("配置 S3 bucket policy 失败")
 			s.db.Model(pkg).Updates(map[string]interface{}{
 				"status":        models.DownloadPackageStatusFailed,
 				"error_message": fmt.Sprintf("配置 S3 bucket policy 失败: %v", err),
 			})
 			return
 		}
+		log.WithField("bucket_name", s.config.S3BucketName).Info("S3 bucket policy配置成功")
 	}
 
 	// 1. 上传文件到S3
@@ -132,8 +176,21 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 		contentType = "application/octet-stream"
 	}
 
+	log.WithFields(map[string]interface{}{
+		"package_id":   pkg.ID,
+		"s3_key":       pkg.S3Key,
+		"bucket_name":  s.config.S3BucketName,
+		"content_type": contentType,
+		"file_size":    pkg.FileSize,
+	}).Info("开始上传文件到S3")
+
 	// 上传文件到S3（使用public-read ACL以便CloudFront访问）
 	if err := s.s3Svc.UploadFileWithACL(s.config.S3BucketName, pkg.S3Key, fileReader, contentType, "public-read"); err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"package_id":  pkg.ID,
+			"s3_key":      pkg.S3Key,
+			"bucket_name": s.config.S3BucketName,
+		}).Error("上传文件到S3失败")
 		s.db.Model(pkg).Updates(map[string]interface{}{
 			"status":        models.DownloadPackageStatusFailed,
 			"error_message": fmt.Sprintf("上传文件到S3失败: %v", err),
@@ -141,29 +198,109 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 		return
 	}
 
-	// 验证文件是否真的存在于S3中（等待一下让S3完成写入）
-	time.Sleep(1 * time.Second)
-	exists, err := s.s3Svc.ObjectExists(s.config.S3BucketName, pkg.S3Key)
+	log.WithFields(map[string]interface{}{
+		"package_id":  pkg.ID,
+		"s3_key":      pkg.S3Key,
+		"bucket_name": s.config.S3BucketName,
+	}).Info("文件上传到S3成功，开始验证文件存在性")
+
+	// 验证文件是否真的存在于S3中（使用重试机制，因为S3可能有最终一致性延迟）
+	maxRetries := 5
+	retryInterval := 2 * time.Second
+	var exists bool
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		// 等待一段时间让S3完成写入
+		if i > 0 {
+			log.WithFields(map[string]interface{}{
+				"package_id":     pkg.ID,
+				"s3_key":         pkg.S3Key,
+				"retry_attempt":  i,
+				"max_retries":    maxRetries,
+				"retry_interval": retryInterval,
+			}).Info("等待后重试验证S3文件存在性")
+			time.Sleep(retryInterval)
+		}
+
+		exists, err = s.s3Svc.ObjectExists(s.config.S3BucketName, pkg.S3Key)
+		if err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"package_id":    pkg.ID,
+				"s3_key":        pkg.S3Key,
+				"retry_attempt": i + 1,
+			}).Warn("检查S3文件存在性时出错")
+			// 如果是权限错误，立即返回
+			if strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "Access Denied") || strings.Contains(err.Error(), "403") {
+				log.WithError(err).WithFields(map[string]interface{}{
+					"package_id": pkg.ID,
+					"s3_key":     pkg.S3Key,
+				}).Error("验证S3文件存在性失败（权限错误）")
+				s.db.Model(pkg).Updates(map[string]interface{}{
+					"status":        models.DownloadPackageStatusFailed,
+					"error_message": fmt.Sprintf("验证S3文件存在性失败（权限错误）: %v", err),
+				})
+				return
+			}
+			// 其他错误，继续重试
+			continue
+		}
+
+		if exists {
+			log.WithFields(map[string]interface{}{
+				"package_id":    pkg.ID,
+				"s3_key":        pkg.S3Key,
+				"retry_attempt": i + 1,
+			}).Info("S3文件验证成功")
+			// 文件存在，验证成功
+			break
+		}
+
+		log.WithFields(map[string]interface{}{
+			"package_id":    pkg.ID,
+			"s3_key":        pkg.S3Key,
+			"retry_attempt": i + 1,
+			"max_retries":   maxRetries,
+		}).Warn("S3文件不存在，将继续重试")
+		// 文件不存在，继续重试
+	}
+
+	// 检查最终结果
 	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"package_id":  pkg.ID,
+			"s3_key":      pkg.S3Key,
+			"max_retries": maxRetries,
+		}).Error("验证S3文件存在性失败（重试后）")
 		s.db.Model(pkg).Updates(map[string]interface{}{
 			"status":        models.DownloadPackageStatusFailed,
-			"error_message": fmt.Sprintf("验证S3文件存在性失败: %v", err),
+			"error_message": fmt.Sprintf("验证S3文件存在性失败（重试%d次后）: %v", maxRetries, err),
 		})
 		return
 	}
 	if !exists {
+		log.WithFields(map[string]interface{}{
+			"package_id":  pkg.ID,
+			"s3_key":      pkg.S3Key,
+			"max_retries": maxRetries,
+		}).Error("文件上传后验证失败：S3中不存在文件")
 		s.db.Model(pkg).Updates(map[string]interface{}{
 			"status":        models.DownloadPackageStatusFailed,
-			"error_message": fmt.Sprintf("文件上传后验证失败：S3中不存在文件 %s", pkg.S3Key),
+			"error_message": fmt.Sprintf("文件上传后验证失败：S3中不存在文件 %s（已重试%d次）", pkg.S3Key, maxRetries),
 		})
 		return
 	}
 
 	// 更新状态为处理中
 	s.db.Model(pkg).Update("status", models.DownloadPackageStatusProcessing)
+	log.WithField("package_id", pkg.ID).Info("文件验证成功，开始处理CloudFront配置")
 
 	// 2. 获取S3域名
 	s3Origin := s.s3Svc.GetBucketDomain(s.config.S3BucketName)
+	log.WithFields(map[string]interface{}{
+		"package_id": pkg.ID,
+		"s3_origin":  s3Origin,
+	}).Info("获取S3域名")
 
 	// 3. 检查该域名是否已有CloudFront分发（用于支持同一域名下多个文件）
 	var cloudFrontID string
@@ -178,10 +315,22 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 		// 已存在该域名的CloudFront分发，复用它
 		cloudFrontID = existingPackage.CloudFrontID
 		cloudFrontDomain = existingPackage.CloudFrontDomain
+		log.WithFields(map[string]interface{}{
+			"package_id":        pkg.ID,
+			"domain_name":       pkg.DomainName,
+			"cloudfront_id":     cloudFrontID,
+			"cloudfront_domain": cloudFrontDomain,
+		}).Info("复用已存在的CloudFront分发")
 	} else {
 		// 不存在，创建新的CloudFront分发
 		// 计算originPath：同一域名下的所有文件都使用相同的目录路径 downloads/{domain_name}/
 		originPath := fmt.Sprintf("/downloads/%s", pkg.DomainName)
+		log.WithFields(map[string]interface{}{
+			"package_id":  pkg.ID,
+			"domain_name": pkg.DomainName,
+			"origin_path": originPath,
+			"s3_origin":   s3Origin,
+		}).Info("开始创建新的CloudFront分发")
 
 		cloudFrontID, err = s.cloudFrontSvc.CreateDistributionForLargeFileDownload(
 			pkg.DomainName,
@@ -190,6 +339,11 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 			originPath,
 		)
 		if err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"package_id":  pkg.ID,
+				"domain_name": pkg.DomainName,
+				"origin_path": originPath,
+			}).Error("创建CloudFront分发失败")
 			s.db.Model(pkg).Updates(map[string]interface{}{
 				"status":        models.DownloadPackageStatusFailed,
 				"error_message": fmt.Sprintf("创建CloudFront分发失败: %v", err),
@@ -197,18 +351,39 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 			return
 		}
 
+		log.WithFields(map[string]interface{}{
+			"package_id":    pkg.ID,
+			"cloudfront_id": cloudFrontID,
+		}).Info("CloudFront分发创建成功，获取域名")
+
 		// 获取CloudFront域名
 		cloudFrontDomain, err = s.cloudFrontSvc.GetDistributionDomain(cloudFrontID)
 		if err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"package_id":    pkg.ID,
+				"cloudfront_id": cloudFrontID,
+			}).Error("获取CloudFront域名失败")
 			s.db.Model(pkg).Updates(map[string]interface{}{
 				"status":        models.DownloadPackageStatusFailed,
 				"error_message": fmt.Sprintf("获取CloudFront域名失败: %v", err),
 			})
 			return
 		}
+
+		log.WithFields(map[string]interface{}{
+			"package_id":        pkg.ID,
+			"cloudfront_id":     cloudFrontID,
+			"cloudfront_domain": cloudFrontDomain,
+		}).Info("CloudFront域名获取成功")
 	}
 	// 4. 将域名绑定到CloudFront（创建Route53 A记录）
 	if domain.HostedZoneID != "" {
+		log.WithFields(map[string]interface{}{
+			"package_id":        pkg.ID,
+			"domain_name":       pkg.DomainName,
+			"hosted_zone_id":    domain.HostedZoneID,
+			"cloudfront_domain": cloudFrontDomain,
+		}).Info("开始配置Route53 DNS记录")
 		// 等待一下让CloudFront分发完全部署
 		time.Sleep(5 * time.Second)
 
@@ -216,22 +391,59 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 		exists, err := s.domainService.CheckCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, cloudFrontDomain)
 		if err == nil && !exists {
 			// 创建A记录指向CloudFront
+			log.WithFields(map[string]interface{}{
+				"package_id":        pkg.ID,
+				"domain_name":       pkg.DomainName,
+				"cloudfront_domain": cloudFrontDomain,
+			}).Info("创建Route53 A记录")
 			if err := s.domainService.CreateCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, cloudFrontDomain); err != nil {
+				log.WithError(err).WithFields(map[string]interface{}{
+					"package_id":        pkg.ID,
+					"domain_name":       pkg.DomainName,
+					"cloudfront_domain": cloudFrontDomain,
+				}).Error("创建Route53记录失败")
 				s.db.Model(pkg).Updates(map[string]interface{}{
 					"status":        models.DownloadPackageStatusFailed,
 					"error_message": fmt.Sprintf("创建Route53记录失败: %v", err),
 				})
 				return
 			}
+			log.WithFields(map[string]interface{}{
+				"package_id":  pkg.ID,
+				"domain_name": pkg.DomainName,
+			}).Info("Route53 A记录创建成功")
+		} else if err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"package_id":  pkg.ID,
+				"domain_name": pkg.DomainName,
+			}).Warn("检查Route53记录时出错")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"package_id":  pkg.ID,
+				"domain_name": pkg.DomainName,
+			}).Info("Route53记录已存在，跳过创建")
 		}
+	} else {
+		log.WithFields(map[string]interface{}{
+			"package_id":  pkg.ID,
+			"domain_name": pkg.DomainName,
+		}).Warn("域名未配置HostedZoneID，跳过Route53 DNS配置")
 	}
 
 	// 5. 构建下载URL
 	downloadURL := fmt.Sprintf("https://%s/%s", pkg.DomainName, pkg.FileName)
 
 	// 确保 CloudFront 分发已启用
+	log.WithFields(map[string]interface{}{
+		"package_id":    pkg.ID,
+		"cloudfront_id": cloudFrontID,
+	}).Info("启用CloudFront分发")
 	enabled := true
 	if err := s.cloudFrontSvc.UpdateDistribution(cloudFrontID, nil, "", &enabled); err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"package_id":    pkg.ID,
+			"cloudfront_id": cloudFrontID,
+		}).Error("启用CloudFront分发失败")
 		s.db.Model(pkg).Updates(map[string]interface{}{
 			"status":        models.DownloadPackageStatusFailed,
 			"error_message": fmt.Sprintf("启用CloudFront分发失败: %v", err),
@@ -246,6 +458,16 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 		"download_url":      downloadURL,
 		"status":            models.DownloadPackageStatusCompleted,
 	})
+
+	log.WithFields(map[string]interface{}{
+		"package_id":        pkg.ID,
+		"domain_name":       pkg.DomainName,
+		"file_name":         pkg.FileName,
+		"cloudfront_id":     cloudFrontID,
+		"cloudfront_domain": cloudFrontDomain,
+		"download_url":      downloadURL,
+		"s3_key":            pkg.S3Key,
+	}).Info("下载包处理完成")
 }
 
 // GetDownloadPackage 获取下载包信息

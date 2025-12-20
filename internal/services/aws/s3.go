@@ -2,6 +2,7 @@ package aws
 
 import (
 	"aws_cdn/internal/config"
+	"aws_cdn/internal/logger"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -98,8 +99,17 @@ func (s *S3Service) UploadFile(bucketName, key string, body io.ReadSeeker, conte
 // UploadFileWithACL 上传文件到 S3（支持自定义ACL）
 // 如果存储桶不支持ACL，会自动重试不使用ACL
 func (s *S3Service) UploadFileWithACL(bucketName, key string, body io.ReadSeeker, contentType string, acl string) error {
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
+		"bucket_name":  bucketName,
+		"key":          key,
+		"content_type": contentType,
+		"acl":          acl,
+	}).Info("开始上传文件到S3")
+
 	// 确保存储桶存在
 	if err := s.EnsureBucketExists(bucketName); err != nil {
+		log.WithError(err).WithField("bucket_name", bucketName).Error("确保存储桶存在失败")
 		return fmt.Errorf("确保存储桶存在失败: %w", err)
 	}
 
@@ -121,6 +131,10 @@ func (s *S3Service) UploadFileWithACL(bucketName, key string, body io.ReadSeeker
 		// 检查是否是ACL不支持的错误
 		if strings.Contains(err.Error(), "AccessControlListNotSupported") ||
 			strings.Contains(err.Error(), "does not allow ACLs") {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"bucket_name": bucketName,
+				"key":         key,
+			}).Warn("存储桶不支持ACL，重试不使用ACL上传")
 			// 存储桶不支持ACL，重试不使用ACL
 			// 重置body位置
 			if seeker, ok := body.(io.Seeker); ok {
@@ -138,16 +152,28 @@ func (s *S3Service) UploadFileWithACL(bucketName, key string, body io.ReadSeeker
 
 			_, retryErr := s.client.PutObject(inputWithoutACL)
 			if retryErr != nil {
+				log.WithError(retryErr).WithFields(map[string]interface{}{
+					"bucket_name": bucketName,
+					"key":         key,
+				}).Error("不使用ACL重试上传失败")
 				// 检查是否是权限错误
 				if strings.Contains(retryErr.Error(), "AccessDenied") || strings.Contains(retryErr.Error(), "Access Denied") || strings.Contains(retryErr.Error(), "403") {
 					return fmt.Errorf("S3访问被拒绝，请检查AWS凭证权限。需要s3:PutObject权限。错误详情: %w", retryErr)
 				}
 				return fmt.Errorf("上传文件失败（存储桶不支持ACL，且不使用ACL重试也失败）: %w", retryErr)
 			}
+			log.WithFields(map[string]interface{}{
+				"bucket_name": bucketName,
+				"key":         key,
+			}).Info("不使用ACL上传成功")
 			// 不使用ACL上传成功
 			return nil
 		}
 
+		log.WithError(err).WithFields(map[string]interface{}{
+			"bucket_name": bucketName,
+			"key":         key,
+		}).Error("上传文件到S3失败")
 		// 检查是否是权限错误
 		if strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "Access Denied") || strings.Contains(err.Error(), "403") {
 			return fmt.Errorf("S3访问被拒绝，请检查AWS凭证权限。需要s3:PutObject和s3:PutObjectAcl权限。错误详情: %w", err)
@@ -155,6 +181,10 @@ func (s *S3Service) UploadFileWithACL(bucketName, key string, body io.ReadSeeker
 		return fmt.Errorf("上传文件失败: %w", err)
 	}
 
+	log.WithFields(map[string]interface{}{
+		"bucket_name": bucketName,
+		"key":         key,
+	}).Info("文件上传到S3成功")
 	return nil
 }
 
@@ -250,6 +280,12 @@ func (s *S3Service) DeleteObject(bucketName, key string) error {
 
 // ObjectExists 检查S3对象是否存在
 func (s *S3Service) ObjectExists(bucketName, key string) (bool, error) {
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
+		"bucket_name": bucketName,
+		"key":         key,
+	}).Debug("检查S3对象是否存在")
+
 	input := &s3.HeadObjectInput{
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(key),
@@ -259,15 +295,31 @@ func (s *S3Service) ObjectExists(bucketName, key string) (bool, error) {
 	if err != nil {
 		// 检查是否是404错误（对象不存在）
 		if strings.Contains(err.Error(), "NoSuchKey") || strings.Contains(err.Error(), "404") {
+			log.WithFields(map[string]interface{}{
+				"bucket_name": bucketName,
+				"key":         key,
+			}).Debug("S3对象不存在")
 			return false, nil
 		}
 		// 检查是否是权限错误
 		if strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "Access Denied") || strings.Contains(err.Error(), "403") {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"bucket_name": bucketName,
+				"key":         key,
+			}).Error("检查S3对象存在性时权限被拒绝")
 			return false, fmt.Errorf("S3访问被拒绝，请检查AWS凭证权限。需要s3:GetObject权限。错误详情: %w", err)
 		}
+		log.WithError(err).WithFields(map[string]interface{}{
+			"bucket_name": bucketName,
+			"key":         key,
+		}).Error("检查S3对象存在性失败")
 		return false, fmt.Errorf("检查对象是否存在失败: %w", err)
 	}
 
+	log.WithFields(map[string]interface{}{
+		"bucket_name": bucketName,
+		"key":         key,
+	}).Debug("S3对象存在")
 	return true, nil
 }
 

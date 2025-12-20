@@ -3,17 +3,21 @@ package main
 import (
 	"aws_cdn/internal/config"
 	"aws_cdn/internal/database"
+	"aws_cdn/internal/logger"
 	"aws_cdn/internal/router"
-	"log"
 	"os"
 
 	"github.com/joho/godotenv"
 )
 
 func main() {
+	// 初始化日志系统（5G=5120MB，保留10个文件）
+	logger.InitLogger("./logs", "app", 5120, 10, 0)
+	log := logger.GetLogger()
+
 	// 加载环境变量
 	if err := godotenv.Load(); err != nil {
-		log.Println("未找到 .env 文件，使用环境变量")
+		log.Info("未找到 .env 文件，使用环境变量")
 	}
 
 	// 初始化配置
@@ -29,12 +33,12 @@ func main() {
 		SSLMode:  cfg.Database.SSLMode,
 	})
 	if err != nil {
-		log.Fatalf("数据库初始化失败: %v", err)
+		log.WithError(err).Fatal("数据库初始化失败")
 	}
 
 	// 自动迁移数据库
 	if err := database.AutoMigrate(db); err != nil {
-		log.Fatalf("数据库迁移失败: %v", err)
+		log.WithError(err).Fatal("数据库迁移失败")
 	}
 
 	// 初始化路由
@@ -46,9 +50,9 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("服务器启动在端口 %s", port)
+	log.WithField("port", port).Info("服务器启动")
 	if err := r.Run(":" + port); err != nil {
-		log.Fatalf("服务器启动失败: %v", err)
+		log.WithError(err).Fatal("服务器启动失败")
 	}
 }
 
