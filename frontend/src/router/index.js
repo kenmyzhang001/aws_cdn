@@ -3,6 +3,7 @@ import DomainList from '@/views/DomainList.vue'
 import RedirectList from '@/views/RedirectList.vue'
 import CloudFrontList from '@/views/CloudFrontList.vue'
 import DownloadPackageList from '@/views/DownloadPackageList.vue'
+import AuditLogList from '@/views/AuditLogList.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -34,6 +35,11 @@ const routes = [
     path: '/download-packages',
     name: 'DownloadPackageList',
     component: DownloadPackageList,
+  },
+  {
+    path: '/audit-logs',
+    name: 'AuditLogList',
+    component: AuditLogList,
   },
 ]
 
