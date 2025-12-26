@@ -235,7 +235,7 @@ func (s *RedirectService) CheckDomainUsedByDownloadPackage(domainName string) (b
 }
 
 // CreateRedirectRule 创建重定向规则并自动部署
-func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []string, certificateARN string) (*CreateRedirectRuleResult, error) {
+func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []string, certificateARN string, dnsProvider string) (*CreateRedirectRuleResult, error) {
 	// 检查源域名是否已存在（排除软删除的记录）
 	var existingRule models.RedirectRule
 	if err := s.db.Where("source_domain = ?", sourceDomain).First(&existingRule).Error; err == nil {
@@ -309,17 +309,60 @@ func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []s
 		return nil, fmt.Errorf("加载重定向规则失败: %w", err)
 	}
 
+	// 如果域名不存在，且提供了dns_provider，先创建域名
+	var domain *models.Domain
+	var domainErr error
+	if s.domainSvc != nil {
+		var existingDomain models.Domain
+		if err := s.db.Where("domain_name = ?", sourceDomain).First(&existingDomain).Error; err != nil {
+			// 域名不存在，如果提供了dns_provider，创建域名
+			if dnsProvider != "" {
+				dnsProviderEnum := models.DNSProviderAWS
+				if dnsProvider == "cloudflare" {
+					dnsProviderEnum = models.DNSProviderCloudflare
+				}
+				domain, domainErr = s.domainSvc.TransferDomain(sourceDomain, "系统自动创建", dnsProviderEnum)
+				if domainErr != nil {
+					fmt.Printf("警告: 自动创建域名失败: %v\n", domainErr)
+				}
+			}
+		} else {
+			domain = &existingDomain
+		}
+	}
+
 	// 如果没有提供证书ARN，尝试从domain表中查找
 	if certificateARN == "" {
-		certificateARN = s.findCertificateARN(sourceDomain)
+		if domain != nil && domain.CertificateARN != "" {
+			certificateARN = domain.CertificateARN
+		} else {
+			certificateARN = s.findCertificateARN(sourceDomain)
+		}
 	}
 
 	// 收集部署警告信息
 	var deploymentWarnings []string
 
+	// 检查域名是否为 Cloudflare 托管
+	isCloudflare := false
+	if domain != nil && domain.DNSProvider == models.DNSProviderCloudflare {
+		isCloudflare = true
+	} else {
+		// 如果 domain 为空，尝试从数据库查询
+		var domainCheck models.Domain
+		if err := s.db.Where("domain_name = ?", sourceDomain).First(&domainCheck).Error; err == nil {
+			if domainCheck.DNSProvider == models.DNSProviderCloudflare {
+				isCloudflare = true
+			}
+		}
+	}
+
 	// 自动部署到S3和CloudFront
-	// 如果找到了证书ARN，创建CloudFront分发
-	if certificateARN != "" {
+	// Cloudflare 托管的域名可以使用 CloudFront 默认证书（None），不需要证书 ARN
+	// AWS 托管的域名需要证书 ARN
+	if isCloudflare || certificateARN != "" {
+		// Cloudflare 域名或已找到证书，创建 CloudFront 分发
+		// 对于 Cloudflare 域名，certificateARN 可以为空，将使用 CloudFront 默认证书
 		if err := s.deployRedirectRule(rule, certificateARN); err != nil {
 			// 如果部署失败，记录错误但不阻止规则创建
 			// 可以后续通过更新接口重新部署
@@ -328,7 +371,7 @@ func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []s
 			fmt.Printf("警告: %s\n", warningMsg)
 		}
 	} else {
-		// 如果没有找到证书，先上传HTML文件到S3
+		// AWS 托管域名但没有找到证书，先上传HTML文件到S3
 		// 系统会自动尝试从domain表中查找证书，如果找到会自动创建CloudFront
 		// 如果确实没有证书，可以后续通过BindDomainToCloudFront接口手动绑定CloudFront
 		if err := s.uploadHTMLOnly(rule); err != nil {
@@ -431,8 +474,8 @@ func (s *RedirectService) CheckRoute53RecordStatus(domainName, cloudFrontID stri
 		}
 	}
 
-	// 检查是否存在指向 CloudFront 的 A 记录，并验证是否指向正确的分发
-	exists, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName)
+	// 检查是否存在指向 CloudFront 的 DNS 记录，并验证是否指向正确的分发
+	exists, err := s.domainSvc.CheckCloudFrontCNAMERecord(&domain, cloudFrontDomainName)
 	if err != nil {
 		return "error"
 	}
@@ -443,10 +486,12 @@ func (s *RedirectService) CheckRoute53RecordStatus(domainName, cloudFrontID stri
 
 	// 如果指定了 CloudFront 域名但检查失败，可能是指向了错误的分发
 	if cloudFrontDomainName != "" {
-		// 再次检查是否指向了其他 CloudFront（不指定域名）
-		existsAny, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName, "")
-		if err == nil && existsAny {
-			return "mismatched" // 指向了 CloudFront 但不是正确的分发
+		// 对于AWS，再次检查是否指向了其他 CloudFront（不指定域名）
+		if domain.DNSProvider == models.DNSProviderAWS {
+			existsAny, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName, "")
+			if err == nil && existsAny {
+				return "mismatched" // 指向了 CloudFront 但不是正确的分发
+			}
 		}
 	}
 
@@ -477,7 +522,7 @@ func (s *RedirectService) CheckWWWCNAMERecordStatus(domainName string) string {
 	}
 
 	// 检查是否存在 www CNAME 记录
-	exists, err := s.domainSvc.CheckWWWCNAMERecord(domain.HostedZoneID, domainName)
+	exists, err := s.domainSvc.CheckWWWCNAMERecord(&domain)
 	if err != nil {
 		return "error"
 	}
@@ -538,20 +583,20 @@ func (s *RedirectService) createRoute53RecordForCloudFront(domainName, distribut
 	cloudFrontDomainName := *dist.DomainName
 
 	// 先检查是否已存在正确的 DNS 记录
-	exists, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName)
+	exists, err := s.domainSvc.CheckCloudFrontCNAMERecord(&domain, cloudFrontDomainName)
 	if err != nil {
 		// 检查失败，继续尝试创建
 	} else if !exists {
-		// 如果不存在，创建或更新 Alias 记录（使用 UPSERT，如果存在则更新）
-		if err := s.domainSvc.CreateCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName); err != nil {
+		// 如果不存在，创建或更新 DNS 记录
+		if err := s.domainSvc.CreateCloudFrontCNAMERecord(&domain, cloudFrontDomainName); err != nil {
 			return err
 		}
 	}
 
 	// 如果域名不是 www 子域名，为 www 子域名创建 CNAME 记录指向根域名
-	// 即使根域名的 A 记录已存在，也要确保 www CNAME 记录存在
+	// 即使根域名的 DNS 记录已存在，也要确保 www CNAME 记录存在
 	if !strings.HasPrefix(domainName, "www.") {
-		if err := s.domainSvc.CreateWWWCNAMERecord(domain.HostedZoneID, domainName); err != nil {
+		if err := s.domainSvc.CreateWWWCNAMERecord(&domain); err != nil {
 			// 记录错误但不阻止流程，因为 www CNAME 不是必需的
 			fmt.Printf("警告: 创建 www CNAME 记录失败: %v\n", err)
 		}
@@ -995,7 +1040,7 @@ func (s *RedirectService) CheckRedirectRule(ruleID uint) (*RedirectRuleStatus, e
 				// 查找域名对应的 Route 53 Hosted Zone ID
 				var domain models.Domain
 				if err := s.db.Where("domain_name = ?", rule.SourceDomain).First(&domain).Error; err == nil && domain.HostedZoneID != "" {
-					exists, err := s.domainSvc.CheckWWWCNAMERecord(domain.HostedZoneID, rule.SourceDomain)
+					exists, err := s.domainSvc.CheckWWWCNAMERecord(&domain)
 					if err != nil {
 						status.WWWCNAMEError = fmt.Sprintf("检查www CNAME记录失败: %v", err)
 						status.Issues = append(status.Issues, "检查www CNAME记录失败")

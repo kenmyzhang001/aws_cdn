@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"aws_cdn/internal/models"
 	"aws_cdn/internal/services"
 	"bytes"
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -203,8 +205,10 @@ func (h *DownloadPackageHandler) ListDownloadPackages(c *gin.Context) {
 		return
 	}
 
-	// 为每个下载包获取CloudFront状态
+	// 为每个下载包获取CloudFront状态（并发查询）
 	responses := make([]DownloadPackageResponse, len(packages))
+	var wg sync.WaitGroup
+
 	for i, pkg := range packages {
 		responses[i] = DownloadPackageResponse{
 			ID:               pkg.ID,
@@ -223,33 +227,57 @@ func (h *DownloadPackageHandler) ListDownloadPackages(c *gin.Context) {
 			UpdatedAt:        pkg.UpdatedAt.Format(time.RFC3339),
 		}
 
-		// 获取CloudFront状态和启用状态
-		if pkg.CloudFrontID != "" {
-			status, err := h.service.GetCloudFrontStatus(pkg.CloudFrontID)
-			if err != nil {
-				responses[i].CloudFrontStatus = "unknown"
-			} else {
-				responses[i].CloudFrontStatus = status
-			}
-
-			enabled, err := h.service.GetCloudFrontEnabled(pkg.CloudFrontID)
-			if err != nil {
-				responses[i].CloudFrontEnabled = false
-			} else {
-				responses[i].CloudFrontEnabled = enabled
-			}
-		} else {
+		// 初始化默认值
+		if pkg.CloudFrontID == "" {
 			responses[i].CloudFrontStatus = ""
 			responses[i].CloudFrontEnabled = false
 		}
 
-		// 获取 CloudFront OriginPath 信息
-		currentPath, expectedPath, err := h.service.GetCloudFrontOriginPathInfo(&pkg)
-		if err == nil {
-			responses[i].CloudFrontOriginPathCurrent = currentPath
-			responses[i].CloudFrontOriginPathExpected = expectedPath
-		}
+		// 并发查询所有状态
+		wg.Add(1)
+		go func(idx int, pkgCopy models.DownloadPackage) {
+			defer wg.Done()
+
+			// 查询 CloudFront 状态和启用状态
+			if pkgCopy.CloudFrontID != "" {
+				var statusWg sync.WaitGroup
+
+				// 并发查询状态和启用状态
+				statusWg.Add(1)
+				go func() {
+					defer statusWg.Done()
+					status, err := h.service.GetCloudFrontStatus(pkgCopy.CloudFrontID)
+					if err != nil {
+						responses[idx].CloudFrontStatus = "unknown"
+					} else {
+						responses[idx].CloudFrontStatus = status
+					}
+				}()
+
+				statusWg.Add(1)
+				go func() {
+					defer statusWg.Done()
+					enabled, err := h.service.GetCloudFrontEnabled(pkgCopy.CloudFrontID)
+					if err != nil {
+						responses[idx].CloudFrontEnabled = false
+					} else {
+						responses[idx].CloudFrontEnabled = enabled
+					}
+				}()
+
+				statusWg.Wait()
+			}
+
+			// 获取 CloudFront OriginPath 信息
+			currentPath, expectedPath, err := h.service.GetCloudFrontOriginPathInfo(&pkgCopy)
+			if err == nil {
+				responses[idx].CloudFrontOriginPathCurrent = currentPath
+				responses[idx].CloudFrontOriginPathExpected = expectedPath
+			}
+		}(i, pkg)
 	}
+
+	wg.Wait()
 
 	c.JSON(http.StatusOK, gin.H{
 		"data":  responses,

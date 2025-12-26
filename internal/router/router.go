@@ -7,6 +7,7 @@ import (
 	"aws_cdn/internal/middleware"
 	"aws_cdn/internal/services"
 	"aws_cdn/internal/services/aws"
+	"aws_cdn/internal/services/cloudflare"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -37,6 +38,14 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	cloudFrontSvc, _ := aws.NewCloudFrontService(&cfg.AWS)
 	s3Svc, _ := aws.NewS3Service(&cfg.AWS)
 
+	// 初始化 Cloudflare 服务
+	cloudflareSvc, err := cloudflare.NewCloudflareService(&cfg.Cloudflare)
+	if err != nil {
+		log := logger.GetLogger()
+		log.WithError(err).Warn("Cloudflare服务初始化失败，Cloudflare功能将不可用")
+		cloudflareSvc = nil
+	}
+
 	var s3Origin string
 	log := logger.GetLogger()
 	if cfg.AWS.S3BucketName != "" {
@@ -52,7 +61,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 初始化服务
 	auditService := services.NewAuditService(db)
-	domainService := services.NewDomainService(db, route53Svc, acmSvc, cloudFrontSvc, s3Svc)
+	domainService := services.NewDomainService(db, route53Svc, acmSvc, cloudFrontSvc, s3Svc, cloudflareSvc)
 	redirectService := services.NewRedirectService(db, cloudFrontSvc, s3Svc, domainService, &cfg.AWS)
 	authService := services.NewAuthService(db, &cfg.JWT)
 	cloudFrontService := services.NewCloudFrontService(cloudFrontSvc, s3Origin)

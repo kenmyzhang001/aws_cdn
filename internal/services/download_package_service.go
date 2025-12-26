@@ -73,8 +73,9 @@ func (s *DownloadPackageService) CreateDownloadPackage(domainID uint, fileName s
 		return nil, fmt.Errorf("域名不存在: %w", err)
 	}
 
-	// 检查域名证书状态
-	if domain.CertificateStatus != "issued" {
+	// 检查域名证书状态（仅对 AWS 托管的域名检查）
+	// Cloudflare 托管的域名使用 CloudFront 默认证书，不需要证书
+	if domain.DNSProvider == models.DNSProviderAWS && domain.CertificateStatus != "issued" {
 		log.WithFields(map[string]interface{}{
 			"domain_id":          domainID,
 			"domain_name":        domain.DomainName,
@@ -326,15 +327,26 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 		// 计算originPath：同一域名下的所有文件都使用相同的目录路径 downloads/{domain_name}/
 		originPath := fmt.Sprintf("/downloads/%s", pkg.DomainName)
 		log.WithFields(map[string]interface{}{
-			"package_id":  pkg.ID,
-			"domain_name": pkg.DomainName,
-			"origin_path": originPath,
-			"s3_origin":   s3Origin,
+			"package_id":   pkg.ID,
+			"domain_name":  pkg.DomainName,
+			"origin_path":  originPath,
+			"s3_origin":    s3Origin,
+			"dns_provider": domain.DNSProvider,
 		}).Info("开始创建新的CloudFront分发")
+
+		// 对于 Cloudflare 托管的域名，使用空证书 ARN（将使用 CloudFront 默认证书）
+		certificateARN := domain.CertificateARN
+		if domain.DNSProvider == models.DNSProviderCloudflare {
+			certificateARN = "" // Cloudflare 域名使用 CloudFront 默认证书
+			log.WithFields(map[string]interface{}{
+				"package_id":  pkg.ID,
+				"domain_name": pkg.DomainName,
+			}).Info("Cloudflare 托管域名，使用 CloudFront 默认证书")
+		}
 
 		cloudFrontID, err = s.cloudFrontSvc.CreateDistributionForLargeFileDownload(
 			pkg.DomainName,
-			domain.CertificateARN,
+			certificateARN,
 			s3Origin,
 			originPath,
 		)
@@ -388,40 +400,41 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 		time.Sleep(5 * time.Second)
 
 		// 检查是否已存在记录
-		exists, err := s.domainService.CheckCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, cloudFrontDomain)
+		exists, err := s.domainService.CheckCloudFrontCNAMERecord(domain, cloudFrontDomain)
 		if err == nil && !exists {
-			// 创建A记录指向CloudFront
+			// 创建DNS记录指向CloudFront
 			log.WithFields(map[string]interface{}{
 				"package_id":        pkg.ID,
 				"domain_name":       pkg.DomainName,
 				"cloudfront_domain": cloudFrontDomain,
-			}).Info("创建Route53 A记录")
-			if err := s.domainService.CreateCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, cloudFrontDomain); err != nil {
+				"dns_provider":      domain.DNSProvider,
+			}).Info("创建DNS记录")
+			if err := s.domainService.CreateCloudFrontCNAMERecord(domain, cloudFrontDomain); err != nil {
 				log.WithError(err).WithFields(map[string]interface{}{
 					"package_id":        pkg.ID,
 					"domain_name":       pkg.DomainName,
 					"cloudfront_domain": cloudFrontDomain,
-				}).Error("创建Route53记录失败")
+				}).Error("创建DNS记录失败")
 				s.db.Model(pkg).Updates(map[string]interface{}{
 					"status":        models.DownloadPackageStatusFailed,
-					"error_message": fmt.Sprintf("创建Route53记录失败: %v", err),
+					"error_message": fmt.Sprintf("创建DNS记录失败: %v", err),
 				})
 				return
 			}
 			log.WithFields(map[string]interface{}{
 				"package_id":  pkg.ID,
 				"domain_name": pkg.DomainName,
-			}).Info("Route53 A记录创建成功")
+			}).Info("DNS记录创建成功")
 		} else if err != nil {
 			log.WithError(err).WithFields(map[string]interface{}{
 				"package_id":  pkg.ID,
 				"domain_name": pkg.DomainName,
-			}).Warn("检查Route53记录时出错")
+			}).Warn("检查DNS记录时出错")
 		} else {
 			log.WithFields(map[string]interface{}{
 				"package_id":  pkg.ID,
 				"domain_name": pkg.DomainName,
-			}).Info("Route53记录已存在，跳过创建")
+			}).Info("DNS记录已存在，跳过创建")
 		}
 	} else {
 		log.WithFields(map[string]interface{}{
@@ -709,7 +722,7 @@ func (s *DownloadPackageService) CheckDownloadPackage(id uint) (*DownloadPackage
 
 			// 检查 Route 53 DNS 记录是否指向正确的 CloudFront
 			if domain.HostedZoneID != "" && pkg.CloudFrontDomain != "" {
-				exists, err := s.domainService.CheckCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, pkg.CloudFrontDomain)
+				exists, err := s.domainService.CheckCloudFrontCNAMERecord(domain, pkg.CloudFrontDomain)
 				if err != nil {
 					status.Route53DNSError = fmt.Sprintf("检查Route 53 DNS记录失败: %v", err)
 					status.Issues = append(status.Issues, "检查Route 53 DNS记录失败")
@@ -848,10 +861,16 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 		// 计算originPath：同一域名下的所有文件都使用相同的目录路径 downloads/{domain_name}/
 		originPath := fmt.Sprintf("/downloads/%s", pkg.DomainName)
 
+		// 对于 Cloudflare 托管的域名，使用空证书 ARN（将使用 CloudFront 默认证书）
+		certificateARN := domain.CertificateARN
+		if domain.DNSProvider == models.DNSProviderCloudflare {
+			certificateARN = "" // Cloudflare 域名使用 CloudFront 默认证书
+		}
+
 		// 创建CloudFront分发
 		cloudFrontID, err := s.cloudFrontSvc.CreateDistributionForLargeFileDownload(
 			pkg.DomainName,
-			domain.CertificateARN,
+			certificateARN,
 			s3Origin,
 			originPath,
 		)
@@ -876,16 +895,16 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 
 	// 检查并创建 Route 53 DNS 记录（如果不存在）
 	if domain.HostedZoneID != "" && pkg.CloudFrontDomain != "" {
-		exists, err := s.domainService.CheckCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, pkg.CloudFrontDomain)
+		exists, err := s.domainService.CheckCloudFrontCNAMERecord(domain, pkg.CloudFrontDomain)
 		if err != nil {
 			// 检查失败，尝试创建
-			if err := s.domainService.CreateCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, pkg.CloudFrontDomain); err != nil {
-				return fmt.Errorf("创建Route 53 DNS记录失败: %w", err)
+			if err := s.domainService.CreateCloudFrontCNAMERecord(domain, pkg.CloudFrontDomain); err != nil {
+				return fmt.Errorf("创建DNS记录失败: %w", err)
 			}
 		} else if !exists {
 			// 记录不存在，创建它
-			if err := s.domainService.CreateCloudFrontAliasRecord(domain.HostedZoneID, pkg.DomainName, pkg.CloudFrontDomain); err != nil {
-				return fmt.Errorf("创建Route 53 DNS记录失败: %w", err)
+			if err := s.domainService.CreateCloudFrontCNAMERecord(domain, pkg.CloudFrontDomain); err != nil {
+				return fmt.Errorf("创建DNS记录失败: %w", err)
 			}
 		}
 	}

@@ -36,6 +36,24 @@ func NewCloudFrontService(cfg *config.AWSConfig) (*CloudFrontService, error) {
 	}, nil
 }
 
+// buildViewerCertificate 构建 ViewerCertificate 配置
+// 如果 certificateARN 为空，使用 CloudFront 默认证书（None）
+// 如果 certificateARN 不为空，使用 ACM 证书
+func (s *CloudFrontService) buildViewerCertificate(certificateARN string) *cloudfront.ViewerCertificate {
+	if certificateARN == "" {
+		// 使用 CloudFront 默认证书（None）
+		return &cloudfront.ViewerCertificate{
+			CloudFrontDefaultCertificate: aws.Bool(true),
+		}
+	}
+	// 使用 ACM 证书
+	return &cloudfront.ViewerCertificate{
+		ACMCertificateArn:      aws.String(certificateARN),
+		SSLSupportMethod:       aws.String("sni-only"),
+		MinimumProtocolVersion: aws.String("TLSv1.2_2021"),
+	}
+}
+
 // CreateDistribution 创建 CloudFront 分发
 func (s *CloudFrontService) CreateDistribution(domainName string, certificateARN string, s3Origin string) (string, error) {
 	return s.CreateDistributionWithPath(domainName, certificateARN, s3Origin, "")
@@ -163,11 +181,7 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 				DefaultTTL: aws.Int64(86400),    // 默认缓存时间（24小时）
 				MaxTTL:     aws.Int64(31536000), // 最大缓存时间（1年）
 			},
-			ViewerCertificate: &cloudfront.ViewerCertificate{
-				ACMCertificateArn:      aws.String(certificateARN),
-				SSLSupportMethod:       aws.String("sni-only"),
-				MinimumProtocolVersion: aws.String("TLSv1.2_2021"),
-			},
+			ViewerCertificate: s.buildViewerCertificate(certificateARN),
 			Enabled: aws.Bool(true),
 		},
 	}
@@ -308,11 +322,7 @@ func (s *CloudFrontService) CreateDistributionForLargeFileDownload(domainName st
 				DefaultTTL: aws.Int64(3600),  // 默认缓存时间（1小时）
 				MaxTTL:     aws.Int64(86400), // 最大缓存时间（24小时）
 			},
-			ViewerCertificate: &cloudfront.ViewerCertificate{
-				ACMCertificateArn:      aws.String(certificateARN),
-				SSLSupportMethod:       aws.String("sni-only"),
-				MinimumProtocolVersion: aws.String("TLSv1.2_2021"),
-			},
+			ViewerCertificate: s.buildViewerCertificate(certificateARN),
 			Enabled: aws.Bool(true),
 		},
 	}

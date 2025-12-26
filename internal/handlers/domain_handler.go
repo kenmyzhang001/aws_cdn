@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"aws_cdn/internal/models"
 	"aws_cdn/internal/services"
 	"net/http"
 	"strconv"
@@ -19,8 +20,9 @@ func NewDomainHandler(service *services.DomainService) *DomainHandler {
 // TransferDomain 转入域名
 func (h *DomainHandler) TransferDomain(c *gin.Context) {
 	var req struct {
-		DomainName string `json:"domain_name" binding:"required"`
-		Registrar  string `json:"registrar" binding:"required"`
+		DomainName  string `json:"domain_name" binding:"required"`
+		Registrar   string `json:"registrar" binding:"required"`
+		DNSProvider string `json:"dns_provider"` // aws 或 cloudflare，默认为 aws
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -28,7 +30,16 @@ func (h *DomainHandler) TransferDomain(c *gin.Context) {
 		return
 	}
 
-	domain, err := h.service.TransferDomain(req.DomainName, req.Registrar)
+	// 默认使用AWS
+	dnsProvider := models.DNSProviderAWS
+	if req.DNSProvider == "cloudflare" {
+		dnsProvider = models.DNSProviderCloudflare
+	} else if req.DNSProvider != "" && req.DNSProvider != "aws" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dns_provider 必须是 'aws' 或 'cloudflare'"})
+		return
+	}
+
+	domain, err := h.service.TransferDomain(req.DomainName, req.Registrar, dnsProvider)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -109,7 +120,7 @@ func (h *DomainHandler) GenerateCertificate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "证书生成请求已提交，验证记录已添加到 Route 53"})
+	c.JSON(http.StatusOK, gin.H{"message": "证书生成请求已提交，验证记录已添加到 DNS 提供商"})
 }
 
 // GetCertificateStatus 获取证书状态

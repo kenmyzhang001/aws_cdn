@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"aws_cdn/internal/models"
 	"aws_cdn/internal/services"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,6 +25,7 @@ func (h *RedirectHandler) CreateRedirectRule(c *gin.Context) {
 		SourceDomain   string   `json:"source_domain" binding:"required"`
 		TargetURLs     []string `json:"target_urls" binding:"required,min=1"`
 		CertificateARN string   `json:"certificate_arn"` // 可选，用于创建CloudFront分发
+		DNSProvider    string   `json:"dns_provider"`   // aws 或 cloudflare，默认为 aws
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -30,7 +33,7 @@ func (h *RedirectHandler) CreateRedirectRule(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.CreateRedirectRule(req.SourceDomain, req.TargetURLs, req.CertificateARN)
+	result, err := h.service.CreateRedirectRule(req.SourceDomain, req.TargetURLs, req.CertificateARN, req.DNSProvider)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -72,8 +75,10 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 		return
 	}
 
-	// 为每个规则添加 CloudFront 状态、域名状态、证书状态和目标URL状态
+	// 为每个规则添加 CloudFront 状态、域名状态、证书状态和目标URL状态（并发查询）
 	rulesWithStatus := make([]gin.H, len(rules))
+	var wg sync.WaitGroup
+
 	for i, rule := range rules {
 		ruleMap := gin.H{
 			"id":            rule.ID,
@@ -84,71 +89,133 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 			"updated_at":    rule.UpdatedAt,
 		}
 
-		// 查询 CloudFront 状态和启用状态
-		if rule.CloudFrontID != "" {
-			status, err := h.service.GetCloudFrontStatus(rule.CloudFrontID)
-			if err == nil {
-				ruleMap["cloudfront_status"] = status
+		// 并发查询所有状态
+		wg.Add(1)
+		go func(idx int, ruleCopy models.RedirectRule) {
+			defer wg.Done()
+
+			var statusWg sync.WaitGroup
+			var mu sync.Mutex // 保护对 ruleMap 的并发写入
+
+			// 查询 CloudFront 状态和启用状态
+			if ruleCopy.CloudFrontID != "" {
+				statusWg.Add(1)
+				go func() {
+					defer statusWg.Done()
+					status, err := h.service.GetCloudFrontStatus(ruleCopy.CloudFrontID)
+					if err == nil {
+						mu.Lock()
+						ruleMap["cloudfront_status"] = status
+						mu.Unlock()
+					}
+				}()
+
+				statusWg.Add(1)
+				go func() {
+					defer statusWg.Done()
+					enabled, err := h.service.GetCloudFrontEnabled(ruleCopy.CloudFrontID)
+					if err == nil {
+						mu.Lock()
+						ruleMap["cloudfront_enabled"] = enabled
+						mu.Unlock()
+					}
+				}()
 			}
 
-			enabled, err := h.service.GetCloudFrontEnabled(rule.CloudFrontID)
-			if err == nil {
-				ruleMap["cloudfront_enabled"] = enabled
+			// 获取 CloudFront OriginPath 信息
+			statusWg.Add(1)
+			go func() {
+				defer statusWg.Done()
+				currentPath, expectedPath, err := h.service.GetCloudFrontOriginPathInfo(&ruleCopy)
+				if err == nil {
+					mu.Lock()
+					ruleMap["cloudfront_origin_path_current"] = currentPath
+					ruleMap["cloudfront_origin_path_expected"] = expectedPath
+					mu.Unlock()
+				}
+			}()
+
+			// 查询域名状态和证书状态
+			statusWg.Add(1)
+			go func() {
+				defer statusWg.Done()
+				domainStatus, certStatus := h.service.GetDomainInfoByDomainName(ruleCopy.SourceDomain)
+				mu.Lock()
+				if domainStatus != "" {
+					ruleMap["domain_status"] = domainStatus
+				}
+				if certStatus != "" {
+					ruleMap["certificate_status"] = certStatus
+				}
+				mu.Unlock()
+			}()
+
+			// 检查 S3 bucket policy 状态
+			statusWg.Add(1)
+			go func() {
+				defer statusWg.Done()
+				s3BucketPolicyStatus := h.service.CheckS3BucketPolicyStatus()
+				if s3BucketPolicyStatus != "" {
+					mu.Lock()
+					ruleMap["s3_bucket_policy_status"] = s3BucketPolicyStatus
+					mu.Unlock()
+				}
+			}()
+
+			// 查询 Route 53 DNS 记录状态（验证是否指向正确的 CloudFront）
+			if ruleCopy.CloudFrontID != "" {
+				statusWg.Add(1)
+				go func() {
+					defer statusWg.Done()
+					dnsStatus := h.service.CheckRoute53RecordStatus(ruleCopy.SourceDomain, ruleCopy.CloudFrontID)
+					mu.Lock()
+					ruleMap["route53_dns_status"] = dnsStatus
+					mu.Unlock()
+				}()
+
+				// 检查 www CNAME 记录状态（仅对根域名检查，不包括 www 子域名）
+				if !strings.HasPrefix(ruleCopy.SourceDomain, "www.") {
+					statusWg.Add(1)
+					go func() {
+						defer statusWg.Done()
+						wwwCNAMEStatus := h.service.CheckWWWCNAMERecordStatus(ruleCopy.SourceDomain)
+						mu.Lock()
+						ruleMap["www_cname_status"] = wwwCNAMEStatus
+						mu.Unlock()
+					}()
+				}
 			}
-		}
 
-		// 获取 CloudFront OriginPath 信息
-		currentPath, expectedPath, err := h.service.GetCloudFrontOriginPathInfo(&rule)
-		if err == nil {
-			ruleMap["cloudfront_origin_path_current"] = currentPath
-			ruleMap["cloudfront_origin_path_expected"] = expectedPath
-		}
+			// 等待所有状态查询完成
+			statusWg.Wait()
 
-		// 查询域名状态和证书状态
-		domainStatus, certStatus := h.service.GetDomainInfoByDomainName(rule.SourceDomain)
-		if domainStatus != "" {
-			ruleMap["domain_status"] = domainStatus
-		}
-		if certStatus != "" {
-			ruleMap["certificate_status"] = certStatus
-		}
-
-		// 检查 S3 bucket policy 状态
-		s3BucketPolicyStatus := h.service.CheckS3BucketPolicyStatus()
-		if s3BucketPolicyStatus != "" {
-			ruleMap["s3_bucket_policy_status"] = s3BucketPolicyStatus
-		}
-
-		// 查询 Route 53 DNS 记录状态（验证是否指向正确的 CloudFront）
-		if rule.CloudFrontID != "" {
-			dnsStatus := h.service.CheckRoute53RecordStatus(rule.SourceDomain, rule.CloudFrontID)
-			ruleMap["route53_dns_status"] = dnsStatus
-
-			// 检查 www CNAME 记录状态（仅对根域名检查，不包括 www 子域名）
-			if !strings.HasPrefix(rule.SourceDomain, "www.") {
-				wwwCNAMEStatus := h.service.CheckWWWCNAMERecordStatus(rule.SourceDomain)
-				ruleMap["www_cname_status"] = wwwCNAMEStatus
+			// 检查目标URL状态（并发查询所有目标）
+			targetsWithStatus := make([]gin.H, len(ruleCopy.Targets))
+			var targetWg sync.WaitGroup
+			for j, target := range ruleCopy.Targets {
+				targetWg.Add(1)
+				go func(targetIdx int, targetCopy models.RedirectTarget) {
+					defer targetWg.Done()
+					targetMap := gin.H{
+						"id":         targetCopy.ID,
+						"target_url": targetCopy.TargetURL,
+						"weight":     targetCopy.Weight,
+						"is_active":  targetCopy.IsActive,
+					}
+					// 检查URL状态
+					urlStatus := h.service.CheckURLStatus(targetCopy.TargetURL)
+					targetMap["url_status"] = urlStatus
+					targetsWithStatus[targetIdx] = targetMap
+				}(j, target)
 			}
-		}
+			targetWg.Wait()
+			ruleMap["targets"] = targetsWithStatus
 
-		// 检查目标URL状态
-		targetsWithStatus := make([]gin.H, len(rule.Targets))
-		for j, target := range rule.Targets {
-			targetMap := gin.H{
-				"id":         target.ID,
-				"target_url": target.TargetURL,
-				"weight":     target.Weight,
-				"is_active":  target.IsActive,
-			}
-			// 检查URL状态
-			urlStatus := h.service.CheckURLStatus(target.TargetURL)
-			targetMap["url_status"] = urlStatus
-			targetsWithStatus[j] = targetMap
-		}
-		ruleMap["targets"] = targetsWithStatus
-
-		rulesWithStatus[i] = ruleMap
+			rulesWithStatus[idx] = ruleMap
+		}(i, rule)
 	}
+
+	wg.Wait()
 
 	c.JSON(http.StatusOK, gin.H{
 		"data":  rulesWithStatus,
