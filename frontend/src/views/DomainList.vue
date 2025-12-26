@@ -31,7 +31,8 @@
         </el-table-column>
         <el-table-column prop="certificate_status" label="证书状态">
           <template #default="{ row }">
-            <el-tag :type="getCertificateStatusType(row.certificate_status)">
+            <span v-if="row.dns_provider === 'cloudflare'" style="color: #c0c4cc;">-</span>
+            <el-tag v-else :type="getCertificateStatusType(row.certificate_status)">
               {{ getCertificateStatusText(row.certificate_status) }}
             </el-tag>
           </template>

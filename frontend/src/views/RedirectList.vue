@@ -158,8 +158,8 @@
       <el-form :model="createForm" label-width="120px">
         <el-form-item label="DNS提供商" required>
           <el-radio-group v-model="createForm.dns_provider" @change="loadAvailableDomains">
-            <el-radio label="aws">AWS Route53</el-radio>
             <el-radio label="cloudflare">Cloudflare</el-radio>
+            <el-radio label="aws">AWS Route53</el-radio>
           </el-radio-group>
           <div style="margin-top: 5px; color: #909399; font-size: 12px">
             选择域名托管商，将影响证书验证和DNS记录的创建方式

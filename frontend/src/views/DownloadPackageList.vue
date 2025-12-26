@@ -142,8 +142,8 @@
       <el-form :model="addDomainForm" label-width="120px" :rules="addDomainRules" ref="addDomainFormRef">
         <el-form-item label="DNS提供商" required>
           <el-radio-group v-model="addDomainForm.dns_provider" @change="loadAvailableDomains">
-            <el-radio label="aws">AWS Route53</el-radio>
             <el-radio label="cloudflare">Cloudflare</el-radio>
+            <el-radio label="aws">AWS Route53</el-radio>
           </el-radio-group>
           <div style="margin-top: 5px; color: #909399; font-size: 12px">
             选择域名托管商，将影响证书验证和DNS记录的创建方式
@@ -165,6 +165,7 @@
               <div>
                 <span>{{ domain.domain_name }}</span>
                 <el-tag
+                  v-if="domain.dns_provider !== 'cloudflare'"
                   :type="domain.certificate_status === 'issued' ? 'success' : 'warning'"
                   size="small"
                   style="margin-left: 8px"
@@ -183,7 +184,7 @@
             </el-option>
           </el-select>
           <div style="margin-top: 5px; color: #909399; font-size: 12px">
-            只显示证书已签发且未被重定向和下载包使用的域名
+            AWS域名需要证书已签发，Cloudflare域名只需要域名状态为已完成，且未被重定向和下载包使用
           </div>
         </el-form-item>
         <el-form-item label="上传第一个APK文件" prop="file">
@@ -400,7 +401,7 @@ const showAddDomainDialog = ref(false)
 const addDomainLoading = ref(false)
 const addDomainUploadProgress = ref(0)
 const addDomainForm = ref({
-  dns_provider: 'aws', // 默认使用AWS
+  dns_provider: 'cloudflare', // 默认使用Cloudflare
   domain_id: '',
   file_name: '',
   file: null,
@@ -526,10 +527,19 @@ const loadDomains = async () => {
 const loadAvailableDomains = async () => {
   try {
     const response = await domainApi.getDomainList({ page: 1, page_size: 1000 })
-    // 过滤：只显示证书已签发且未被重定向使用且未被下载包使用的域名
-    const allAvailable = (response.data || []).filter(
-      (d) => d.certificate_status === 'issued' && !d.used_by_redirect && !d.used_by_download_package
-    )
+    // 过滤：AWS域名需要证书已签发，Cloudflare域名只需要域名状态为completed
+    const allAvailable = (response.data || []).filter((d) => {
+      // 必须未被重定向使用且未被下载包使用
+      if (d.used_by_redirect || d.used_by_download_package) {
+        return false
+      }
+      // Cloudflare域名：只需要域名状态为completed
+      if (d.dns_provider === 'cloudflare') {
+        return d.status === 'completed'
+      }
+      // AWS域名：需要证书已签发
+      return d.certificate_status === 'issued'
+    })
     
     // 排除已经在下载域名列表中的域名
     const existingDomainIds = new Set(domainList.value.map((d) => d.id))
@@ -544,8 +554,9 @@ const filteredAvailableDomains = computed(() => {
   if (!addDomainForm.value.dns_provider) {
     return availableDomains.value
   }
+  // 只显示匹配所选DNS提供商的域名
   return availableDomains.value.filter(
-    (d) => !d.dns_provider || d.dns_provider === addDomainForm.value.dns_provider
+    (d) => d.dns_provider === addDomainForm.value.dns_provider
   )
 })
 
@@ -553,7 +564,7 @@ const filteredAvailableDomains = computed(() => {
 const openAddDomainDialog = async () => {
   // 重置表单
   addDomainForm.value = {
-    dns_provider: 'aws',
+    dns_provider: 'cloudflare',
     domain_id: '',
     file_name: '',
     file: null,
@@ -591,6 +602,7 @@ const handleAddDomain = async () => {
     ElMessage.success('域名已添加，您可以稍后上传文件')
     showAddDomainDialog.value = false
     addDomainForm.value = {
+      dns_provider: 'cloudflare',
       domain_id: '',
       file_name: '',
       file: null,
@@ -624,6 +636,7 @@ const handleAddDomain = async () => {
     ElMessage.success('上传成功，正在处理中...')
     showAddDomainDialog.value = false
     addDomainForm.value = {
+      dns_provider: 'cloudflare',
       domain_id: '',
       file_name: '',
       file: null,
