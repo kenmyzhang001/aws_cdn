@@ -6,7 +6,7 @@
           <span>域名管理</span>
           <el-button type="primary" @click="showTransferDialog = true">
             <el-icon><Plus /></el-icon>
-            转入域名
+            新增域名
           </el-button>
         </div>
       </template>
@@ -15,6 +15,13 @@
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="domain_name" label="域名" />
         <el-table-column prop="registrar" label="原注册商" />
+        <el-table-column prop="dns_provider" label="DNS提供商" width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.dns_provider === 'cloudflare' ? 'success' : 'primary'">
+              {{ row.dns_provider === 'cloudflare' ? 'Cloudflare' : 'AWS' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
@@ -54,8 +61,15 @@
         </el-table-column>
         <el-table-column label="操作" width="450">
           <template #default="{ row }">
-            <el-button size="small" @click="viewNServers(row)">查看 NS</el-button>
+            <el-button 
+              v-if="row.dns_provider !== 'cloudflare'"
+              size="small" 
+              @click="viewNServers(row)"
+            >
+              查看 NS
+            </el-button>
             <el-button
+              v-if="row.dns_provider !== 'cloudflare'"
               size="small"
               type="success"
               @click="generateCert(row)"
@@ -64,6 +78,7 @@
               生成证书
             </el-button>
             <el-button
+              v-if="row.dns_provider !== 'cloudflare'"
               size="small"
               type="warning"
               @click="checkCertificate(row)"
@@ -95,20 +110,26 @@
       />
     </el-card>
 
-    <!-- 转入域名对话框 -->
-    <el-dialog v-model="showTransferDialog" title="转入域名" width="500px">
+    <!-- 新增域名对话框 -->
+    <el-dialog v-model="showTransferDialog" title="新增域名" width="500px">
       <el-form :model="transferForm" label-width="100px">
         <el-form-item label="域名" required>
           <el-input v-model="transferForm.domain_name" placeholder="例如: example.com" />
         </el-form-item>
         <el-form-item label="原注册商" required>
-          <el-input v-model="transferForm.registrar" placeholder="例如: GoDaddy" />
+          <el-input v-model="transferForm.registrar" placeholder="例如: GoDaddy aliyun" />
+        </el-form-item>
+        <el-form-item label="DNS提供商" required>
+          <el-select v-model="transferForm.dns_provider" placeholder="请选择DNS提供商" style="width: 100%">
+            <el-option label="Cloudflare" value="cloudflare" />
+            <el-option label="AWS" value="aws" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showTransferDialog = false">取消</el-button>
         <el-button type="primary" @click="handleTransfer" :loading="transferLoading">
-          确认转入
+          确认新增
         </el-button>
       </template>
     </el-dialog>
@@ -217,6 +238,7 @@ const transferLoading = ref(false)
 const transferForm = ref({
   domain_name: '',
   registrar: '',
+  dns_provider: 'cloudflare', // 默认选择 Cloudflare
 })
 
 const showNSDialog = ref(false)
@@ -259,7 +281,7 @@ const handleTransfer = async () => {
     await domainApi.transferDomain(transferForm.value)
     ElMessage.success('域名转入请求已提交')
     showTransferDialog.value = false
-    transferForm.value = { domain_name: '', registrar: '' }
+    transferForm.value = { domain_name: '', registrar: '', dns_provider: 'cloudflare' }
     loadDomains()
   } catch (error) {
     // 错误已在拦截器中处理
@@ -323,8 +345,13 @@ const refreshStatus = async (row) => {
 }
 
 const handleDelete = (row) => {
+  const isCloudflare = row.dns_provider === 'cloudflare'
+  const message = isCloudflare
+    ? `确定要删除域名 "${row.domain_name}" 吗？此操作将删除数据库中的域名记录，且无法恢复。`
+    : `确定要删除域名 "${row.domain_name}" 吗？此操作将同时删除相关的 AWS 资源（Route53 Hosted Zone 和 ACM 证书），且无法恢复。`
+  
   ElMessageBox.confirm(
-    `确定要删除域名 "${row.domain_name}" 吗？此操作将同时删除相关的 AWS 资源（Route53 Hosted Zone 和 ACM 证书），且无法恢复。`,
+    message,
     '确认删除',
     {
       confirmButtonText: '确定',

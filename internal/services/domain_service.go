@@ -36,8 +36,8 @@ func NewDomainService(db *gorm.DB, route53Svc *aws.Route53Service, acmSvc *aws.A
 func (s *DomainService) TransferDomain(domainName, registrar string, dnsProvider models.DNSProvider) (*models.Domain, error) {
 	log := logger.GetLogger()
 	log.WithFields(map[string]interface{}{
-		"domain_name": domainName,
-		"registrar":   registrar,
+		"domain_name":  domainName,
+		"registrar":    registrar,
 		"dns_provider": dnsProvider,
 	}).Info("开始转入域名")
 
@@ -67,7 +67,7 @@ func (s *DomainService) TransferDomain(domainName, registrar string, dnsProvider
 		nsServers = []string{} // Cloudflare不需要NS服务器配置
 		nsServersJSON = "[]"
 		log.WithFields(map[string]interface{}{
-			"domain_name":   domainName,
+			"domain_name":    domainName,
 			"hosted_zone_id": hostedZoneID,
 		}).Info("Cloudflare Zone ID获取成功")
 	} else {
@@ -80,9 +80,9 @@ func (s *DomainService) TransferDomain(domainName, registrar string, dnsProvider
 			return nil, fmt.Errorf("创建托管区域失败: %w", err)
 		}
 		log.WithFields(map[string]interface{}{
-			"domain_name":   domainName,
+			"domain_name":    domainName,
 			"hosted_zone_id": hostedZoneID,
-			"ns_servers":    nsServers,
+			"ns_servers":     nsServers,
 		}).Info("Route53托管区域创建成功")
 
 		// 格式化 NS 服务器为 JSON
@@ -105,17 +105,17 @@ func (s *DomainService) TransferDomain(domainName, registrar string, dnsProvider
 
 	if err := s.db.Create(domain).Error; err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
-			"domain_name":   domainName,
+			"domain_name":    domainName,
 			"hosted_zone_id": hostedZoneID,
 		}).Error("创建域名记录失败")
 		return nil, fmt.Errorf("创建域名记录失败: %w", err)
 	}
 
 	log.WithFields(map[string]interface{}{
-		"domain_id":     domain.ID,
-		"domain_name":   domainName,
+		"domain_id":      domain.ID,
+		"domain_name":    domainName,
 		"hosted_zone_id": hostedZoneID,
-		"dns_provider":  dnsProvider,
+		"dns_provider":   dnsProvider,
 	}).Info("域名记录创建成功")
 
 	// 只有 AWS 托管的域名才需要申请证书
@@ -129,8 +129,8 @@ func (s *DomainService) TransferDomain(domainName, registrar string, dnsProvider
 		go s.requestCertificateAsync(domain)
 	} else {
 		log.WithFields(map[string]interface{}{
-			"domain_id":   domain.ID,
-			"domain_name": domainName,
+			"domain_id":    domain.ID,
+			"domain_name":  domainName,
 			"dns_provider": dnsProvider,
 		}).Info("Cloudflare 托管域名，跳过证书申请，将使用 CloudFront 默认证书")
 	}
@@ -159,8 +159,8 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 	}
 
 	log.WithFields(map[string]interface{}{
-		"domain_id":      domain.ID,
-		"domain_name":    domain.DomainName,
+		"domain_id":       domain.ID,
+		"domain_name":     domain.DomainName,
 		"certificate_arn": certificateARN,
 	}).Info("证书请求成功，等待验证")
 
@@ -171,13 +171,13 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 
 	// 等待证书验证（最多等待 1 小时）
 	log.WithFields(map[string]interface{}{
-		"domain_id":      domain.ID,
+		"domain_id":       domain.ID,
 		"certificate_arn": certificateARN,
-		"timeout":        "1小时",
+		"timeout":         "1小时",
 	}).Info("开始等待证书验证")
 	if err := s.acmSvc.WaitForCertificateValidation(certificateARN, 1*time.Hour); err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
-			"domain_id":      domain.ID,
+			"domain_id":       domain.ID,
 			"certificate_arn": certificateARN,
 		}).Error("证书验证失败")
 		// 证书验证失败，只更新证书状态，不影响域名转入状态
@@ -186,8 +186,8 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 	}
 
 	log.WithFields(map[string]interface{}{
-		"domain_id":      domain.ID,
-		"domain_name":    domain.DomainName,
+		"domain_id":       domain.ID,
+		"domain_name":     domain.DomainName,
 		"certificate_arn": certificateARN,
 	}).Info("证书验证成功")
 	// 证书验证成功，只更新证书状态
@@ -293,6 +293,11 @@ func (s *DomainService) GetNServers(id uint) ([]string, error) {
 		return nil, err
 	}
 
+	// Cloudflare 托管的域名不需要 NS 服务器配置
+	if domain.DNSProvider == models.DNSProviderCloudflare {
+		return []string{}, nil
+	}
+
 	if domain.HostedZoneID == "" {
 		return nil, fmt.Errorf("域名尚未创建托管区域")
 	}
@@ -317,19 +322,29 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 		return err
 	}
 
+	// Cloudflare 托管的域名不需要生成证书，使用 CloudFront 默认证书
+	if domain.DNSProvider == models.DNSProviderCloudflare {
+		log.WithFields(map[string]interface{}{
+			"domain_id":    id,
+			"domain_name":  domain.DomainName,
+			"dns_provider": domain.DNSProvider,
+		}).Info("Cloudflare 托管域名，不需要生成证书")
+		return fmt.Errorf("Cloudflare 托管的域名不需要生成证书，将使用 CloudFront 默认证书")
+	}
+
 	var certificateARN string
 	if domain.CertificateARN != "" {
 		// 证书已存在，检查状态
 		certificateARN = domain.CertificateARN
 		log.WithFields(map[string]interface{}{
-			"domain_id":      id,
-			"domain_name":    domain.DomainName,
+			"domain_id":       id,
+			"domain_name":     domain.DomainName,
 			"certificate_arn": certificateARN,
 		}).Info("证书已存在，检查状态")
 		status, err := s.acmSvc.GetCertificateStatus(certificateARN)
 		if err != nil {
 			log.WithError(err).WithFields(map[string]interface{}{
-				"domain_id":      id,
+				"domain_id":       id,
 				"certificate_arn": certificateARN,
 			}).Error("获取证书状态失败")
 			return fmt.Errorf("获取证书状态失败: %w", err)
@@ -339,7 +354,7 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 		if status == "PENDING_VALIDATION" {
 			if domain.HostedZoneID == "" {
 				log.WithFields(map[string]interface{}{
-					"domain_id":      id,
+					"domain_id":       id,
 					"certificate_arn": certificateARN,
 				}).Error("证书已存在但缺少托管区域ID")
 				return fmt.Errorf("证书已存在但缺少托管区域ID，无法添加验证记录")
@@ -349,14 +364,14 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 			validationRecords, err := s.acmSvc.GetCertificateValidationRecords(certificateARN)
 			if err != nil {
 				log.WithError(err).WithFields(map[string]interface{}{
-					"domain_id":      id,
+					"domain_id":       id,
 					"certificate_arn": certificateARN,
 				}).Error("获取证书验证记录失败")
 				return fmt.Errorf("获取证书验证记录失败: %w", err)
 			}
 
 			log.WithFields(map[string]interface{}{
-				"domain_id":      id,
+				"domain_id":       id,
 				"certificate_arn": certificateARN,
 				"record_count":    len(validationRecords),
 			}).Info("开始添加证书验证记录到Route53")
@@ -372,10 +387,10 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 					}
 					if err != nil {
 						log.WithError(err).WithFields(map[string]interface{}{
-							"domain_id":      id,
-							"record_name":    record.Name,
-							"record_value":   record.Value,
-							"dns_provider":   domain.DNSProvider,
+							"domain_id":    id,
+							"record_name":  record.Name,
+							"record_value": record.Value,
+							"dns_provider": domain.DNSProvider,
 						}).Error("添加CNAME验证记录失败")
 						return fmt.Errorf("添加 CNAME 验证记录失败: %w", err)
 					}
@@ -383,7 +398,7 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 			}
 
 			log.WithFields(map[string]interface{}{
-				"domain_id":      id,
+				"domain_id":       id,
 				"certificate_arn": certificateARN,
 			}).Info("证书验证记录添加成功，开始异步等待验证")
 
@@ -398,9 +413,9 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 
 		// 如果证书已经是 ISSUED 或其他状态，直接返回
 		log.WithFields(map[string]interface{}{
-			"domain_id":      id,
+			"domain_id":       id,
 			"certificate_arn": certificateARN,
-			"status":         status,
+			"status":          status,
 		}).Info("证书已存在且状态为: " + status)
 		return fmt.Errorf("证书已存在: %s (状态: %s)", certificateARN, status)
 	}
@@ -420,7 +435,7 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 	}
 
 	log.WithFields(map[string]interface{}{
-		"domain_id":      id,
+		"domain_id":       id,
 		"certificate_arn": certificateARN,
 	}).Info("证书请求成功")
 
@@ -432,7 +447,7 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 	// 获取证书验证记录并添加到 Route 53
 	if domain.HostedZoneID != "" {
 		log.WithFields(map[string]interface{}{
-			"domain_id":      id,
+			"domain_id":       id,
 			"certificate_arn": certificateARN,
 		}).Info("等待AWS生成验证记录")
 		// 等待一下让 AWS 生成验证记录
@@ -502,7 +517,19 @@ func (s *DomainService) GetDomainStatus(id uint) (models.DomainStatus, error) {
 		return "", err
 	}
 
-	// 如果 Hosted Zone 存在，说明域名已成功转入，应该返回 completed
+	// Cloudflare 托管的域名，如果 HostedZoneID 存在，说明已成功转入
+	if domain.DNSProvider == models.DNSProviderCloudflare {
+		if domain.HostedZoneID != "" {
+			if domain.Status != models.DomainStatusCompleted {
+				// 更新数据库中的状态
+				s.db.Model(domain).Update("status", models.DomainStatusCompleted)
+			}
+			return models.DomainStatusCompleted, nil
+		}
+		return domain.Status, nil
+	}
+
+	// AWS 托管的域名：如果 Hosted Zone 存在，说明域名已成功转入，应该返回 completed
 	// 这样可以修复之前因为证书验证失败而状态未更新的问题
 	if domain.HostedZoneID != "" {
 		// 验证 Hosted Zone 是否真的存在
@@ -528,6 +555,7 @@ func (s *DomainService) UpdateDomainStatus(id uint, status models.DomainStatus) 
 
 // DeleteDomain 删除域名
 // 删除域名时会同时删除相关的 AWS 资源（Route53 Hosted Zone 和 ACM 证书）
+// 对于 Cloudflare 托管的域名，只删除数据库记录
 func (s *DomainService) DeleteDomain(id uint) error {
 	log := logger.GetLogger()
 	log.WithField("domain_id", id).Info("开始删除域名")
@@ -540,47 +568,57 @@ func (s *DomainService) DeleteDomain(id uint) error {
 	}
 
 	log.WithFields(map[string]interface{}{
-		"domain_id":   id,
-		"domain_name": domain.DomainName,
+		"domain_id":       id,
+		"domain_name":     domain.DomainName,
+		"dns_provider":    domain.DNSProvider,
 		"certificate_arn": domain.CertificateARN,
 		"hosted_zone_id":  domain.HostedZoneID,
 	}).Info("获取域名信息成功，开始删除相关资源")
 
-	// 删除 ACM 证书（如果存在）
-	if domain.CertificateARN != "" {
+	// Cloudflare 托管的域名不需要删除 AWS 资源
+	if domain.DNSProvider == models.DNSProviderCloudflare {
 		log.WithFields(map[string]interface{}{
-			"domain_id":      id,
-			"certificate_arn": domain.CertificateARN,
-		}).Info("开始删除ACM证书")
-		if err := s.acmSvc.DeleteCertificate(domain.CertificateARN); err != nil {
-			log.WithError(err).WithFields(map[string]interface{}{
-				"domain_id":      id,
-				"certificate_arn": domain.CertificateARN,
-			}).Warn("删除ACM证书失败（可能已不存在）")
-		} else {
+			"domain_id":    id,
+			"domain_name":  domain.DomainName,
+			"dns_provider": domain.DNSProvider,
+		}).Info("Cloudflare 托管域名，只删除数据库记录")
+	} else {
+		// 删除 ACM 证书（如果存在）
+		if domain.CertificateARN != "" {
 			log.WithFields(map[string]interface{}{
-				"domain_id":      id,
+				"domain_id":       id,
 				"certificate_arn": domain.CertificateARN,
-			}).Info("ACM证书删除成功")
+			}).Info("开始删除ACM证书")
+			if err := s.acmSvc.DeleteCertificate(domain.CertificateARN); err != nil {
+				log.WithError(err).WithFields(map[string]interface{}{
+					"domain_id":       id,
+					"certificate_arn": domain.CertificateARN,
+				}).Warn("删除ACM证书失败（可能已不存在）")
+			} else {
+				log.WithFields(map[string]interface{}{
+					"domain_id":       id,
+					"certificate_arn": domain.CertificateARN,
+				}).Info("ACM证书删除成功")
+			}
 		}
-	}
 
-	// 删除 Route53 Hosted Zone（如果存在）
-	if domain.HostedZoneID != "" {
-		log.WithFields(map[string]interface{}{
-			"domain_id":     id,
-			"hosted_zone_id": domain.HostedZoneID,
-		}).Info("开始删除Route53托管区域")
-		if err := s.route53Svc.DeleteHostedZone(domain.HostedZoneID); err != nil {
-			log.WithError(err).WithFields(map[string]interface{}{
-				"domain_id":     id,
-				"hosted_zone_id": domain.HostedZoneID,
-			}).Warn("删除Route53托管区域失败（可能已不存在）")
-		} else {
+		// 删除 Route53 Hosted Zone（如果存在）
+		if domain.HostedZoneID != "" {
 			log.WithFields(map[string]interface{}{
-				"domain_id":     id,
+				"domain_id":      id,
 				"hosted_zone_id": domain.HostedZoneID,
-			}).Info("Route53托管区域删除成功")
+			}).Info("开始删除Route53托管区域")
+			if err := s.route53Svc.DeleteHostedZone(domain.HostedZoneID); err != nil {
+				log.WithError(err).WithFields(map[string]interface{}{
+					"domain_id":      id,
+					"hosted_zone_id": domain.HostedZoneID,
+				}).Warn("删除Route53托管区域失败（可能已不存在）")
+			} else {
+				log.WithFields(map[string]interface{}{
+					"domain_id":      id,
+					"hosted_zone_id": domain.HostedZoneID,
+				}).Info("Route53托管区域删除成功")
+			}
 		}
 	}
 
@@ -705,6 +743,19 @@ func (s *DomainService) CheckCertificate(id uint) (*CertificateCheckResult, erro
 		return nil, err
 	}
 
+	// Cloudflare 托管的域名不需要检查证书
+	if domain.DNSProvider == models.DNSProviderCloudflare {
+		return &CertificateCheckResult{
+			CertificateExists:     false,
+			CertificateStatus:     "not_applicable",
+			ValidationRecords:     []string{},
+			MissingCNAMERecords:   []string{},
+			IncorrectCNAMERecords: []string{},
+			HasIssues:             false,
+			Issues:                []string{"Cloudflare 托管的域名使用 CloudFront 默认证书，无需检查"},
+		}, nil
+	}
+
 	result := &CertificateCheckResult{
 		ValidationRecords:     []string{},
 		MissingCNAMERecords:   []string{},
@@ -797,6 +848,11 @@ func (s *DomainService) FixCertificate(id uint) error {
 	domain, err := s.GetDomain(id)
 	if err != nil {
 		return err
+	}
+
+	// Cloudflare 托管的域名不需要修复证书
+	if domain.DNSProvider == models.DNSProviderCloudflare {
+		return fmt.Errorf("Cloudflare 托管的域名不需要修复证书，将使用 CloudFront 默认证书")
 	}
 
 	// 如果证书不存在，尝试生成证书
