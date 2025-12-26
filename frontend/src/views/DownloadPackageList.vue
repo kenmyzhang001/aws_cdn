@@ -140,6 +140,15 @@
     <!-- 添加下载域名对话框 -->
     <el-dialog v-model="showAddDomainDialog" title="添加下载域名" width="600px">
       <el-form :model="addDomainForm" label-width="120px" :rules="addDomainRules" ref="addDomainFormRef">
+        <el-form-item label="DNS提供商" required>
+          <el-radio-group v-model="addDomainForm.dns_provider" @change="loadAvailableDomains">
+            <el-radio label="aws">AWS Route53</el-radio>
+            <el-radio label="cloudflare">Cloudflare</el-radio>
+          </el-radio-group>
+          <div style="margin-top: 5px; color: #909399; font-size: 12px">
+            选择域名托管商，将影响证书验证和DNS记录的创建方式
+          </div>
+        </el-form-item>
         <el-form-item label="选择域名" prop="domain_id" required>
           <el-select
             v-model="addDomainForm.domain_id"
@@ -148,7 +157,7 @@
             filterable
           >
             <el-option
-              v-for="domain in availableDomains"
+              v-for="domain in filteredAvailableDomains"
               :key="domain.id"
               :label="domain.domain_name"
               :value="domain.id"
@@ -162,11 +171,19 @@
                 >
                   {{ getCertificateStatusText(domain.certificate_status) }}
                 </el-tag>
+                <el-tag
+                  v-if="domain.dns_provider"
+                  size="small"
+                  :type="domain.dns_provider === 'cloudflare' ? 'warning' : 'primary'"
+                  style="margin-left: 5px"
+                >
+                  {{ domain.dns_provider === 'cloudflare' ? 'Cloudflare' : 'AWS' }}
+                </el-tag>
               </div>
             </el-option>
           </el-select>
           <div style="margin-top: 5px; color: #909399; font-size: 12px">
-            只显示证书已签发且未被重定向使用的域名
+            只显示证书已签发且未被重定向和下载包使用的域名
           </div>
         </el-form-item>
         <el-form-item label="上传第一个APK文件" prop="file">
@@ -223,30 +240,34 @@
             ref="addFileUploadRef"
             :auto-upload="false"
             :on-change="handleAddFileChange"
-            :limit="1"
+            :on-remove="handleAddFileRemove"
             :file-list="addFileList"
             accept=".apk"
+            multiple
           >
             <template #trigger>
               <el-button type="primary">选择APK文件</el-button>
             </template>
           </el-upload>
-          <div v-if="addFileSelectedFile" style="margin-top: 10px">
-            <div>文件名: {{ addFileSelectedFile.name }}</div>
-            <div>文件大小: {{ formatFileSize(addFileSelectedFile.size) }}</div>
-          </div>
-          <div v-if="addFileLoading" style="margin-top: 15px">
-            <el-progress
-              v-if="addFileUploadProgress > 0"
-              :percentage="addFileUploadProgress"
-              :status="addFileUploadProgress === 100 ? 'success' : null"
-              :stroke-width="8"
-            />
-            <div v-else style="text-align: center; color: #909399; font-size: 12px">
-              准备上传...
+          <div v-if="addFileSelectedFiles && addFileSelectedFiles.length > 0" style="margin-top: 10px">
+            <div v-for="(file, index) in addFileSelectedFiles" :key="index" style="margin-bottom: 8px; padding: 8px; background: #f5f7fa; border-radius: 4px">
+              <div>文件名: {{ file.name }}</div>
+              <div>文件大小: {{ formatFileSize(file.size) }}</div>
+              <div v-if="addFileUploadProgressMap[file.name] !== undefined" style="margin-top: 5px">
+                <el-progress
+                  :percentage="addFileUploadProgressMap[file.name]"
+                  :status="addFileUploadProgressMap[file.name] === 100 ? 'success' : null"
+                  :stroke-width="6"
+                />
+                <div style="text-align: center; margin-top: 3px; color: #909399; font-size: 12px">
+                  {{ addFileUploadProgressMap[file.name] === 100 ? '上传完成' : `上传中... ${addFileUploadProgressMap[file.name]}%` }}
+                </div>
+              </div>
             </div>
-            <div v-if="addFileUploadProgress > 0" style="text-align: center; margin-top: 5px; color: #909399; font-size: 12px">
-              上传中... {{ addFileUploadProgress }}%
+          </div>
+          <div v-if="addFileLoading && addFileSelectedFiles.length === 0" style="margin-top: 15px">
+            <div style="text-align: center; color: #909399; font-size: 12px">
+              准备上传...
             </div>
           </div>
         </el-form-item>
@@ -363,7 +384,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Document, CopyDocument } from '@element-plus/icons-vue'
 import request from '@/api/request'
@@ -379,6 +400,7 @@ const showAddDomainDialog = ref(false)
 const addDomainLoading = ref(false)
 const addDomainUploadProgress = ref(0)
 const addDomainForm = ref({
+  dns_provider: 'aws', // 默认使用AWS
   domain_id: '',
   file_name: '',
   file: null,
@@ -392,7 +414,6 @@ const availableDomains = ref([]) // 可用于添加的域名列表
 // 添加文件到已有域名
 const showAddFileDialog = ref(false)
 const addFileLoading = ref(false)
-const addFileUploadProgress = ref(0)
 const addFileForm = ref({
   domain_id: '',
   domain_name: '',
@@ -400,7 +421,8 @@ const addFileForm = ref({
 })
 const addFileFormRef = ref(null)
 const addFileList = ref([])
-const addFileSelectedFile = ref(null)
+const addFileSelectedFiles = ref([])
+const addFileUploadProgressMap = ref({})
 const addFileUploadRef = ref(null)
 
 // 检查修复相关
@@ -420,7 +442,7 @@ const addFileRules = {
       message: '请选择APK文件',
       trigger: 'change',
       validator: (rule, value, callback) => {
-        if (!value) {
+        if (!addFileSelectedFiles.value || addFileSelectedFiles.value.length === 0) {
           callback(new Error('请选择APK文件'))
         } else {
           callback()
@@ -504,9 +526,9 @@ const loadDomains = async () => {
 const loadAvailableDomains = async () => {
   try {
     const response = await domainApi.getDomainList({ page: 1, page_size: 1000 })
-    // 过滤：只显示证书已签发且未被重定向使用的域名
+    // 过滤：只显示证书已签发且未被重定向使用且未被下载包使用的域名
     const allAvailable = (response.data || []).filter(
-      (d) => d.certificate_status === 'issued' && !d.used_by_redirect
+      (d) => d.certificate_status === 'issued' && !d.used_by_redirect && !d.used_by_download_package
     )
     
     // 排除已经在下载域名列表中的域名
@@ -517,10 +539,21 @@ const loadAvailableDomains = async () => {
   }
 }
 
+// 根据DNS提供商过滤可用域名
+const filteredAvailableDomains = computed(() => {
+  if (!addDomainForm.value.dns_provider) {
+    return availableDomains.value
+  }
+  return availableDomains.value.filter(
+    (d) => !d.dns_provider || d.dns_provider === addDomainForm.value.dns_provider
+  )
+})
+
 // 打开添加下载域名对话框
 const openAddDomainDialog = async () => {
   // 重置表单
   addDomainForm.value = {
+    dns_provider: 'aws',
     domain_id: '',
     file_name: '',
     file: null,
@@ -616,15 +649,29 @@ const openAddFileDialog = (domain) => {
     file: null,
   }
   addFileList.value = []
-  addFileSelectedFile.value = null
+  addFileSelectedFiles.value = []
+  addFileUploadProgressMap.value = {}
   showAddFileDialog.value = true
 }
 
 // 处理添加文件选择
-const handleAddFileChange = (file) => {
-  addFileSelectedFile.value = file.raw
-  addFileForm.value.file_name = file.name
-  addFileForm.value.file = file.raw
+const handleAddFileChange = (file, fileList) => {
+  // 更新选中的文件列表
+  addFileSelectedFiles.value = fileList.map(f => f.raw)
+  // 手动触发表单验证
+  if (addFileFormRef.value) {
+    addFileFormRef.value.validateField('file')
+  }
+}
+
+// 处理文件移除
+const handleAddFileRemove = (file, fileList) => {
+  // 更新选中的文件列表
+  addFileSelectedFiles.value = fileList.map(f => f.raw)
+  // 移除对应的进度
+  if (addFileUploadProgressMap.value[file.name] !== undefined) {
+    delete addFileUploadProgressMap.value[file.name]
+  }
   // 手动触发表单验证
   if (addFileFormRef.value) {
     addFileFormRef.value.validateField('file')
@@ -643,30 +690,57 @@ const handleAddFile = async () => {
   }
 
   // 验证通过后，再次检查文件
-  if (!addFileSelectedFile.value) {
+  if (!addFileSelectedFiles.value || addFileSelectedFiles.value.length === 0) {
     ElMessage.warning('请选择文件')
     return
   }
 
   addFileLoading.value = true
-  addFileUploadProgress.value = 0
+  addFileUploadProgressMap.value = {}
+  
+  // 初始化所有文件的进度为0
+  addFileSelectedFiles.value.forEach(file => {
+    addFileUploadProgressMap.value[file.name] = 0
+  })
 
-  try {
-    const formData = new FormData()
-    formData.append('domain_id', addFileForm.value.domain_id)
-    formData.append('file_name', addFileForm.value.file_name)
-    formData.append('file', addFileSelectedFile.value)
+  const totalFiles = addFileSelectedFiles.value.length
+  let successCount = 0
+  let failCount = 0
+  const errors = []
 
-    await uploadFile(
-      '/download-packages',
-      formData,
-      { timeout: 600000 },
-      (progress) => {
-        addFileUploadProgress.value = progress
-      }
-    )
+  // 依次上传每个文件
+  for (let i = 0; i < addFileSelectedFiles.value.length; i++) {
+    const file = addFileSelectedFiles.value[i]
+    
+    try {
+      const formData = new FormData()
+      formData.append('domain_id', addFileForm.value.domain_id)
+      formData.append('file_name', file.name)
+      formData.append('file', file)
 
-    ElMessage.success('上传成功，正在处理中...')
+      await uploadFile(
+        '/download-packages',
+        formData,
+        { timeout: 600000 },
+        (progress) => {
+          addFileUploadProgressMap.value[file.name] = progress
+        }
+      )
+
+      addFileUploadProgressMap.value[file.name] = 100
+      successCount++
+    } catch (error) {
+      const errorMsg = error.response?.data?.error || error.message
+      errors.push(`${file.name}: ${errorMsg}`)
+      failCount++
+      // 即使失败也标记为100，表示该文件处理完成（虽然失败了）
+      addFileUploadProgressMap.value[file.name] = 100
+    }
+  }
+
+  // 显示结果
+  if (successCount === totalFiles) {
+    ElMessage.success(`所有文件上传成功，正在处理中...`)
     showAddFileDialog.value = false
     addFileForm.value = {
       domain_id: '',
@@ -674,15 +748,23 @@ const handleAddFile = async () => {
       file: null,
     }
     addFileList.value = []
-    addFileSelectedFile.value = null
-    addFileUploadProgress.value = 0
+    addFileSelectedFiles.value = []
+    addFileUploadProgressMap.value = {}
     loadDomains()
-  } catch (error) {
-    ElMessage.error('上传失败: ' + (error.response?.data?.error || error.message))
-  } finally {
-    addFileLoading.value = false
-    addFileUploadProgress.value = 0
+  } else if (successCount > 0) {
+    ElMessage.warning(`${successCount}个文件上传成功，${failCount}个文件上传失败`)
+    errors.forEach(err => {
+      ElMessage.error(err)
+    })
+    // 不关闭对话框，让用户看到失败的文件
+  } else {
+    ElMessage.error('所有文件上传失败')
+    errors.forEach(err => {
+      ElMessage.error(err)
+    })
   }
+
+  addFileLoading.value = false
 }
 
 // 删除下载包
