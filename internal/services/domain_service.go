@@ -154,8 +154,16 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 		"domain_name":  domain.DomainName,
 		"dns_provider": domain.DNSProvider,
 	}).Info("开始异步请求证书")
+	rootDomain := extractRootDomain(domain.DomainName)
 
-	certificateARN, err := s.acmSvc.RequestCertificate(domain.DomainName)
+	requestCetificateDomain := ""
+	if rootDomain == domain.DomainName {
+		requestCetificateDomain = domain.DomainName
+	} else {
+		requestCetificateDomain = "*." + rootDomain
+	}
+
+	certificateARN, err := s.acmSvc.RequestCertificate(requestCetificateDomain)
 	if err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
 			"domain_id":   domain.ID,
