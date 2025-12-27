@@ -11,131 +11,40 @@
         </div>
       </template>
 
+      <!-- 分组Tab -->
+      <el-tabs v-model="activeGroupId" @tab-change="handleGroupChange" style="margin-bottom: 20px">
+        <el-tab-pane :label="`全部 (${totalAll})`" :name="null"></el-tab-pane>
+        <el-tab-pane
+          v-for="group in groups"
+          :key="group.id"
+          :label="`${group.name} (${group.count || 0})`"
+          :name="group.id"
+        ></el-tab-pane>
+      </el-tabs>
+
       <el-table :data="redirectList" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column label="域名信息" width="280">
+        <el-table-column prop="source_domain" label="域名" min-width="200">
           <template #default="{ row }">
-            <div style="display: flex; flex-direction: column; gap: 6px;">
-              <div style="font-weight: 500;">{{ row.source_domain }}</div>
-              <div style="display: flex; gap: 8px; align-items: center;">
-                <span style="font-size: 12px; color: #909399;">域名:</span>
-                <el-tag v-if="row.domain_status" :type="getDomainStatusType(row.domain_status)" size="small">
-                  {{ getDomainStatusText(row.domain_status) }}
-                </el-tag>
-                <span v-else style="color: #c0c4cc; font-size: 12px;">未找到</span>
-                <span style="font-size: 12px; color: #909399; margin-left: 8px;">证书:</span>
-                <el-tag v-if="row.certificate_status" :type="getCertificateStatusType(row.certificate_status)" size="small">
-                  {{ getCertificateStatusText(row.certificate_status) }}
-                </el-tag>
-                <span v-else style="color: #c0c4cc; font-size: 12px;">未申请</span>
-              </div>
-            </div>
+            <span style="font-weight: 500;">{{ row.source_domain }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="目标 URL" min-width="200">
+        <el-table-column label="目标数量" width="120">
           <template #default="{ row }">
-            <div v-for="target in row.targets" :key="target.id" style="margin-bottom: 5px">
-              <el-tag
-                :type="getURLStatusType(target.url_status)"
-                style="margin-right: 5px"
-              >
-                {{ getURLStatusText(target.url_status) }}
-              </el-tag>
-              <span>{{ target.target_url }}</span>
-            </div>
+            <el-tag size="small">{{ row.targets?.length || 0 }} 个目标</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="CloudFront" width="240">
+        <el-table-column label="状态" width="120">
           <template #default="{ row }">
-            <div style="display: flex; flex-direction: column; gap: 6px;">
-              <div v-if="row.cloudfront_id" style="font-size: 12px; color: #606266; font-family: monospace;">
-                {{ row.cloudfront_id }}
-              </div>
-              <div v-else style="color: #c0c4cc; font-size: 12px;">未绑定</div>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <el-tag v-if="row.cloudfront_status" :type="getCloudFrontStatusType(row.cloudfront_status)" size="small">
-                  {{ getCloudFrontStatusText(row.cloudfront_status) }}
-                </el-tag>
-                <span v-else style="color: #c0c4cc; font-size: 12px;">未部署</span>
-              </div>
-              <div v-if="row.cloudfront_id" style="display: flex; align-items: center;">
-                <el-tag :type="row.cloudfront_enabled ? 'success' : 'danger'" size="small">
-                  {{ row.cloudfront_enabled ? '已启用' : '已禁用' }}
-                </el-tag>
-              </div>
-            </div>
+            <el-tag v-if="row.status" :type="getRedirectStatusType(row.status)" size="small">
+              {{ getRedirectStatusText(row.status) }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="CloudFront源路径" width="280">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
-            <div v-if="row.cloudfront_id" style="display: flex; flex-direction: column; gap: 4px; font-size: 12px;">
-              <div>
-                <span style="color: #909399;">期望:</span>
-                <code style="background: #f5f7fa; padding: 2px 4px; border-radius: 2px; margin-left: 4px; font-size: 11px;">
-                  {{ row.cloudfront_origin_path_expected || '(空)' }}
-                </code>
-              </div>
-              <div>
-                <span style="color: #909399;">实际:</span>
-                <code 
-                  :style="{
-                    background: row.cloudfront_origin_path_current === row.cloudfront_origin_path_expected ? '#f0f9ff' : '#fef0f0',
-                    padding: '2px 4px',
-                    borderRadius: '2px',
-                    marginLeft: '4px',
-                    fontSize: '11px',
-                    color: row.cloudfront_origin_path_current === row.cloudfront_origin_path_expected ? '#67c23a' : '#f56c6c'
-                  }"
-                >
-                  {{ row.cloudfront_origin_path_current || '(空)' }}
-                </code>
-                <el-tag 
-                  v-if="row.cloudfront_origin_path_current !== row.cloudfront_origin_path_expected" 
-                  type="danger" 
-                  size="small" 
-                  style="margin-left: 4px"
-                >
-                  不匹配
-                </el-tag>
-              </div>
-            </div>
-            <span v-else style="color: #c0c4cc; font-size: 12px">未配置</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="DNS 记录" width="200">
-          <template #default="{ row }">
-            <div style="display: flex; flex-direction: column; gap: 6px;">
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 12px; color: #909399;">Route 53:</span>
-                <el-tag v-if="row.route53_dns_status" :type="getRoute53DNSStatusType(row.route53_dns_status)" size="small">
-                  {{ getRoute53DNSStatusText(row.route53_dns_status) }}
-                </el-tag>
-                <span v-else style="color: #c0c4cc; font-size: 12px;">未检查</span>
-              </div>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 12px; color: #909399;">www CNAME:</span>
-                <el-tag v-if="row.www_cname_status" :type="getRoute53DNSStatusType(row.www_cname_status)" size="small">
-                  {{ getRoute53DNSStatusText(row.www_cname_status) }}
-                </el-tag>
-                <span v-else-if="row.source_domain && row.source_domain.startsWith('www.')" style="color: #c0c4cc; font-size: 12px;">不适用</span>
-                <span v-else style="color: #c0c4cc; font-size: 12px;">未检查</span>
-              </div>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-size: 12px; color: #909399;">S3 Policy:</span>
-                <el-tag v-if="row.s3_bucket_policy_status" :type="getRoute53DNSStatusType(row.s3_bucket_policy_status)" size="small">
-                  {{ getRoute53DNSStatusText(row.s3_bucket_policy_status) }}
-                </el-tag>
-                <span v-else style="color: #c0c4cc; font-size: 12px;">未检查</span>
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="350">
-          <template #default="{ row }">
-            <el-button size="small" @click="viewDetails(row)">详情</el-button>
+            <el-button size="small" type="primary" @click="viewDetails(row)">查看详情</el-button>
             <el-button size="small" type="success" @click="addTarget(row)">添加目标</el-button>
-            <el-button size="small" type="info" @click="checkRule(row)">检查</el-button>
-            <el-button size="small" type="warning" @click="fixRule(row)">修复</el-button>
             <el-button size="small" type="danger" @click="deleteRule(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -156,6 +65,15 @@
     <!-- 创建重定向规则对话框 -->
     <el-dialog v-model="showCreateDialog" title="创建重定向规则" width="700px" @close="resetCreateForm" @open="loadAvailableDomains">
       <el-form :model="createForm" label-width="120px">
+        <el-form-item label="DNS提供商" required>
+          <el-radio-group v-model="createForm.dns_provider" @change="loadAvailableDomains">
+            <el-radio label="cloudflare">Cloudflare</el-radio>
+            <el-radio label="aws">AWS Route53</el-radio>
+          </el-radio-group>
+          <div style="margin-top: 5px; color: #909399; font-size: 12px">
+            选择域名托管商，将影响证书验证和DNS记录的创建方式
+          </div>
+        </el-form-item>
         <el-form-item label="源域名" required>
           <el-select
             v-model="createForm.source_domain"
@@ -166,24 +84,32 @@
             style="width: 100%"
           >
             <el-option
-              v-for="domain in availableDomains"
+              v-for="domain in filteredAvailableDomains"
               :key="domain.id"
               :label="domain.domain_name"
               :value="domain.domain_name"
             >
               <span>{{ domain.domain_name }}</span>
               <el-tag
-                v-if="domain.certificate_status === 'issued'"
+                v-if="domain.dns_provider"
                 size="small"
-                type="success"
+                :type="domain.dns_provider === 'cloudflare' ? 'warning' : 'primary'"
                 style="margin-left: 10px"
               >
-                证书已签发
+                {{ domain.dns_provider === 'cloudflare' ? 'Cloudflare' : 'AWS' }}
+              </el-tag>
+              <el-tag
+                v-if="domain.certificate_status"
+                size="small"
+                :type="getCertificateStatusType(domain.certificate_status)"
+                style="margin-left: 5px"
+              >
+                {{ getCertificateStatusText(domain.certificate_status) }}
               </el-tag>
             </el-option>
           </el-select>
           <div style="margin-top: 5px; color: #909399; font-size: 12px">
-            下拉列表只显示未被下载包使用的域名，也可以手动输入新域名
+            下拉列表只显示未被重定向和下载包使用的域名，也可以手动输入新域名
           </div>
         </el-form-item>
         <el-form-item label="目标 URL" required>
@@ -223,39 +149,126 @@
     </el-dialog>
 
     <!-- 详情对话框 -->
-    <el-dialog v-model="showDetailDialog" title="重定向规则详情" width="700px">
-      <el-descriptions :column="1" border v-if="currentRule">
-        <el-descriptions-item label="源域名">
-          {{ currentRule.source_domain }}
-        </el-descriptions-item>
-        <el-descriptions-item label="CloudFront ID">
-          {{ currentRule.cloudfront_id || '未绑定' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="目标 URL">
-          <el-table :data="currentRule.targets" size="small" border>
-            <el-table-column prop="target_url" label="URL" />
-            <el-table-column prop="weight" label="权重" width="80" />
-            <el-table-column label="状态" width="80">
-              <template #default="{ row }">
-                <el-tag :type="row.is_active ? 'success' : 'info'">
-                  {{ row.is_active ? '活跃' : '禁用' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="100">
-              <template #default="{ row }">
-                <el-button
-                  size="small"
-                  type="danger"
-                  @click="removeTarget(row.id)"
+    <el-dialog v-model="showDetailDialog" title="重定向规则详情" width="900px">
+      <div v-loading="detailLoading" v-if="currentRule">
+        <el-descriptions :column="2" border style="margin-bottom: 20px">
+          <el-descriptions-item label="源域名">
+            {{ currentRule.source_domain }}
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFront ID">
+            {{ currentRule.cloudfront_id || '未绑定' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="域名状态" v-if="currentRule.domain_status">
+            <el-tag :type="getDomainStatusType(currentRule.domain_status)" size="small">
+              {{ getDomainStatusText(currentRule.domain_status) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="证书状态" v-if="currentRule.certificate_status">
+            <el-tag :type="getCertificateStatusType(currentRule.certificate_status)" size="small">
+              {{ getCertificateStatusText(currentRule.certificate_status) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFront状态" v-if="currentRule.cloudfront_status">
+            <el-tag :type="getCloudFrontStatusType(currentRule.cloudfront_status)" size="small">
+              {{ getCloudFrontStatusText(currentRule.cloudfront_status) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFront启用" v-if="currentRule.cloudfront_id">
+            <el-tag :type="currentRule.cloudfront_enabled ? 'success' : 'danger'" size="small">
+              {{ currentRule.cloudfront_enabled ? '已启用' : '已禁用' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="Route 53 DNS" v-if="currentRule.route53_dns_status">
+            <el-tag :type="getRoute53DNSStatusType(currentRule.route53_dns_status)" size="small">
+              {{ getRoute53DNSStatusText(currentRule.route53_dns_status) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="www CNAME" v-if="currentRule.www_cname_status">
+            <el-tag :type="getRoute53DNSStatusType(currentRule.www_cname_status)" size="small">
+              {{ getRoute53DNSStatusText(currentRule.www_cname_status) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="S3 Policy" v-if="currentRule.s3_bucket_policy_status">
+            <el-tag :type="getRoute53DNSStatusType(currentRule.s3_bucket_policy_status)" size="small">
+              {{ getRoute53DNSStatusText(currentRule.s3_bucket_policy_status) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFront源路径" v-if="currentRule.cloudfront_origin_path_current || currentRule.cloudfront_origin_path_expected" :span="2">
+            <div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px;">
+              <div>
+                <span style="color: #909399;">期望:</span>
+                <code style="background: #f5f7fa; padding: 2px 4px; border-radius: 2px; margin-left: 4px; font-size: 11px;">
+                  {{ currentRule.cloudfront_origin_path_expected || '(空)' }}
+                </code>
+              </div>
+              <div>
+                <span style="color: #909399;">实际:</span>
+                <code 
+                  :style="{
+                    background: currentRule.cloudfront_origin_path_current === currentRule.cloudfront_origin_path_expected ? '#f0f9ff' : '#fef0f0',
+                    padding: '2px 4px',
+                    borderRadius: '2px',
+                    marginLeft: '4px',
+                    fontSize: '11px',
+                    color: currentRule.cloudfront_origin_path_current === currentRule.cloudfront_origin_path_expected ? '#67c23a' : '#f56c6c'
+                  }"
                 >
-                  删除
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-descriptions-item>
-      </el-descriptions>
+                  {{ currentRule.cloudfront_origin_path_current || '(空)' }}
+                </code>
+                <el-tag 
+                  v-if="currentRule.cloudfront_origin_path_current !== currentRule.cloudfront_origin_path_expected" 
+                  type="danger" 
+                  size="small" 
+                  style="margin-left: 4px"
+                >
+                  不匹配
+                </el-tag>
+              </div>
+            </div>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <h3 style="margin-bottom: 10px">目标 URL</h3>
+        <el-table :data="currentRule.targets" size="small" border>
+          <el-table-column prop="target_url" label="URL" min-width="300" />
+          <el-table-column prop="weight" label="权重" width="80" />
+          <el-table-column label="URL状态" width="100">
+            <template #default="{ row }">
+              <el-tag
+                v-if="row.url_status"
+                :type="getURLStatusType(row.url_status)"
+                size="small"
+              >
+                {{ getURLStatusText(row.url_status) }}
+              </el-tag>
+              <span v-else style="color: #c0c4cc; font-size: 12px;">未检查</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="80">
+            <template #default="{ row }">
+              <el-tag :type="row.is_active ? 'success' : 'info'">
+                {{ row.is_active ? '活跃' : '禁用' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                type="danger"
+                @click="removeTarget(row.id)"
+              >
+                删除
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button @click="showDetailDialog = false">关闭</el-button>
+        <el-button type="info" @click="checkRule({ id: currentRule?.id })">检查</el-button>
+        <el-button type="warning" @click="fixRule({ id: currentRule?.id })">修复</el-button>
+      </template>
     </el-dialog>
 
     <!-- 添加目标对话框 -->
@@ -400,9 +413,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { redirectApi } from '@/api/redirect'
 import { domainApi } from '@/api/domain'
+import { groupApi } from '@/api/group'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 
@@ -411,17 +425,24 @@ const redirectList = ref([])
 const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+const totalAll = ref(0)
+
+const activeGroupId = ref(null)
+const groups = ref([])
 
 const showCreateDialog = ref(false)
 const createLoading = ref(false)
 const createForm = ref({
+  dns_provider: 'aws', // 默认使用AWS
   source_domain: '',
   target_urls: [],
+  group_id: null,
 })
 const targetUrlInput = ref('')
 
 const showDetailDialog = ref(false)
 const currentRule = ref(null)
+const detailLoading = ref(false)
 
 const showAddTargetDialog = ref(false)
 const addTargetLoading = ref(false)
@@ -439,30 +460,74 @@ const checkRuleId = ref(null)
 const availableDomains = ref([])
 
 onMounted(() => {
+  loadGroups()
   loadRedirects()
 })
 
-// 加载可用域名列表（只显示未被下载包使用的域名）
+const loadGroups = async () => {
+  try {
+    const res = await groupApi.getGroupList()
+    groups.value = res
+    // 加载每个分组的重定向数量
+    for (const group of groups.value) {
+      const res = await redirectApi.getRedirectList({
+        page: 1,
+        page_size: 1,
+        group_id: group.id,
+      })
+      group.count = res.total
+    }
+    // 加载全部数量
+    const resAll = await redirectApi.getRedirectList({
+      page: 1,
+      page_size: 1,
+    })
+    totalAll.value = resAll.total
+  } catch (error) {
+    console.error('加载分组列表失败:', error)
+  }
+}
+
+const handleGroupChange = () => {
+  currentPage.value = 1
+  loadRedirects()
+}
+
+// 加载可用域名列表（只显示未被重定向和下载包使用的域名）
 const loadAvailableDomains = async () => {
   try {
     const response = await domainApi.getDomainList({ page: 1, page_size: 1000 })
-    // 过滤：只显示未被下载包使用的域名（允许手动输入，所以不过滤证书状态）
-    // 但下拉列表中只显示未被下载包使用的域名
+    // 过滤：只显示未被重定向使用且未被下载包使用的域名（允许手动输入，所以不过滤证书状态）
+    // 但下拉列表中只显示未被重定向和下载包使用的域名
     availableDomains.value = (response.data || []).filter(
-      (d) => !d.used_by_download_package
+      (d) => !d.used_by_redirect && !d.used_by_download_package
     )
   } catch (error) {
     console.error('加载域名列表失败:', error)
   }
 }
 
+// 根据DNS提供商过滤可用域名
+const filteredAvailableDomains = computed(() => {
+  if (!createForm.value.dns_provider) {
+    return availableDomains.value
+  }
+  return availableDomains.value.filter(
+    (d) => !d.dns_provider || d.dns_provider === createForm.value.dns_provider
+  )
+})
+
 const loadRedirects = async () => {
   loading.value = true
   try {
-    const res = await redirectApi.getRedirectList({
+    const params = {
       page: currentPage.value,
       page_size: pageSize.value,
-    })
+    }
+    if (activeGroupId.value !== null) {
+      params.group_id = activeGroupId.value
+    }
+    const res = await redirectApi.getRedirectList(params)
     redirectList.value = res.data
     total.value = res.total
   } catch (error) {
@@ -527,8 +592,10 @@ const removeTargetUrl = (index) => {
 // 重置创建表单
 const resetCreateForm = () => {
   createForm.value = {
+    dns_provider: 'aws',
     source_domain: '',
     target_urls: [],
+    group_id: null,
   }
   targetUrlInput.value = ''
 }
@@ -556,6 +623,10 @@ const handleCreate = async () => {
     const requestData = {
       source_domain: createForm.value.source_domain,
       target_urls: createForm.value.target_urls,
+      dns_provider: createForm.value.dns_provider,
+    }
+    if (createForm.value.group_id) {
+      requestData.group_id = createForm.value.group_id
     }
 
     const res = await redirectApi.createRedirectRule(requestData)
@@ -599,6 +670,7 @@ const handleCreate = async () => {
     
     showCreateDialog.value = false
     resetCreateForm()
+    loadGroups()
     loadRedirects()
   } catch (error) {
     // 错误已在拦截器中处理
@@ -608,12 +680,16 @@ const handleCreate = async () => {
 }
 
 const viewDetails = async (row) => {
+  detailLoading.value = true
   try {
+    // 获取详情时会自动加载状态信息
     const res = await redirectApi.getRedirectRule(row.id)
     currentRule.value = res
     showDetailDialog.value = true
   } catch (error) {
     ElMessage.error('获取详情失败')
+  } finally {
+    detailLoading.value = false
   }
 }
 
@@ -860,6 +936,26 @@ const getRoute53DNSStatusText = (status) => {
     not_configured: '未配置',
     mismatched: '指向错误',
     error: '检查失败',
+  }
+  return statusTextMap[status] || status || '未知'
+}
+
+const getRedirectStatusType = (status) => {
+  const statusMap = {
+    pending: 'info',
+    processing: 'warning',
+    completed: 'success',
+    failed: 'danger',
+  }
+  return statusMap[status] || 'info'
+}
+
+const getRedirectStatusText = (status) => {
+  const statusTextMap = {
+    pending: '待处理',
+    processing: '处理中',
+    completed: '已完成',
+    failed: '失败',
   }
   return statusTextMap[status] || status || '未知'
 }

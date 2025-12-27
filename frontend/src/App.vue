@@ -12,6 +12,10 @@
           router
           class="sidebar-menu"
         >
+         <el-menu-item index="/groups">
+            <el-icon><Folder /></el-icon>
+            <span>分组管理</span>
+          </el-menu-item>
           <el-menu-item index="/domains">
             <el-icon><Link /></el-icon>
             <span>域名管理</span>
@@ -44,7 +48,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Link, RefreshRight, Connection, Download, Document } from '@element-plus/icons-vue'
+import { Link, RefreshRight, Connection, Download, Document, Folder } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)

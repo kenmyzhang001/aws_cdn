@@ -6,15 +6,33 @@
           <span>域名管理</span>
           <el-button type="primary" @click="showTransferDialog = true">
             <el-icon><Plus /></el-icon>
-            转入域名
+            新增域名
           </el-button>
         </div>
       </template>
+
+      <!-- 分组Tab -->
+      <el-tabs v-model="activeGroupId" @tab-change="handleGroupChange" style="margin-bottom: 20px">
+        <el-tab-pane :label="`全部 (${totalAll})`" :name="null"></el-tab-pane>
+        <el-tab-pane
+          v-for="group in groups"
+          :key="group.id"
+          :label="`${group.name} (${group.count || 0})`"
+          :name="group.id"
+        ></el-tab-pane>
+      </el-tabs>
 
       <el-table :data="domainList" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="domain_name" label="域名" />
         <el-table-column prop="registrar" label="原注册商" />
+        <el-table-column prop="dns_provider" label="DNS提供商" width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.dns_provider === 'cloudflare' ? 'success' : 'primary'">
+              {{ row.dns_provider === 'cloudflare' ? 'Cloudflare' : 'AWS' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
@@ -54,7 +72,13 @@
         </el-table-column>
         <el-table-column label="操作" width="450">
           <template #default="{ row }">
-            <el-button size="small" @click="viewNServers(row)">查看 NS</el-button>
+            <el-button 
+              v-if="row.dns_provider !== 'cloudflare'"
+              size="small" 
+              @click="viewNServers(row)"
+            >
+              查看 NS
+            </el-button>
             <el-button
               size="small"
               type="success"
@@ -64,6 +88,7 @@
               生成证书
             </el-button>
             <el-button
+              v-if="row.dns_provider !== 'cloudflare'"
               size="small"
               type="warning"
               @click="checkCertificate(row)"
@@ -95,20 +120,36 @@
       />
     </el-card>
 
-    <!-- 转入域名对话框 -->
-    <el-dialog v-model="showTransferDialog" title="转入域名" width="500px">
+    <!-- 新增域名对话框 -->
+    <el-dialog v-model="showTransferDialog" title="新增域名" width="500px">
       <el-form :model="transferForm" label-width="100px">
         <el-form-item label="域名" required>
           <el-input v-model="transferForm.domain_name" placeholder="例如: example.com" />
         </el-form-item>
         <el-form-item label="原注册商" required>
-          <el-input v-model="transferForm.registrar" placeholder="例如: GoDaddy" />
+          <el-input v-model="transferForm.registrar" placeholder="例如: GoDaddy aliyun" />
+        </el-form-item>
+        <el-form-item label="DNS提供商" required>
+          <el-select v-model="transferForm.dns_provider" placeholder="请选择DNS提供商" style="width: 100%">
+            <el-option label="Cloudflare" value="cloudflare" />
+            <el-option label="AWS" value="aws" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="分组">
+          <el-select v-model="transferForm.group_id" placeholder="请选择分组（不选则使用默认分组）" clearable style="width: 100%">
+            <el-option
+              v-for="group in groups"
+              :key="group.id"
+              :label="group.name"
+              :value="group.id"
+            />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showTransferDialog = false">取消</el-button>
         <el-button type="primary" @click="handleTransfer" :loading="transferLoading">
-          确认转入
+          确认新增
         </el-button>
       </template>
     </el-dialog>
@@ -203,6 +244,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { domainApi } from '@/api/domain'
+import { groupApi } from '@/api/group'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 
@@ -211,12 +253,18 @@ const domainList = ref([])
 const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+const totalAll = ref(0)
+
+const activeGroupId = ref(null)
+const groups = ref([])
 
 const showTransferDialog = ref(false)
 const transferLoading = ref(false)
 const transferForm = ref({
   domain_name: '',
   registrar: '',
+  dns_provider: 'cloudflare', // 默认选择 Cloudflare
+  group_id: null,
 })
 
 const showNSDialog = ref(false)
@@ -229,16 +277,50 @@ const currentCheckDomainId = ref(null)
 const fixing = ref(false)
 
 onMounted(() => {
+  loadGroups()
   loadDomains()
 })
+
+const loadGroups = async () => {
+  try {
+    const res = await groupApi.getGroupList()
+    groups.value = res
+    // 加载每个分组的域名数量
+    for (const group of groups.value) {
+      const res = await domainApi.getDomainList({
+        page: 1,
+        page_size: 1,
+        group_id: group.id,
+      })
+      group.count = res.total
+    }
+    // 加载全部数量
+    const resAll = await domainApi.getDomainList({
+      page: 1,
+      page_size: 1,
+    })
+    totalAll.value = resAll.total
+  } catch (error) {
+    console.error('加载分组列表失败:', error)
+  }
+}
+
+const handleGroupChange = () => {
+  currentPage.value = 1
+  loadDomains()
+}
 
 const loadDomains = async () => {
   loading.value = true
   try {
-    const res = await domainApi.getDomainList({
+    const params = {
       page: currentPage.value,
       page_size: pageSize.value,
-    })
+    }
+    if (activeGroupId.value !== null) {
+      params.group_id = activeGroupId.value
+    }
+    const res = await domainApi.getDomainList(params)
     domainList.value = res.data
     total.value = res.total
   } catch (error) {
@@ -256,10 +338,15 @@ const handleTransfer = async () => {
 
   transferLoading.value = true
   try {
-    await domainApi.transferDomain(transferForm.value)
+    const data = { ...transferForm.value }
+    if (!data.group_id) {
+      delete data.group_id
+    }
+    await domainApi.transferDomain(data)
     ElMessage.success('域名转入请求已提交')
     showTransferDialog.value = false
-    transferForm.value = { domain_name: '', registrar: '' }
+    transferForm.value = { domain_name: '', registrar: '', dns_provider: 'cloudflare', group_id: null }
+    loadGroups()
     loadDomains()
   } catch (error) {
     // 错误已在拦截器中处理
@@ -323,8 +410,13 @@ const refreshStatus = async (row) => {
 }
 
 const handleDelete = (row) => {
+  const isCloudflare = row.dns_provider === 'cloudflare'
+  const message = isCloudflare
+    ? `确定要删除域名 "${row.domain_name}" 吗？此操作将删除数据库中的域名记录，且无法恢复。`
+    : `确定要删除域名 "${row.domain_name}" 吗？此操作将同时删除相关的 AWS 资源（Route53 Hosted Zone 和 ACM 证书），且无法恢复。`
+  
   ElMessageBox.confirm(
-    `确定要删除域名 "${row.domain_name}" 吗？此操作将同时删除相关的 AWS 资源（Route53 Hosted Zone 和 ACM 证书），且无法恢复。`,
+    message,
     '确认删除',
     {
       confirmButtonText: '确定',

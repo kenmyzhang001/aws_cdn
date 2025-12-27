@@ -11,127 +11,57 @@
         </div>
       </template>
 
+      <!-- 分组Tab -->
+      <el-tabs v-model="activeGroupId" @tab-change="handleGroupChange" style="margin-bottom: 20px">
+        <el-tab-pane :label="`全部 (${totalAll})`" :name="null"></el-tab-pane>
+        <el-tab-pane
+          v-for="group in groups"
+          :key="group.id"
+          :label="`${group.name} (${group.count || 0})`"
+          :name="group.id"
+        ></el-tab-pane>
+      </el-tabs>
+
       <!-- 域名列表 -->
       <div v-loading="loading">
-        <div v-if="domainList.length > 0" class="domain-list">
-          <el-card
-            v-for="domain in domainList"
-            :key="domain.id"
-            class="domain-card"
-            shadow="hover"
-          >
-            <template #header>
-              <div class="domain-card-header">
-                <div class="domain-info">
-                  <span class="domain-name">{{ domain.domain_name }}</span>
-                  <el-tag
-                    :type="domain.certificate_status === 'issued' ? 'success' : 'warning'"
-                    size="small"
-                    style="margin-left: 8px"
-                  >
-                    证书: {{ getCertificateStatusText(domain.certificate_status) }}
-                  </el-tag>
-                  <el-tag size="small" style="margin-left: 8px">
-                    {{ domain.file_count || 0 }} 个文件
-                  </el-tag>
-                  <el-tag
-                    v-if="domain.cloudfront_id"
-                    :type="domain.cloudfront_enabled ? 'success' : 'danger'"
-                    size="small"
-                    style="margin-left: 8px"
-                  >
-                    CloudFront: {{ domain.cloudfront_enabled ? '已启用' : '已禁用' }}
-                  </el-tag>
-                </div>
-                <div class="domain-actions">
-                  <el-button
-                    size="small"
-                    type="primary"
-                    @click="openAddFileDialog(domain)"
-                  >
-                    <el-icon><Plus /></el-icon>
-                    添加APK文件
-                  </el-button>
-                </div>
-              </div>
+        <el-table v-if="domainList.length > 0" :data="domainList" stripe border>
+          <el-table-column prop="domain_name" label="域名" min-width="200">
+            <template #default="{ row }">
+              <span class="domain-name">{{ row.domain_name }}</span>
             </template>
-
-            <!-- 文件列表 -->
-            <div v-if="domain.files && domain.files.length > 0">
-              <el-table :data="domain.files" stripe size="small" border>
-                <el-table-column prop="file_name" label="文件名" min-width="200">
-                  <template #default="{ row }">
-                    <el-icon style="margin-right: 4px"><Document /></el-icon>
-                    {{ row.file_name }}
-                  </template>
-                </el-table-column>
-                <el-table-column prop="file_size" label="文件大小" width="120">
-                  <template #default="{ row }">
-                    {{ formatFileSize(row.file_size) }}
-                  </template>
-                </el-table-column>
-                <el-table-column prop="status" label="状态" width="100">
-                  <template #default="{ row }">
-                    <el-tag :type="getStatusType(row.status)" size="small">
-                      {{ getStatusText(row.status) }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="下载URL" min-width="300">
-                  <template #default="{ row }">
-                    <div v-if="row.download_url" style="display: flex; align-items: center; gap: 8px;">
-                      <el-link
-                        :href="row.download_url"
-                        target="_blank"
-                        type="primary"
-                        style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                      >
-                        {{ row.download_url }}
-                      </el-link>
-                      <el-button
-                        size="small"
-                        :icon="CopyDocument"
-                        circle
-                        @click="copyDownloadUrl(row)"
-                        title="复制链接"
-                      />
-                    </div>
-                    <span v-else style="color: #909399">-</span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="created_at" label="创建时间" width="180">
-                  <template #default="{ row }">
-                    {{ formatDate(row.created_at) }}
-                  </template>
-                </el-table-column>
-                <el-table-column label="操作" width="200" fixed="right">
-                  <template #default="{ row }">
-                    <el-button
-                      size="small"
-                      type="primary"
-                      :loading="row.checking"
-                      @click="checkPackage(row)"
-                    >
-                      检查
-                    </el-button>
-                    <el-button
-                      size="small"
-                      type="danger"
-                      @click="handleDelete(row)"
-                    >
-                      删除
-                    </el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </div>
-            <el-empty
-              v-else
-              description="该域名下暂无文件，点击上方按钮添加APK文件"
-              :image-size="80"
-            />
-          </el-card>
-        </div>
+          </el-table-column>
+          <el-table-column label="文件数量" width="120">
+            <template #default="{ row }">
+              <el-tag size="small">{{ row.file_count || 0 }} 个文件</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="120">
+            <template #default="{ row }">
+              <el-tag v-if="row.status" :type="getStatusType(row.status)" size="small">
+                {{ getStatusText(row.status) }}
+              </el-tag>
+              <span v-else style="color: #909399; font-size: 12px">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="200" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                type="primary"
+                @click="viewDomainDetails(row)"
+              >
+                查看详情
+              </el-button>
+              <el-button
+                size="small"
+                type="success"
+                @click="openAddFileDialog(row)"
+              >
+                添加文件
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
 
         <el-empty v-else description="暂无下载域名，请先添加下载域名" />
       </div>
@@ -140,6 +70,15 @@
     <!-- 添加下载域名对话框 -->
     <el-dialog v-model="showAddDomainDialog" title="添加下载域名" width="600px">
       <el-form :model="addDomainForm" label-width="120px" :rules="addDomainRules" ref="addDomainFormRef">
+        <el-form-item label="DNS提供商" required>
+          <el-radio-group v-model="addDomainForm.dns_provider" @change="loadAvailableDomains">
+            <el-radio label="cloudflare">Cloudflare</el-radio>
+            <el-radio label="aws">AWS Route53</el-radio>
+          </el-radio-group>
+          <div style="margin-top: 5px; color: #909399; font-size: 12px">
+            选择域名托管商，将影响证书验证和DNS记录的创建方式
+          </div>
+        </el-form-item>
         <el-form-item label="选择域名" prop="domain_id" required>
           <el-select
             v-model="addDomainForm.domain_id"
@@ -148,7 +87,7 @@
             filterable
           >
             <el-option
-              v-for="domain in availableDomains"
+              v-for="domain in filteredAvailableDomains"
               :key="domain.id"
               :label="domain.domain_name"
               :value="domain.id"
@@ -156,17 +95,26 @@
               <div>
                 <span>{{ domain.domain_name }}</span>
                 <el-tag
+                  v-if="domain.dns_provider !== 'cloudflare'"
                   :type="domain.certificate_status === 'issued' ? 'success' : 'warning'"
                   size="small"
                   style="margin-left: 8px"
                 >
                   {{ getCertificateStatusText(domain.certificate_status) }}
                 </el-tag>
+                <el-tag
+                  v-if="domain.dns_provider"
+                  size="small"
+                  :type="domain.dns_provider === 'cloudflare' ? 'warning' : 'primary'"
+                  style="margin-left: 5px"
+                >
+                  {{ domain.dns_provider === 'cloudflare' ? 'Cloudflare' : 'AWS' }}
+                </el-tag>
               </div>
             </el-option>
           </el-select>
           <div style="margin-top: 5px; color: #909399; font-size: 12px">
-            只显示证书已签发且未被重定向使用的域名
+            AWS域名需要证书已签发，Cloudflare域名只需要域名状态为已完成，且未被重定向和下载包使用
           </div>
         </el-form-item>
         <el-form-item label="上传第一个APK文件" prop="file">
@@ -223,30 +171,34 @@
             ref="addFileUploadRef"
             :auto-upload="false"
             :on-change="handleAddFileChange"
-            :limit="1"
+            :on-remove="handleAddFileRemove"
             :file-list="addFileList"
             accept=".apk"
+            multiple
           >
             <template #trigger>
               <el-button type="primary">选择APK文件</el-button>
             </template>
           </el-upload>
-          <div v-if="addFileSelectedFile" style="margin-top: 10px">
-            <div>文件名: {{ addFileSelectedFile.name }}</div>
-            <div>文件大小: {{ formatFileSize(addFileSelectedFile.size) }}</div>
-          </div>
-          <div v-if="addFileLoading" style="margin-top: 15px">
-            <el-progress
-              v-if="addFileUploadProgress > 0"
-              :percentage="addFileUploadProgress"
-              :status="addFileUploadProgress === 100 ? 'success' : null"
-              :stroke-width="8"
-            />
-            <div v-else style="text-align: center; color: #909399; font-size: 12px">
-              准备上传...
+          <div v-if="addFileSelectedFiles && addFileSelectedFiles.length > 0" style="margin-top: 10px">
+            <div v-for="(file, index) in addFileSelectedFiles" :key="index" style="margin-bottom: 8px; padding: 8px; background: #f5f7fa; border-radius: 4px">
+              <div>文件名: {{ file.name }}</div>
+              <div>文件大小: {{ formatFileSize(file.size) }}</div>
+              <div v-if="addFileUploadProgressMap[file.name] !== undefined" style="margin-top: 5px">
+                <el-progress
+                  :percentage="addFileUploadProgressMap[file.name]"
+                  :status="addFileUploadProgressMap[file.name] === 100 ? 'success' : null"
+                  :stroke-width="6"
+                />
+                <div style="text-align: center; margin-top: 3px; color: #909399; font-size: 12px">
+                  {{ addFileUploadProgressMap[file.name] === 100 ? '上传完成' : `上传中... ${addFileUploadProgressMap[file.name]}%` }}
+                </div>
+              </div>
             </div>
-            <div v-if="addFileUploadProgress > 0" style="text-align: center; margin-top: 5px; color: #909399; font-size: 12px">
-              上传中... {{ addFileUploadProgress }}%
+          </div>
+          <div v-if="addFileLoading && addFileSelectedFiles.length === 0" style="margin-top: 15px">
+            <div style="text-align: center; color: #909399; font-size: 12px">
+              准备上传...
             </div>
           </div>
         </el-form-item>
@@ -256,6 +208,166 @@
         <el-button type="primary" @click="handleAddFile" :loading="addFileLoading">
           {{ addFileLoading ? '上传中...' : '开始上传' }}
         </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 域名详情对话框 -->
+    <el-dialog v-model="showDetailDialog" title="域名详情" width="900px">
+      <div v-loading="detailLoading" v-if="currentDomain">
+        <el-descriptions :column="2" border style="margin-bottom: 20px">
+          <el-descriptions-item label="域名">{{ currentDomain.domain_name }}</el-descriptions-item>
+          <el-descriptions-item label="文件数量">
+            <el-tag size="small">{{ currentDomain.file_count || 0 }} 个文件</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="域名状态" v-if="currentDomain.domain_status">
+            <el-tag :type="getDomainStatusType(currentDomain.domain_status)" size="small">
+              {{ getDomainStatusText(currentDomain.domain_status) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="证书状态" v-if="currentDomain.certificate_status">
+            <el-tag
+              :type="currentDomain.certificate_status === 'issued' ? 'success' : 'warning'"
+              size="small"
+            >
+              {{ getCertificateStatusText(currentDomain.certificate_status) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFront状态" v-if="currentDomain.cloudfront_status">
+            <el-tag :type="getCloudFrontStatusType(currentDomain.cloudfront_status)" size="small">
+              {{ getCloudFrontStatusText(currentDomain.cloudfront_status) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFront启用" v-if="currentDomain.cloudfront_id">
+            <el-tag
+              :type="currentDomain.cloudfront_enabled ? 'success' : 'danger'"
+              size="small"
+            >
+              {{ currentDomain.cloudfront_enabled ? '已启用' : '已禁用' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFront源路径" v-if="currentDomain.cloudfront_origin_path_current || currentDomain.cloudfront_origin_path_expected" :span="2">
+            <div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px;">
+              <div>
+                <span style="color: #909399;">期望:</span>
+                <code style="background: #f5f7fa; padding: 2px 4px; border-radius: 2px; margin-left: 4px; font-size: 11px;">
+                  {{ currentDomain.cloudfront_origin_path_expected || '(空)' }}
+                </code>
+              </div>
+              <div>
+                <span style="color: #909399;">实际:</span>
+                <code 
+                  :style="{
+                    background: currentDomain.cloudfront_origin_path_current === currentDomain.cloudfront_origin_path_expected ? '#f0f9ff' : '#fef0f0',
+                    padding: '2px 4px',
+                    borderRadius: '2px',
+                    marginLeft: '4px',
+                    fontSize: '11px',
+                    color: currentDomain.cloudfront_origin_path_current === currentDomain.cloudfront_origin_path_expected ? '#67c23a' : '#f56c6c'
+                  }"
+                >
+                  {{ currentDomain.cloudfront_origin_path_current || '(空)' }}
+                </code>
+                <el-tag 
+                  v-if="currentDomain.cloudfront_origin_path_current !== currentDomain.cloudfront_origin_path_expected" 
+                  type="danger" 
+                  size="small" 
+                  style="margin-left: 4px"
+                >
+                  不匹配
+                </el-tag>
+              </div>
+            </div>
+          </el-descriptions-item>
+          <el-descriptions-item label="S3 Policy" v-if="currentDomain.s3_bucket_policy_configured !== undefined">
+            <el-tag :type="currentDomain.s3_bucket_policy_configured ? 'success' : 'danger'" size="small">
+              {{ currentDomain.s3_bucket_policy_configured ? '已配置' : '未配置' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFront ID" v-if="currentDomain.cloudfront_id">
+            <span style="font-size: 12px; color: #606266; font-family: monospace;">
+              {{ currentDomain.cloudfront_id }}
+            </span>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <!-- 文件列表 -->
+        <div v-if="currentDomain.files && currentDomain.files.length > 0">
+          <h3 style="margin-bottom: 10px">文件列表</h3>
+          <el-table :data="currentDomain.files" stripe size="small" border>
+            <el-table-column prop="file_name" label="文件名" min-width="200">
+              <template #default="{ row }">
+                <el-icon style="margin-right: 4px"><Document /></el-icon>
+                {{ row.file_name }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="file_size" label="文件大小" width="120">
+              <template #default="{ row }">
+                {{ formatFileSize(row.file_size) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="status" label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="getStatusType(row.status)" size="small">
+                  {{ getStatusText(row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="下载URL" >
+              <template #default="{ row }">
+                <div v-if="row.download_url" style="display: flex; align-items: center; gap: 8px;">
+                  <el-link
+                    :href="row.download_url"
+                    target="_blank"
+                    type="primary"
+                    style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                  >
+                    {{ row.download_url }}
+                  </el-link>
+                  <el-button
+                    size="small"
+                    :icon="CopyDocument"
+                    circle
+                    @click="copyDownloadUrl(row)"
+                    title="复制链接"
+                  />
+                </div>
+                <span v-else style="color: #909399">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="创建时间" width="180">
+              <template #default="{ row }">
+                {{ formatDate(row.created_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="200" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  size="small"
+                  type="primary"
+                  :loading="row.checking"
+                  @click="checkPackage(row)"
+                >
+                  检查
+                </el-button>
+                <el-button
+                  size="small"
+                  type="danger"
+                  @click="handleDelete(row)"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+        <el-empty
+          v-else
+          description="该域名下暂无文件"
+          :image-size="80"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="showDetailDialog = false">关闭</el-button>
       </template>
     </el-dialog>
 
@@ -363,22 +475,33 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Document, CopyDocument } from '@element-plus/icons-vue'
 import request from '@/api/request'
 import { domainApi } from '@/api/domain'
 import { downloadPackageApi } from '@/api/download_package'
+import { groupApi } from '@/api/group'
 import { uploadFile } from '@/utils/upload'
 
 const loading = ref(false)
-const domainList = ref([]) // 域名列表，每个域名包含其下的文件列表
+const domainList = ref([]) // 域名列表，只包含基本域名信息
+const totalAll = ref(0)
+
+// 详情相关
+const showDetailDialog = ref(false)
+const detailLoading = ref(false)
+const currentDomain = ref(null)
+
+const activeGroupId = ref(null)
+const groups = ref([])
 
 // 添加下载域名
 const showAddDomainDialog = ref(false)
 const addDomainLoading = ref(false)
 const addDomainUploadProgress = ref(0)
 const addDomainForm = ref({
+  dns_provider: 'cloudflare', // 默认使用Cloudflare
   domain_id: '',
   file_name: '',
   file: null,
@@ -392,7 +515,6 @@ const availableDomains = ref([]) // 可用于添加的域名列表
 // 添加文件到已有域名
 const showAddFileDialog = ref(false)
 const addFileLoading = ref(false)
-const addFileUploadProgress = ref(0)
 const addFileForm = ref({
   domain_id: '',
   domain_name: '',
@@ -400,7 +522,8 @@ const addFileForm = ref({
 })
 const addFileFormRef = ref(null)
 const addFileList = ref([])
-const addFileSelectedFile = ref(null)
+const addFileSelectedFiles = ref([])
+const addFileUploadProgressMap = ref({})
 const addFileUploadRef = ref(null)
 
 // 检查修复相关
@@ -420,7 +543,7 @@ const addFileRules = {
       message: '请选择APK文件',
       trigger: 'change',
       validator: (rule, value, callback) => {
-        if (!value) {
+        if (!addFileSelectedFiles.value || addFileSelectedFiles.value.length === 0) {
           callback(new Error('请选择APK文件'))
         } else {
           callback()
@@ -430,68 +553,62 @@ const addFileRules = {
   ],
 }
 
-// 加载下载域名列表
+// 加载下载域名列表（只加载域名基本信息）
 const loadDomains = async () => {
   loading.value = true
   try {
-    // 1. 获取所有可用于下载的域名（证书已签发且未被重定向使用）
-    const domainResponse = await domainApi.getDomainList({ page: 1, page_size: 1000 })
-    const allDomains = (domainResponse.data || []).filter(
-      (d) => d.certificate_status === 'issued' && !d.used_by_redirect
-    )
-
-    // 2. 获取所有下载包
+    // 1. 获取所有下载包（只获取基本信息，不查询状态）
+    const packageParams = {
+      page: 1,
+      page_size: 1000,
+    }
+    if (activeGroupId.value !== null) {
+      packageParams.group_id = activeGroupId.value
+    }
     const packageResponse = await request.get('/download-packages', {
-      params: {
-        page: 1,
-        page_size: 1000,
-      },
+      params: packageParams,
     })
     const allPackages = packageResponse.data || []
 
-    // 3. 按域名组织数据（只处理有文件的域名）
+    // 2. 获取所有域名（不过滤，显示所有域名包括失败的）
+    const domainParams = { page: 1, page_size: 1000 }
+    if (activeGroupId.value !== null) {
+      domainParams.group_id = activeGroupId.value
+    }
+    const domainResponse = await domainApi.getDomainList(domainParams)
+    const allDomains = domainResponse.data || []
+
+    // 3. 按域名组织数据（只统计文件数量，不加载详细信息）
     const domainMap = {}
-    const domainInfoMap = {} // 用于存储域名信息
+    const domainInfoMap = {}
     
-    // 创建域名信息映射
     allDomains.forEach((domain) => {
       domainInfoMap[domain.id] = domain
     })
 
-    // 只处理有文件的域名
     allPackages.forEach((pkg) => {
       const domainInfo = domainInfoMap[pkg.domain_id]
-      if (!domainInfo) return // 如果域名不存在，跳过
+      if (!domainInfo) {
+        return
+      }
       
       if (!domainMap[pkg.domain_id]) {
-        // 初始化域名信息
         domainMap[pkg.domain_id] = {
           id: domainInfo.id,
           domain_name: domainInfo.domain_name,
-          certificate_status: domainInfo.certificate_status,
           file_count: 0,
-          files: [],
-          cloudfront_id: null,
-          cloudfront_domain: null,
-          cloudfront_status: null,
-          cloudfront_enabled: false,
+          status: null, // 将使用最新下载包的状态
         }
       }
       
-      // 添加文件
-      domainMap[pkg.domain_id].files.push(pkg)
       domainMap[pkg.domain_id].file_count++
-      
-      // 更新CloudFront信息（使用第一个文件的CloudFront信息）
-      if (pkg.cloudfront_id && !domainMap[pkg.domain_id].cloudfront_id) {
-        domainMap[pkg.domain_id].cloudfront_id = pkg.cloudfront_id
-        domainMap[pkg.domain_id].cloudfront_domain = pkg.cloudfront_domain
-        domainMap[pkg.domain_id].cloudfront_status = pkg.cloudfront_status
-        domainMap[pkg.domain_id].cloudfront_enabled = pkg.cloudfront_enabled
+      // 使用最新下载包的状态（按创建时间，如果status更"重要"则更新）
+      if (!domainMap[pkg.domain_id].status || 
+          (pkg.status && getStatusPriority(pkg.status) > getStatusPriority(domainMap[pkg.domain_id].status))) {
+        domainMap[pkg.domain_id].status = pkg.status
       }
     })
 
-    // 只显示有文件的域名
     domainList.value = Object.values(domainMap)
   } catch (error) {
     ElMessage.error('加载下载域名列表失败: ' + (error.response?.data?.error || error.message))
@@ -500,14 +617,74 @@ const loadDomains = async () => {
   }
 }
 
+// 查看域名详情（加载详细信息）
+const viewDomainDetails = async (domain) => {
+  showDetailDialog.value = true
+  detailLoading.value = true
+  currentDomain.value = null
+  
+  try {
+    // 1. 获取域名下的所有下载包
+    const packageResponse = await request.get('/download-packages/by-domain', {
+      params: { domain_id: domain.id },
+    })
+    const packages = packageResponse.data || []
+
+    // 2. 获取域名信息
+    const domainResponse = await domainApi.getDomain(domain.id)
+    const domainInfo = domainResponse
+
+    // 3. 如果有下载包，获取第一个下载包的详细信息（包含状态检测）
+    let packageDetail = null
+    if (packages.length > 0) {
+      try {
+        packageDetail = await downloadPackageApi.getDownloadPackage(packages[0].id)
+      } catch (error) {
+        console.error('获取下载包详情失败:', error)
+      }
+    }
+
+    // 4. 构建域名详情对象
+    currentDomain.value = {
+      id: domainInfo.id,
+      domain_name: domainInfo.domain_name,
+      domain_status: packageDetail?.domain_status || domainInfo.status,
+      certificate_status: domainInfo.certificate_status,
+      file_count: packages.length,
+      files: packages,
+      cloudfront_id: packages.length > 0 ? packages[0].cloudfront_id : null,
+      cloudfront_domain: packages.length > 0 ? packages[0].cloudfront_domain : null,
+      cloudfront_status: packageDetail?.cloudfront_status || (packages.length > 0 ? packages[0].cloudfront_status : null),
+      cloudfront_enabled: packageDetail?.cloudfront_enabled !== undefined ? packageDetail.cloudfront_enabled : (packages.length > 0 ? packages[0].cloudfront_enabled : false),
+      cloudfront_origin_path_current: packageDetail?.cloudfront_origin_path_current,
+      cloudfront_origin_path_expected: packageDetail?.cloudfront_origin_path_expected,
+      s3_bucket_policy_configured: packageDetail?.s3_bucket_policy_configured,
+    }
+  } catch (error) {
+    ElMessage.error('加载域名详情失败: ' + (error.response?.data?.error || error.message))
+    showDetailDialog.value = false
+  } finally {
+    detailLoading.value = false
+  }
+}
+
 // 加载可用域名列表（用于添加新域名）
 const loadAvailableDomains = async () => {
   try {
     const response = await domainApi.getDomainList({ page: 1, page_size: 1000 })
-    // 过滤：只显示证书已签发且未被重定向使用的域名
-    const allAvailable = (response.data || []).filter(
-      (d) => d.certificate_status === 'issued' && !d.used_by_redirect
-    )
+    // 过滤：AWS域名需要证书已签发，Cloudflare域名只需要域名状态为completed
+    const allAvailable = (response.data || []).filter((d) => {
+      // 必须未被重定向使用且未被下载包使用
+      if (d.used_by_redirect || d.used_by_download_package) {
+        return false
+      }
+      // Cloudflare域名：只需要域名状态为completed
+      if (d.dns_provider === 'cloudflare') {
+        return d.status === 'completed'
+      }
+      // AWS域名：需要证书已签发
+      return d.certificate_status === 'issued'
+    })
     
     // 排除已经在下载域名列表中的域名
     const existingDomainIds = new Set(domainList.value.map((d) => d.id))
@@ -517,10 +694,22 @@ const loadAvailableDomains = async () => {
   }
 }
 
+// 根据DNS提供商过滤可用域名
+const filteredAvailableDomains = computed(() => {
+  if (!addDomainForm.value.dns_provider) {
+    return availableDomains.value
+  }
+  // 只显示匹配所选DNS提供商的域名
+  return availableDomains.value.filter(
+    (d) => d.dns_provider === addDomainForm.value.dns_provider
+  )
+})
+
 // 打开添加下载域名对话框
 const openAddDomainDialog = async () => {
   // 重置表单
   addDomainForm.value = {
+    dns_provider: 'cloudflare',
     domain_id: '',
     file_name: '',
     file: null,
@@ -558,6 +747,7 @@ const handleAddDomain = async () => {
     ElMessage.success('域名已添加，您可以稍后上传文件')
     showAddDomainDialog.value = false
     addDomainForm.value = {
+      dns_provider: 'cloudflare',
       domain_id: '',
       file_name: '',
       file: null,
@@ -591,6 +781,7 @@ const handleAddDomain = async () => {
     ElMessage.success('上传成功，正在处理中...')
     showAddDomainDialog.value = false
     addDomainForm.value = {
+      dns_provider: 'cloudflare',
       domain_id: '',
       file_name: '',
       file: null,
@@ -616,15 +807,29 @@ const openAddFileDialog = (domain) => {
     file: null,
   }
   addFileList.value = []
-  addFileSelectedFile.value = null
+  addFileSelectedFiles.value = []
+  addFileUploadProgressMap.value = {}
   showAddFileDialog.value = true
 }
 
 // 处理添加文件选择
-const handleAddFileChange = (file) => {
-  addFileSelectedFile.value = file.raw
-  addFileForm.value.file_name = file.name
-  addFileForm.value.file = file.raw
+const handleAddFileChange = (file, fileList) => {
+  // 更新选中的文件列表
+  addFileSelectedFiles.value = fileList.map(f => f.raw)
+  // 手动触发表单验证
+  if (addFileFormRef.value) {
+    addFileFormRef.value.validateField('file')
+  }
+}
+
+// 处理文件移除
+const handleAddFileRemove = (file, fileList) => {
+  // 更新选中的文件列表
+  addFileSelectedFiles.value = fileList.map(f => f.raw)
+  // 移除对应的进度
+  if (addFileUploadProgressMap.value[file.name] !== undefined) {
+    delete addFileUploadProgressMap.value[file.name]
+  }
   // 手动触发表单验证
   if (addFileFormRef.value) {
     addFileFormRef.value.validateField('file')
@@ -643,30 +848,57 @@ const handleAddFile = async () => {
   }
 
   // 验证通过后，再次检查文件
-  if (!addFileSelectedFile.value) {
+  if (!addFileSelectedFiles.value || addFileSelectedFiles.value.length === 0) {
     ElMessage.warning('请选择文件')
     return
   }
 
   addFileLoading.value = true
-  addFileUploadProgress.value = 0
+  addFileUploadProgressMap.value = {}
+  
+  // 初始化所有文件的进度为0
+  addFileSelectedFiles.value.forEach(file => {
+    addFileUploadProgressMap.value[file.name] = 0
+  })
 
-  try {
-    const formData = new FormData()
-    formData.append('domain_id', addFileForm.value.domain_id)
-    formData.append('file_name', addFileForm.value.file_name)
-    formData.append('file', addFileSelectedFile.value)
+  const totalFiles = addFileSelectedFiles.value.length
+  let successCount = 0
+  let failCount = 0
+  const errors = []
 
-    await uploadFile(
-      '/download-packages',
-      formData,
-      { timeout: 600000 },
-      (progress) => {
-        addFileUploadProgress.value = progress
-      }
-    )
+  // 依次上传每个文件
+  for (let i = 0; i < addFileSelectedFiles.value.length; i++) {
+    const file = addFileSelectedFiles.value[i]
+    
+    try {
+      const formData = new FormData()
+      formData.append('domain_id', addFileForm.value.domain_id)
+      formData.append('file_name', file.name)
+      formData.append('file', file)
 
-    ElMessage.success('上传成功，正在处理中...')
+      await uploadFile(
+        '/download-packages',
+        formData,
+        { timeout: 600000 },
+        (progress) => {
+          addFileUploadProgressMap.value[file.name] = progress
+        }
+      )
+
+      addFileUploadProgressMap.value[file.name] = 100
+      successCount++
+    } catch (error) {
+      const errorMsg = error.response?.data?.error || error.message
+      errors.push(`${file.name}: ${errorMsg}`)
+      failCount++
+      // 即使失败也标记为100，表示该文件处理完成（虽然失败了）
+      addFileUploadProgressMap.value[file.name] = 100
+    }
+  }
+
+  // 显示结果
+  if (successCount === totalFiles) {
+    ElMessage.success(`所有文件上传成功，正在处理中...`)
     showAddFileDialog.value = false
     addFileForm.value = {
       domain_id: '',
@@ -674,15 +906,23 @@ const handleAddFile = async () => {
       file: null,
     }
     addFileList.value = []
-    addFileSelectedFile.value = null
-    addFileUploadProgress.value = 0
+    addFileSelectedFiles.value = []
+    addFileUploadProgressMap.value = {}
     loadDomains()
-  } catch (error) {
-    ElMessage.error('上传失败: ' + (error.response?.data?.error || error.message))
-  } finally {
-    addFileLoading.value = false
-    addFileUploadProgress.value = 0
+  } else if (successCount > 0) {
+    ElMessage.warning(`${successCount}个文件上传成功，${failCount}个文件上传失败`)
+    errors.forEach(err => {
+      ElMessage.error(err)
+    })
+    // 不关闭对话框，让用户看到失败的文件
+  } else {
+    ElMessage.error('所有文件上传失败')
+    errors.forEach(err => {
+      ElMessage.error(err)
+    })
   }
+
+  addFileLoading.value = false
 }
 
 // 删除下载包
@@ -776,15 +1016,14 @@ const fixPackage = async (row) => {
 // 在检查对话框中点击修复
 const handleFix = async () => {
   if (!checkPackageId.value) return
-  // 在所有域名的文件中查找
-  let row = null
-  for (const domain of domainList.value) {
-    row = domain.files.find((p) => p.id === checkPackageId.value)
-    if (row) break
+  
+  // 创建一个简单的对象，包含 id 和 fixing 属性
+  const row = {
+    id: checkPackageId.value,
+    fixing: false,
   }
-  if (row) {
-    await fixPackage(row)
-  }
+  
+  await fixPackage(row)
 }
 
 // 格式化文件大小
@@ -827,6 +1066,18 @@ const getStatusText = (status) => {
   return statusMap[status] || status
 }
 
+// 获取状态优先级（用于选择最重要的状态显示）
+const getStatusPriority = (status) => {
+  const priorityMap = {
+    failed: 5,
+    processing: 4,
+    uploading: 3,
+    pending: 2,
+    completed: 1,
+  }
+  return priorityMap[status] || 0
+}
+
 // 获取CloudFront状态类型
 const getCloudFrontStatusType = (status) => {
   const statusMap = {
@@ -858,7 +1109,84 @@ const getCertificateStatusText = (status) => {
   return statusMap[status] || status || '未知'
 }
 
+// 获取域名状态类型
+const getDomainStatusType = (status) => {
+  const statusMap = {
+    pending: 'info',
+    in_progress: 'warning',
+    completed: 'success',
+    failed: 'danger',
+  }
+  return statusMap[status] || 'info'
+}
+
+// 获取域名状态文本
+const getDomainStatusText = (status) => {
+  const statusTextMap = {
+    pending: '待转入',
+    in_progress: '转入中',
+    completed: '已完成',
+    failed: '失败',
+  }
+  return statusTextMap[status] || status || '未知'
+}
+
+const loadGroups = async () => {
+  try {
+    const res = await groupApi.getGroupList()
+    groups.value = res
+    // 加载每个分组的下载包数量（通过域名统计）
+    for (const group of groups.value) {
+      const domainRes = await domainApi.getDomainList({
+        page: 1,
+        page_size: 1000,
+        group_id: group.id,
+      })
+      const domainsInGroup = domainRes.data || []
+      // 统计这些域名下的下载包数量
+      let count = 0
+      for (const domain of domainsInGroup) {
+        const packageRes = await request.get('/download-packages', {
+          params: {
+            page: 1,
+            page_size: 1000,
+            group_id: group.id,
+          },
+        })
+        const packages = (packageRes.data || []).filter(p => p.domain_id === domain.id)
+        count += packages.length
+      }
+      group.count = count
+    }
+    // 加载全部数量
+    const domainResAll = await domainApi.getDomainList({
+      page: 1,
+      page_size: 1000,
+    })
+    const allDomains = domainResAll.data || []
+    let totalCount = 0
+    for (const domain of allDomains) {
+      const packageRes = await request.get('/download-packages', {
+        params: {
+          page: 1,
+          page_size: 1000,
+        },
+      })
+      const packages = (packageRes.data || []).filter(p => p.domain_id === domain.id)
+      totalCount += packages.length
+    }
+    totalAll.value = totalCount
+  } catch (error) {
+    console.error('加载分组列表失败:', error)
+  }
+}
+
+const handleGroupChange = () => {
+  loadDomains()
+}
+
 onMounted(() => {
+  loadGroups()
   loadDomains()
   loadAvailableDomains()
   // 每30秒刷新一次状态

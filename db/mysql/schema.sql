@@ -36,13 +36,31 @@ CREATE TABLE IF NOT EXISTS `users` (
 
 
 /*
- * 2. 域名表：domains
+ * 2. 分组表：groups
+ *    - 管理域名、重定向、下载包的分组
+ */
+CREATE TABLE IF NOT EXISTS `groups` (
+  `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `name`        VARCHAR(255) NOT NULL COMMENT '分组名称',
+  `is_default`  TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否为默认分组',
+  `created_at`  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at`  DATETIME(3) NULL DEFAULT NULL,
+
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_groups_name` (`name`, `deleted_at`),
+  KEY `idx_groups_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='分组表';
+
+/*
+ * 3. 域名表：domains
  *    - 管理转入的域名、NS 和证书状态
  */
 CREATE TABLE IF NOT EXISTS `domains` (
   `id`                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `domain_name`         VARCHAR(255) NOT NULL COMMENT '域名',
   `registrar`           VARCHAR(255) DEFAULT NULL COMMENT '原注册商',
+  `group_id`            BIGINT UNSIGNED DEFAULT NULL COMMENT '所属分组ID',
   `status`              VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT '域名状态: pending/in_progress/completed/failed',
   `n_servers`           TEXT DEFAULT NULL COMMENT 'NS 服务器配置(JSON 字符串)',
   `certificate_status`  VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT '证书状态: pending/issued/failed',
@@ -54,18 +72,24 @@ CREATE TABLE IF NOT EXISTS `domains` (
   `deleted_at`          DATETIME(3) NULL DEFAULT NULL,
 
   PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_domains_domain_name` (`domain_name`),
-  KEY `idx_domains_deleted_at` (`deleted_at`)
+  UNIQUE KEY `idx_domains_domain_name` (`domain_name`, `deleted_at`),
+  KEY `idx_domains_deleted_at` (`deleted_at`),
+  KEY `idx_domains_group_id` (`group_id`),
+
+  CONSTRAINT `fk_domains_group`
+    FOREIGN KEY (`group_id`) REFERENCES `groups` (`id`)
+    ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='域名表';
 
 
 /*
- * 3. 重定向规则表：redirect_rules
+ * 4. 重定向规则表：redirect_rules
  *    - 源域名以及对应的 CloudFront 分发
  */
 CREATE TABLE IF NOT EXISTS `redirect_rules` (
   `id`            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `source_domain` VARCHAR(255) NOT NULL COMMENT '源域名',
+  `group_id`      BIGINT UNSIGNED DEFAULT NULL COMMENT '所属分组ID',
   `cloudfront_id` VARCHAR(255) DEFAULT NULL COMMENT 'CloudFront Distribution ID',
 
   `created_at`    DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -74,12 +98,17 @@ CREATE TABLE IF NOT EXISTS `redirect_rules` (
 
   PRIMARY KEY (`id`),
   UNIQUE KEY `idx_redirect_rules_source_domain` (`source_domain`),
-  KEY `idx_redirect_rules_deleted_at` (`deleted_at`)
+  KEY `idx_redirect_rules_deleted_at` (`deleted_at`),
+  KEY `idx_redirect_rules_group_id` (`group_id`),
+
+  CONSTRAINT `fk_redirect_rules_group`
+    FOREIGN KEY (`group_id`) REFERENCES `groups` (`id`)
+    ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='重定向规则表';
 
 
 /*
- * 4. 重定向目标表：redirect_targets
+ * 5. 重定向目标表：redirect_targets
  *    - 每条规则下的多个目标 URL，支持权重与启用状态
  */
 CREATE TABLE IF NOT EXISTS `redirect_targets` (
@@ -104,12 +133,13 @@ CREATE TABLE IF NOT EXISTS `redirect_targets` (
 
 
 /*
- * 5. 下载包表：download_packages
+ * 6. 下载包表：download_packages
  *    - 管理下载包文件、S3存储、CloudFront分发
  */
 CREATE TABLE IF NOT EXISTS `download_packages` (
   `id`                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `domain_id`           BIGINT UNSIGNED NOT NULL COMMENT '所属域名 ID',
+  `group_id`            BIGINT UNSIGNED DEFAULT NULL COMMENT '所属分组ID',
   `domain_name`         VARCHAR(255) NOT NULL COMMENT '下载域名',
   `file_name`           VARCHAR(255) NOT NULL COMMENT '文件名',
   `file_size`           BIGINT NOT NULL COMMENT '文件大小（字节）',
@@ -128,15 +158,19 @@ CREATE TABLE IF NOT EXISTS `download_packages` (
   PRIMARY KEY (`id`),
   KEY `idx_download_packages_domain_id` (`domain_id`),
   KEY `idx_download_packages_deleted_at` (`deleted_at`),
+  KEY `idx_download_packages_group_id` (`group_id`),
 
   CONSTRAINT `fk_download_packages_domain`
     FOREIGN KEY (`domain_id`) REFERENCES `domains` (`id`)
-    ON DELETE RESTRICT
+    ON DELETE RESTRICT,
+  CONSTRAINT `fk_download_packages_group`
+    FOREIGN KEY (`group_id`) REFERENCES `groups` (`id`)
+    ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='下载包表';
 
 
 /*
- * 6. 审计日志表：audit_logs
+ * 7. 审计日志表：audit_logs
  *    - 记录所有后台操作的变更和操作时间
  */
 CREATE TABLE IF NOT EXISTS `audit_logs` (
@@ -171,4 +205,8 @@ CREATE TABLE IF NOT EXISTS `audit_logs` (
 
 SET FOREIGN_KEY_CHECKS = 1;
 
+-- 插入默认分组
+INSERT INTO `groups` (`name`, `is_default`, `created_at`, `updated_at`) 
+VALUES ('默认分组', 1, NOW(), NOW())
+ON DUPLICATE KEY UPDATE `name` = `name`;
 

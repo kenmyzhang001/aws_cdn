@@ -11,8 +11,8 @@ import (
 )
 
 func main() {
-	// 初始化日志系统（5G=5120MB，保留10个文件）
-	logger.InitLogger("./logs", "app", 5120, 10, 0)
+	// 初始化日志系统（20MB，保留10个文件）
+	logger.InitLogger("./logs", "app", 20, 10, 0)
 	log := logger.GetLogger()
 
 	// 加载环境变量
@@ -55,4 +55,3 @@ func main() {
 		log.WithError(err).Fatal("服务器启动失败")
 	}
 }
-
