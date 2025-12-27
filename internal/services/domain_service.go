@@ -177,38 +177,110 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 		"certificate_status": "pending",
 	})
 
-	// 等待一下让 AWS 生成验证记录
-	time.Sleep(2 * time.Second)
-
 	// 获取证书验证记录并添加到 DNS 提供商
 	if domain.HostedZoneID != "" {
-		validationRecords, err := s.acmSvc.GetCertificateValidationRecords(certificateARN)
-		if err == nil && len(validationRecords) > 0 {
+		// 重试获取验证记录（AWS可能需要一些时间生成验证记录）
+		var validationRecords []aws.CertificateValidationRecord
+		maxRetries := 10
+		for i := 0; i < maxRetries; i++ {
+			records, err := s.acmSvc.GetCertificateValidationRecords(certificateARN)
+			if err == nil && len(records) > 0 {
+				validationRecords = records
+				break
+			}
+			if i < maxRetries-1 {
+				log.WithFields(map[string]interface{}{
+					"domain_id":    domain.ID,
+					"retry":        i + 1,
+					"max_retries":  maxRetries,
+					"wait_seconds": 3,
+				}).Info("验证记录尚未生成，等待后重试")
+				time.Sleep(3 * time.Second)
+			}
+		}
+
+		if len(validationRecords) > 0 {
 			log.WithFields(map[string]interface{}{
 				"domain_id":    domain.ID,
 				"record_count": len(validationRecords),
+				"dns_provider": domain.DNSProvider,
 			}).Info("开始添加验证记录到DNS提供商")
+
+			// 记录添加失败的记录数量
+			failedCount := 0
+			successCount := 0
+
 			// 将验证记录添加到 DNS 提供商
 			for _, record := range validationRecords {
 				if record.Type == "CNAME" {
 					var err error
+					recordName := record.Name
+
 					if domain.DNSProvider == models.DNSProviderCloudflare {
-						err = s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
+						// 对于 Cloudflare，如果记录名称是完整域名，提取相对域名部分
+						// AWS ACM 返回的格式可能是：_abc123.example.com. 或 _abc123.example.com
+						// Cloudflare 需要：_abc123（相对于根域名）
+						recordName = extractRelativeDomainName(record.Name, domain.DomainName)
+
+						log.WithFields(map[string]interface{}{
+							"domain_id":     domain.ID,
+							"original_name": record.Name,
+							"relative_name": recordName,
+							"record_value":  record.Value,
+							"zone_id":       domain.HostedZoneID,
+							"root_domain":   domain.DomainName,
+						}).Info("添加验证记录到Cloudflare")
+
+						err = s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, recordName, record.Value)
 					} else {
 						err = s.route53Svc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
 					}
 					if err != nil {
+						failedCount++
 						log.WithError(err).WithFields(map[string]interface{}{
+							"domain_id":     domain.ID,
+							"record_name":   recordName,
+							"original_name": record.Name,
+							"record_value":  record.Value,
+							"dns_provider":  domain.DNSProvider,
+						}).Error("添加验证记录失败")
+					} else {
+						successCount++
+						log.WithFields(map[string]interface{}{
 							"domain_id":    domain.ID,
-							"record_name":  record.Name,
+							"record_name":  recordName,
 							"record_value": record.Value,
 							"dns_provider": domain.DNSProvider,
-						}).Error("添加验证记录失败")
-						// 继续处理，不因为单个记录失败而停止
+						}).Info("验证记录添加成功")
 					}
 				}
 			}
+
+			if failedCount > 0 {
+				log.WithFields(map[string]interface{}{
+					"domain_id":    domain.ID,
+					"success":      successCount,
+					"failed":       failedCount,
+					"dns_provider": domain.DNSProvider,
+				}).Warn("部分验证记录添加失败，证书验证可能会失败")
+			} else {
+				log.WithFields(map[string]interface{}{
+					"domain_id":    domain.ID,
+					"success":      successCount,
+					"dns_provider": domain.DNSProvider,
+				}).Info("所有验证记录添加成功")
+			}
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain_id":       domain.ID,
+				"certificate_arn": certificateARN,
+			}).Warn("未能获取到验证记录，证书验证可能会失败")
 		}
+	} else {
+		log.WithFields(map[string]interface{}{
+			"domain_id":       domain.ID,
+			"certificate_arn": certificateARN,
+		}).Warn("缺少HostedZoneID，无法添加验证记录")
 	}
 
 	// 等待证书验证（最多等待 1 小时）
@@ -1058,6 +1130,29 @@ func extractRootDomain(domain string) string {
 		return strings.Join(parts[len(parts)-2:], ".")
 	}
 	return domain
+}
+
+// extractRelativeDomainName 从完整域名中提取相对域名部分
+// 例如: _abc123.example.com. -> _abc123, _abc123.example.com -> _abc123
+// 如果 recordName 已经是相对域名，直接返回
+func extractRelativeDomainName(recordName, rootDomain string) string {
+	// 去掉末尾的点
+	recordName = strings.TrimSuffix(recordName, ".")
+	rootDomain = strings.TrimSuffix(rootDomain, ".")
+
+	// 如果 recordName 以 rootDomain 结尾，提取前缀部分
+	if strings.HasSuffix(recordName, "."+rootDomain) {
+		relativeName := strings.TrimSuffix(recordName, "."+rootDomain)
+		return relativeName
+	}
+
+	// 如果 recordName 等于 rootDomain，返回 @（根域名记录）
+	if recordName == rootDomain {
+		return "@"
+	}
+
+	// 如果 recordName 不包含 rootDomain，可能是相对域名，直接返回
+	return recordName
 }
 
 // FindCertificateARNForDomain 查找适合域名的证书ARN
