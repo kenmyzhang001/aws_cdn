@@ -2,6 +2,8 @@ package aws
 
 import (
 	"aws_cdn/internal/config"
+	"aws_cdn/internal/logger"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudfront"
+	"github.com/sirupsen/logrus"
 )
 
 type CloudFrontService struct {
@@ -325,6 +328,140 @@ func (s *CloudFrontService) CreateDistributionForLargeFileDownload(domainName st
 			ViewerCertificate: s.buildViewerCertificate(certificateARN),
 			Enabled:           aws.Bool(true),
 		},
+	}
+
+	// 打印详细的创建参数
+	log := logger.GetLogger()
+	if log != nil {
+		// 构建详细的参数信息
+		params := map[string]interface{}{
+			"CallerReference": aws.StringValue(input.DistributionConfig.CallerReference),
+			"Comment":         aws.StringValue(input.DistributionConfig.Comment),
+			"DomainName":      domainName,
+			"CertificateARN":  certificateARN,
+			"S3Origin":        s3Origin,
+			"OriginPath":      originPath,
+			"Enabled":         aws.BoolValue(input.DistributionConfig.Enabled),
+		}
+
+		// 添加 Aliases 信息
+		if input.DistributionConfig.Aliases != nil && input.DistributionConfig.Aliases.Items != nil {
+			aliases := make([]string, 0, len(input.DistributionConfig.Aliases.Items))
+			for _, alias := range input.DistributionConfig.Aliases.Items {
+				if alias != nil {
+					aliases = append(aliases, aws.StringValue(alias))
+				}
+			}
+			params["Aliases"] = aliases
+		}
+
+		// 添加 DefaultRootObject
+		if input.DistributionConfig.DefaultRootObject != nil {
+			params["DefaultRootObject"] = aws.StringValue(input.DistributionConfig.DefaultRootObject)
+		}
+
+		// 添加 Origin 信息
+		if input.DistributionConfig.Origins != nil && len(input.DistributionConfig.Origins.Items) > 0 {
+			origin := input.DistributionConfig.Origins.Items[0]
+			if origin != nil {
+				originInfo := map[string]interface{}{
+					"Id":         aws.StringValue(origin.Id),
+					"DomainName": aws.StringValue(origin.DomainName),
+				}
+				if origin.OriginPath != nil {
+					originInfo["OriginPath"] = aws.StringValue(origin.OriginPath)
+				}
+				if origin.CustomOriginConfig != nil {
+					originInfo["CustomOriginConfig"] = map[string]interface{}{
+						"HTTPPort":             aws.Int64Value(origin.CustomOriginConfig.HTTPPort),
+						"HTTPSPort":            aws.Int64Value(origin.CustomOriginConfig.HTTPSPort),
+						"OriginProtocolPolicy": aws.StringValue(origin.CustomOriginConfig.OriginProtocolPolicy),
+					}
+					if origin.CustomOriginConfig.OriginSslProtocols != nil {
+						sslProtocols := make([]string, 0)
+						if origin.CustomOriginConfig.OriginSslProtocols.Items != nil {
+							for _, proto := range origin.CustomOriginConfig.OriginSslProtocols.Items {
+								if proto != nil {
+									sslProtocols = append(sslProtocols, aws.StringValue(proto))
+								}
+							}
+						}
+						originInfo["OriginSslProtocols"] = sslProtocols
+					}
+				}
+				params["Origin"] = originInfo
+			}
+		}
+
+		// 添加 DefaultCacheBehavior 信息
+		if input.DistributionConfig.DefaultCacheBehavior != nil {
+			cacheBehavior := input.DistributionConfig.DefaultCacheBehavior
+			cacheInfo := map[string]interface{}{
+				"TargetOriginId":       aws.StringValue(cacheBehavior.TargetOriginId),
+				"ViewerProtocolPolicy": aws.StringValue(cacheBehavior.ViewerProtocolPolicy),
+				"Compress":             aws.BoolValue(cacheBehavior.Compress),
+				"MinTTL":               aws.Int64Value(cacheBehavior.MinTTL),
+				"DefaultTTL":           aws.Int64Value(cacheBehavior.DefaultTTL),
+				"MaxTTL":               aws.Int64Value(cacheBehavior.MaxTTL),
+			}
+			if cacheBehavior.AllowedMethods != nil {
+				methods := make([]string, 0)
+				if cacheBehavior.AllowedMethods.Items != nil {
+					for _, method := range cacheBehavior.AllowedMethods.Items {
+						if method != nil {
+							methods = append(methods, aws.StringValue(method))
+						}
+					}
+				}
+				cacheInfo["AllowedMethods"] = methods
+			}
+			if cacheBehavior.ForwardedValues != nil {
+				forwardInfo := map[string]interface{}{
+					"QueryString": aws.BoolValue(cacheBehavior.ForwardedValues.QueryString),
+				}
+				if cacheBehavior.ForwardedValues.Cookies != nil {
+					forwardInfo["Cookies"] = aws.StringValue(cacheBehavior.ForwardedValues.Cookies.Forward)
+				}
+				if cacheBehavior.ForwardedValues.Headers != nil {
+					headers := make([]string, 0)
+					if cacheBehavior.ForwardedValues.Headers.Items != nil {
+						for _, header := range cacheBehavior.ForwardedValues.Headers.Items {
+							if header != nil {
+								headers = append(headers, aws.StringValue(header))
+							}
+						}
+					}
+					forwardInfo["Headers"] = headers
+				}
+				cacheInfo["ForwardedValues"] = forwardInfo
+			}
+			params["DefaultCacheBehavior"] = cacheInfo
+		}
+
+		// 添加 ViewerCertificate 信息
+		if input.DistributionConfig.ViewerCertificate != nil {
+			certInfo := map[string]interface{}{}
+			if input.DistributionConfig.ViewerCertificate.CloudFrontDefaultCertificate != nil {
+				certInfo["CloudFrontDefaultCertificate"] = aws.BoolValue(input.DistributionConfig.ViewerCertificate.CloudFrontDefaultCertificate)
+			}
+			if input.DistributionConfig.ViewerCertificate.ACMCertificateArn != nil {
+				certInfo["ACMCertificateArn"] = aws.StringValue(input.DistributionConfig.ViewerCertificate.ACMCertificateArn)
+			}
+			if input.DistributionConfig.ViewerCertificate.SSLSupportMethod != nil {
+				certInfo["SSLSupportMethod"] = aws.StringValue(input.DistributionConfig.ViewerCertificate.SSLSupportMethod)
+			}
+			if input.DistributionConfig.ViewerCertificate.MinimumProtocolVersion != nil {
+				certInfo["MinimumProtocolVersion"] = aws.StringValue(input.DistributionConfig.ViewerCertificate.MinimumProtocolVersion)
+			}
+			params["ViewerCertificate"] = certInfo
+		}
+
+		// 将参数转换为 JSON 格式打印
+		paramsJSON, _ := json.MarshalIndent(params, "", "  ")
+		log.WithFields(logrus.Fields{
+			"function": "CreateDistributionForLargeFileDownload",
+			"action":   "创建 CloudFront 分发",
+		}).Infof("创建 CloudFront 分发详细参数:\n%s", string(paramsJSON))
 	}
 
 	result, err := s.client.CreateDistribution(input)
