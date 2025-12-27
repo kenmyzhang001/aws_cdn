@@ -506,6 +506,42 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 
 				if record.Type == "CNAME" {
 					cnameCount++
+
+					// 先检查记录是否已存在
+					var exists bool
+					var checkErr error
+					recordName := record.Name
+
+					if domain.DNSProvider == models.DNSProviderCloudflare {
+						// 对于 Cloudflare，提取相对域名部分
+						recordName = extractRelativeDomainName(record.Name, domain.DomainName)
+						exists, checkErr = s.cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, recordName, record.Value)
+					} else {
+						exists, checkErr = s.route53Svc.CheckCertificateValidationCNAME(domain.HostedZoneID, record.Name, record.Value)
+					}
+
+					if checkErr != nil {
+						log.WithError(checkErr).WithFields(map[string]interface{}{
+							"domain_id":    id,
+							"record_index": i + 1,
+							"record_name":  record.Name,
+							"dns_provider": domain.DNSProvider,
+						}).Warn("检查验证记录是否存在时出错，将尝试创建")
+					}
+
+					if exists {
+						skippedCount++
+						log.WithFields(map[string]interface{}{
+							"domain_id":     id,
+							"record_index":  i + 1,
+							"record_name":   record.Name,
+							"record_value":  record.Value,
+							"dns_provider":  domain.DNSProvider,
+							"skipped_count": skippedCount,
+						}).Info("CNAME验证记录已存在，跳过创建")
+						continue
+					}
+
 					log.WithFields(map[string]interface{}{
 						"domain_id":      id,
 						"record_index":   i + 1,
@@ -518,12 +554,13 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 					var err error
 					if domain.DNSProvider == models.DNSProviderCloudflare {
 						log.WithFields(map[string]interface{}{
-							"domain_id":    id,
-							"record_name":  record.Name,
-							"record_value": record.Value,
-							"zone_id":      domain.HostedZoneID,
+							"domain_id":     id,
+							"record_name":   record.Name,
+							"relative_name": recordName,
+							"record_value":  record.Value,
+							"zone_id":       domain.HostedZoneID,
 						}).Info("调用Cloudflare API创建CNAME记录")
-						err = s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
+						err = s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, recordName, record.Value)
 					} else {
 						log.WithFields(map[string]interface{}{
 							"domain_id":      id,
@@ -582,13 +619,13 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 			log.WithFields(map[string]interface{}{
 				"domain_id":       id,
 				"certificate_arn": certificateARN,
-			}).Info("证书验证记录添加成功，开始异步等待验证")
+			}).Info("证书验证记录处理完成，开始异步等待验证")
 
 			// 更新证书状态
 			s.db.Model(domain).Update("certificate_status", "pending_validation")
 
-			// 异步等待证书验证
-			go s.requestCertificateAsync(domain)
+			// 证书已存在且有验证记录，只需要等待验证完成，不需要重复请求证书
+			go s.waitForCertificateValidationAsync(domain)
 
 			return nil
 		}
