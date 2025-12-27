@@ -182,7 +182,7 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 				MaxTTL:     aws.Int64(31536000), // 最大缓存时间（1年）
 			},
 			ViewerCertificate: s.buildViewerCertificate(certificateARN),
-			Enabled: aws.Bool(true),
+			Enabled:           aws.Bool(true),
 		},
 	}
 
@@ -323,7 +323,7 @@ func (s *CloudFrontService) CreateDistributionForLargeFileDownload(domainName st
 				MaxTTL:     aws.Int64(86400), // 最大缓存时间（24小时）
 			},
 			ViewerCertificate: s.buildViewerCertificate(certificateARN),
-			Enabled: aws.Bool(true),
+			Enabled:           aws.Bool(true),
 		},
 	}
 

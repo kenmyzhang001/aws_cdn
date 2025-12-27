@@ -1106,3 +1106,64 @@ func (s *DomainService) generateAndImportCloudflareCertificateAsync(domain *mode
 		"certificate_status": "issued", // 导入的证书直接是issued状态，无需验证
 	})
 }
+
+// extractRootDomain 提取根域名
+// 例如: www.example.com -> example.com, sub.example.com -> example.com, dl.95058.cc -> 95058.cc
+func extractRootDomain(domain string) string {
+	parts := strings.Split(domain, ".")
+	if len(parts) >= 2 {
+		return strings.Join(parts[len(parts)-2:], ".")
+	}
+	return domain
+}
+
+// FindCertificateARNForDomain 查找适合域名的证书ARN
+// 对于子域名（如 dl.95058.cc），优先查找根域名的泛域名证书（*.95058.cc），如果找不到则使用根域名的证书
+// 对于根域名（如 95058.cc），直接使用该域名的证书
+func (s *DomainService) FindCertificateARNForDomain(domainName string) (string, error) {
+	// 提取根域名
+	rootDomain := extractRootDomain(domainName)
+
+	// 判断是否是子域名
+	isSubdomain := domainName != rootDomain
+
+	if isSubdomain {
+		// 对于子域名，优先查找泛域名证书（*.rootDomain）
+		wildcardDomain := "*." + rootDomain
+		var wildcardDomainRecord models.Domain
+		if err := s.db.Where("domain_name = ? AND certificate_status = ? AND certificate_arn != ''", wildcardDomain, "issued").First(&wildcardDomainRecord).Error; err == nil {
+			log := logger.GetLogger()
+			log.WithFields(map[string]interface{}{
+				"domain_name":     domainName,
+				"root_domain":     rootDomain,
+				"wildcard_domain": wildcardDomain,
+				"certificate_arn": wildcardDomainRecord.CertificateARN,
+			}).Info("找到泛域名证书，使用泛域名证书")
+			return wildcardDomainRecord.CertificateARN, nil
+		}
+
+		// 如果没找到泛域名证书，查找根域名的证书（假设根域名的证书是泛域名证书）
+		var rootDomainRecord models.Domain
+		if err := s.db.Where("domain_name = ? AND certificate_status = ? AND certificate_arn != ''", rootDomain, "issued").First(&rootDomainRecord).Error; err == nil {
+			log := logger.GetLogger()
+			log.WithFields(map[string]interface{}{
+				"domain_name":     domainName,
+				"root_domain":     rootDomain,
+				"certificate_arn": rootDomainRecord.CertificateARN,
+			}).Info("使用根域名的证书（假设为泛域名证书）")
+			return rootDomainRecord.CertificateARN, nil
+		}
+
+		// 如果都没找到，返回空字符串（表示未找到证书）
+		return "", nil
+	} else {
+		// 对于根域名，直接查找该域名的证书
+		var domainRecord models.Domain
+		if err := s.db.Where("domain_name = ? AND certificate_status = ? AND certificate_arn != ''", domainName, "issued").First(&domainRecord).Error; err == nil {
+			return domainRecord.CertificateARN, nil
+		}
+
+		// 如果没找到，返回空字符串（表示未找到证书）
+		return "", nil
+	}
+}

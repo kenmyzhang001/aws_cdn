@@ -218,14 +218,34 @@ func (s *RedirectService) deployRedirectRule(rule *models.RedirectRule, certific
 }
 
 // findCertificateARN 查找域名的证书ARN（从domain表中查找）
+// 对于子域名（如 dl.95058.cc），优先查找根域名的泛域名证书（*.95058.cc），如果找不到则使用根域名的证书
+// 对于根域名（如 95058.cc），直接使用该域名的证书
 func (s *RedirectService) findCertificateARN(domainName string) string {
-	var domain models.Domain
-	if err := s.db.Where("domain_name = ?", domainName).First(&domain).Error; err == nil {
-		if domain.CertificateARN != "" {
-			return domain.CertificateARN
+	if s.domainSvc == nil {
+		// 如果domainSvc未初始化，回退到原来的逻辑
+		var domain models.Domain
+		if err := s.db.Where("domain_name = ?", domainName).First(&domain).Error; err == nil {
+			if domain.CertificateARN != "" {
+				return domain.CertificateARN
+			}
 		}
+		return ""
 	}
-	return ""
+
+	// 使用DomainService的FindCertificateARNForDomain方法
+	certificateARN, err := s.domainSvc.FindCertificateARNForDomain(domainName)
+	if err != nil {
+		// 如果查找失败，回退到原来的逻辑
+		var domain models.Domain
+		if err := s.db.Where("domain_name = ?", domainName).First(&domain).Error; err == nil {
+			if domain.CertificateARN != "" {
+				return domain.CertificateARN
+			}
+		}
+		return ""
+	}
+
+	return certificateARN
 }
 
 // CreateRedirectRuleResult 创建重定向规则的结果

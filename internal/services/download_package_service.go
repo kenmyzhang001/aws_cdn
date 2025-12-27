@@ -355,14 +355,32 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 			"dns_provider": domain.DNSProvider,
 		}).Info("开始创建新的CloudFront分发")
 
-		// 对于 Cloudflare 托管的域名，使用空证书 ARN（将使用 CloudFront 默认证书）
-		certificateARN := domain.CertificateARN
-		if domain.DNSProvider == models.DNSProviderCloudflare {
-			certificateARN = "" // Cloudflare 域名使用 CloudFront 默认证书
+		// 查找适合域名的证书ARN（子域名使用泛域名证书，根域名使用根域名证书）
+		certificateARN := ""
+
+		// 对于AWS托管的域名，查找合适的证书
+		var err error
+		certificateARN, err = s.domainService.FindCertificateARNForDomain(pkg.DomainName)
+		if err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"package_id":  pkg.ID,
+				"domain_name": pkg.DomainName,
+			}).Warn("查找证书失败，将尝试使用域名的证书")
+			// 如果查找失败，回退到使用域名的证书
+			certificateARN = domain.CertificateARN
+		} else if certificateARN == "" {
+			// 如果没找到证书，回退到使用域名的证书
 			log.WithFields(map[string]interface{}{
 				"package_id":  pkg.ID,
 				"domain_name": pkg.DomainName,
-			}).Info("Cloudflare 托管域名，使用 CloudFront 默认证书")
+			}).Warn("未找到合适的证书，将尝试使用域名的证书")
+			certificateARN = domain.CertificateARN
+		} else {
+			log.WithFields(map[string]interface{}{
+				"package_id":      pkg.ID,
+				"domain_name":     pkg.DomainName,
+				"certificate_arn": certificateARN,
+			}).Info("找到合适的证书")
 		}
 
 		cloudFrontID, err = s.cloudFrontSvc.CreateDistributionForLargeFileDownload(
@@ -887,10 +905,18 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 		// 计算originPath：同一域名下的所有文件都使用相同的目录路径 downloads/{domain_name}/
 		originPath := fmt.Sprintf("/downloads/%s", pkg.DomainName)
 
-		// 对于 Cloudflare 托管的域名，使用空证书 ARN（将使用 CloudFront 默认证书）
-		certificateARN := domain.CertificateARN
-		if domain.DNSProvider == models.DNSProviderCloudflare {
-			certificateARN = "" // Cloudflare 域名使用 CloudFront 默认证书
+		// 查找适合域名的证书ARN（子域名使用泛域名证书，根域名使用根域名证书）
+		certificateARN := ""
+
+		// 对于AWS托管的域名，查找合适的证书
+		var err error
+		certificateARN, err = s.domainService.FindCertificateARNForDomain(pkg.DomainName)
+		if err != nil {
+			// 如果查找失败，回退到使用域名的证书
+			certificateARN = domain.CertificateARN
+		} else if certificateARN == "" {
+			// 如果没找到证书，回退到使用域名的证书
+			certificateARN = domain.CertificateARN
 		}
 
 		// 创建CloudFront分发
