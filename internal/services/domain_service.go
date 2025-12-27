@@ -518,6 +518,63 @@ func (s *DomainService) ListDomains(page, pageSize int, groupID *uint) ([]Domain
 	return result, total, nil
 }
 
+// ListDomainsForSelect 列出域名用于下拉选择框（轻量级，不查询证书状态）
+func (s *DomainService) ListDomainsForSelect(dnsProvider string) ([]DomainWithUsage, error) {
+	query := s.db.Model(&models.Domain{}).Where("deleted_at IS NULL")
+
+	// 如果指定了DNS提供商，则过滤
+	if dnsProvider != "" {
+		query = query.Where("dns_provider = ?", dnsProvider)
+	}
+
+	var domains []models.Domain
+	if err := query.Order("id DESC").Find(&domains).Error; err != nil {
+		return nil, err
+	}
+
+	// 批量检查域名使用情况（优化性能）
+	domainNames := make([]string, len(domains))
+	for i := range domains {
+		domainNames[i] = domains[i].DomainName
+	}
+
+	// 批量查询重定向使用情况
+	redirectMap := make(map[string]bool)
+	if len(domainNames) > 0 {
+		var redirectDomains []string
+		s.db.Model(&models.RedirectRule{}).
+			Where("source_domain IN ? AND deleted_at IS NULL", domainNames).
+			Pluck("source_domain", &redirectDomains)
+		for _, domainName := range redirectDomains {
+			redirectMap[domainName] = true
+		}
+	}
+
+	// 批量查询下载包使用情况
+	downloadPackageMap := make(map[string]bool)
+	if len(domainNames) > 0 {
+		var downloadPackageDomains []string
+		s.db.Model(&models.DownloadPackage{}).
+			Where("domain_name IN ? AND deleted_at IS NULL", domainNames).
+			Pluck("domain_name", &downloadPackageDomains)
+		for _, domainName := range downloadPackageDomains {
+			downloadPackageMap[domainName] = true
+		}
+	}
+
+	// 转换为带使用状态的域名列表（不查询证书状态）
+	result := make([]DomainWithUsage, len(domains))
+	for i := range domains {
+		result[i] = DomainWithUsage{
+			Domain:                domains[i],
+			UsedByRedirect:        redirectMap[domains[i].DomainName],
+			UsedByDownloadPackage: downloadPackageMap[domains[i].DomainName],
+		}
+	}
+
+	return result, nil
+}
+
 // GetNServers 获取域名的 NS 服务器配置
 func (s *DomainService) GetNServers(id uint) ([]string, error) {
 	domain, err := s.GetDomain(id)

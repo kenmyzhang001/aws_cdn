@@ -27,6 +27,16 @@ func (h *GroupHandler) ListGroups(c *gin.Context) {
 	c.JSON(http.StatusOK, groups)
 }
 
+// ListGroupsWithStats 列出所有分组及其统计信息（用于优化页面加载）
+func (h *GroupHandler) ListGroupsWithStats(c *gin.Context) {
+	groups, err := h.service.ListGroupsWithStats()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, groups)
+}
+
 // GetGroup 获取分组信息
 func (h *GroupHandler) GetGroup(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)

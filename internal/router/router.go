@@ -93,6 +93,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		{
 			domains.POST("", domainHandler.TransferDomain)
 			domains.GET("", domainHandler.ListDomains)
+			domains.GET("/for-select", domainHandler.ListDomainsForSelect) // 轻量级接口，用于下拉选择框
 			domains.GET("/:id", domainHandler.GetDomain)
 			domains.DELETE("/:id", domainHandler.DeleteDomain)
 			domains.GET("/:id/ns-servers", domainHandler.GetNServers)
@@ -143,6 +144,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		groups := protected.Group("/groups")
 		{
 			groups.GET("", groupHandler.ListGroups)
+			groups.GET("/with-stats", groupHandler.ListGroupsWithStats) // 带统计信息的分组列表，用于优化页面加载
 			groups.GET("/:id", groupHandler.GetGroup)
 			groups.POST("", groupHandler.CreateGroup)
 			groups.PUT("/:id", groupHandler.UpdateGroup)

@@ -53,6 +53,46 @@ func (s *GroupService) ListGroups() ([]models.Group, error) {
 	return groups, nil
 }
 
+// GroupWithStats 带统计信息的分组
+type GroupWithStats struct {
+	models.Group
+	DomainCount          int64 `json:"domain_count"`           // 域名数量
+	RedirectCount        int64 `json:"redirect_count"`         // 重定向规则数量
+	DownloadPackageCount int64 `json:"download_package_count"` // 下载包数量
+}
+
+// ListGroupsWithStats 列出所有分组及其统计信息（用于优化页面加载）
+func (s *GroupService) ListGroupsWithStats() ([]GroupWithStats, error) {
+	var groups []models.Group
+	if err := s.db.Order("is_default DESC, id ASC").Find(&groups).Error; err != nil {
+		return nil, fmt.Errorf("获取分组列表失败: %w", err)
+	}
+
+	result := make([]GroupWithStats, len(groups))
+	for i, group := range groups {
+		// 统计域名数量
+		var domainCount int64
+		s.db.Model(&models.Domain{}).Where("group_id = ? AND deleted_at IS NULL", group.ID).Count(&domainCount)
+
+		// 统计重定向规则数量
+		var redirectCount int64
+		s.db.Table("redirect_rules").Where("group_id = ? AND deleted_at IS NULL", group.ID).Count(&redirectCount)
+
+		// 统计下载包数量（直接通过group_id统计）
+		var downloadPackageCount int64
+		s.db.Table("download_packages").Where("group_id = ? AND deleted_at IS NULL", group.ID).Count(&downloadPackageCount)
+
+		result[i] = GroupWithStats{
+			Group:                group,
+			DomainCount:          domainCount,
+			RedirectCount:        redirectCount,
+			DownloadPackageCount: downloadPackageCount,
+		}
+	}
+
+	return result, nil
+}
+
 // GetGroup 获取分组信息
 func (s *GroupService) GetGroup(id uint) (*models.Group, error) {
 	var group models.Group

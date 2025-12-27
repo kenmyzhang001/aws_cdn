@@ -261,3 +261,18 @@ func (h *DomainHandler) FixCertificate(c *gin.Context) {
 	log.WithField("domain_id", id).Info("证书修复请求已提交")
 	c.JSON(http.StatusOK, gin.H{"message": "证书修复请求已提交"})
 }
+
+// ListDomainsForSelect 列出域名用于下拉选择框（轻量级，不查询证书状态）
+func (h *DomainHandler) ListDomainsForSelect(c *gin.Context) {
+	dnsProvider := c.Query("dns_provider") // 可选，用于过滤DNS提供商
+
+	domains, err := h.service.ListDomainsForSelect(dnsProvider)
+	if err != nil {
+		log := logger.GetLogger()
+		log.WithError(err).Error("列出域名用于下拉选择框失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, domains)
+}
