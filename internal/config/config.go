@@ -5,10 +5,11 @@ import (
 )
 
 type Config struct {
-	Database DatabaseConfig
-	Server   ServerConfig
-	JWT      JWTConfig
-	AWS      AWSConfig
+	Database   DatabaseConfig
+	Server     ServerConfig
+	JWT        JWTConfig
+	AWS        AWSConfig
+	Cloudflare CloudflareConfig
 }
 
 type DatabaseConfig struct {
@@ -38,6 +39,12 @@ type AWSConfig struct {
 	S3BucketName    string
 }
 
+type CloudflareConfig struct {
+	APIEmail string
+	APIKey   string
+	APIToken string // 如果使用Token认证，优先使用Token
+}
+
 func Load() *Config {
 	return &Config{
 		Database: DatabaseConfig{
@@ -62,6 +69,11 @@ func Load() *Config {
 			SecretAccessKey: getEnv("AWS_SECRET_ACCESS_KEY", ""),
 			CloudFrontID:    getEnv("CLOUDFRONT_DISTRIBUTION_ID", ""),
 			S3BucketName:    getEnv("S3_BUCKET_NAME", ""),
+		},
+		Cloudflare: CloudflareConfig{
+			APIEmail: getEnv("CLOUDFLARE_API_EMAIL", ""),
+			APIKey:   getEnv("CLOUDFLARE_API_KEY", ""),
+			APIToken: getEnv("CLOUDFLARE_API_TOKEN", ""),
 		},
 	}
 }

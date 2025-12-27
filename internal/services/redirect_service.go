@@ -2,6 +2,7 @@ package services
 
 import (
 	"aws_cdn/internal/config"
+	"aws_cdn/internal/logger"
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/aws"
 	"encoding/json"
@@ -139,7 +140,8 @@ func (s *RedirectService) deployRedirectRule(rule *models.RedirectRule, certific
 	if s.config.S3BucketName != "" {
 		if err := s.s3Svc.EnsureBucketPolicyForPublicAccess(s.config.S3BucketName); err != nil {
 			// 记录警告但不阻止流程，因为可能已有其他策略
-			fmt.Printf("警告: 配置 S3 bucket policy 失败: %v\n", err)
+			log := logger.GetLogger()
+			log.WithError(err).WithField("bucket_name", s.config.S3BucketName).Warn("配置 S3 bucket policy 失败")
 		}
 	}
 
@@ -174,8 +176,13 @@ func (s *RedirectService) deployRedirectRule(rule *models.RedirectRule, certific
 	}
 
 	// 输出调试信息
-	fmt.Printf("创建CloudFront分发 - S3 Bucket: %s, S3 Origin: %s, Region: %s\n",
-		s.config.S3BucketName, s3Origin, s.config.Region)
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
+		"s3_bucket": s.config.S3BucketName,
+		"s3_origin": s3Origin,
+		"region":    s.config.Region,
+		"domain":    rule.SourceDomain,
+	}).Info("开始创建CloudFront分发")
 
 	// S3目录路径（OriginPath会在CreateDistributionWithPath中自动格式化）
 	s3Path := fmt.Sprintf("redirects/%s", rule.SourceDomain)
@@ -200,7 +207,11 @@ func (s *RedirectService) deployRedirectRule(rule *models.RedirectRule, certific
 	// 创建 Route 53 DNS 记录指向 CloudFront
 	if err := s.createRoute53RecordForCloudFront(rule.SourceDomain, distributionID); err != nil {
 		// 记录错误但不阻止流程，因为 DNS 记录可以稍后手动创建
-		fmt.Printf("警告: 创建 Route 53 DNS 记录失败: %v\n", err)
+		log := logger.GetLogger()
+		log.WithError(err).WithFields(map[string]interface{}{
+			"source_domain":   rule.SourceDomain,
+			"distribution_id": distributionID,
+		}).Warn("创建 Route 53 DNS 记录失败")
 	}
 
 	return nil
@@ -235,19 +246,34 @@ func (s *RedirectService) CheckDomainUsedByDownloadPackage(domainName string) (b
 }
 
 // CreateRedirectRule 创建重定向规则并自动部署
-func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []string, certificateARN string) (*CreateRedirectRuleResult, error) {
+func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []string, certificateARN string, dnsProvider string, groupID *uint) (*CreateRedirectRuleResult, error) {
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
+		"source_domain":   sourceDomain,
+		"target_urls":     targetURLs,
+		"certificate_arn": certificateARN,
+		"dns_provider":    dnsProvider,
+		"group_id":        groupID,
+	}).Info("开始创建重定向规则")
+
 	// 检查源域名是否已存在（排除软删除的记录）
 	var existingRule models.RedirectRule
 	if err := s.db.Where("source_domain = ?", sourceDomain).First(&existingRule).Error; err == nil {
+		log.WithFields(map[string]interface{}{
+			"source_domain": sourceDomain,
+			"existing_id":   existingRule.ID,
+		}).Error("创建重定向规则失败：源域名已存在")
 		return nil, fmt.Errorf("源域名 %s 的重定向规则已存在", sourceDomain)
 	}
 
 	// 检查域名是否已被下载包使用
 	isUsed, err := s.CheckDomainUsedByDownloadPackage(sourceDomain)
 	if err != nil {
+		log.WithError(err).WithField("source_domain", sourceDomain).Error("创建重定向规则失败：检查域名使用状态失败")
 		return nil, fmt.Errorf("检查域名使用状态失败: %w", err)
 	}
 	if isUsed {
+		log.WithField("source_domain", sourceDomain).Error("创建重定向规则失败：域名已被下载包使用")
 		return nil, fmt.Errorf("域名 %s 已被下载包使用，请先删除下载包后再使用", sourceDomain)
 	}
 
@@ -256,34 +282,64 @@ func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []s
 	if err := s.db.Unscoped().Where("source_domain = ?", sourceDomain).First(&softDeletedRule).Error; err == nil {
 		// 如果存在软删除的记录，先真正删除它（硬删除）
 		// 同时删除相关的CloudFront和S3资源
+		log := logger.GetLogger()
+		log.WithField("source_domain", sourceDomain).Info("发现软删除的记录，开始清理")
 		if softDeletedRule.CloudFrontID != "" {
 			// 先禁用分发
 			enabled := false
 			if err := s.cloudFrontSvc.UpdateDistribution(softDeletedRule.CloudFrontID, nil, "", &enabled); err != nil {
-				fmt.Printf("警告: 禁用CloudFront分发失败: %v\n", err)
+				log.WithError(err).WithFields(map[string]interface{}{
+					"source_domain":   sourceDomain,
+					"distribution_id": softDeletedRule.CloudFrontID,
+				}).Warn("禁用CloudFront分发失败")
 			}
 			time.Sleep(2 * time.Second)
 			// 删除分发
 			if err := s.cloudFrontSvc.DeleteDistribution(softDeletedRule.CloudFrontID); err != nil {
-				fmt.Printf("警告: 删除CloudFront分发失败: %v\n", err)
+				log.WithError(err).WithFields(map[string]interface{}{
+					"source_domain":   sourceDomain,
+					"distribution_id": softDeletedRule.CloudFrontID,
+				}).Warn("删除CloudFront分发失败")
 			}
 		}
 		// 删除S3目录
 		if s.config.S3BucketName != "" {
 			s3Path := fmt.Sprintf("redirects/%s/", softDeletedRule.SourceDomain)
 			if err := s.s3Svc.DeleteObjectsWithPrefix(s.config.S3BucketName, s3Path); err != nil {
-				fmt.Printf("警告: 删除S3目录失败: %v\n", err)
+				log.WithError(err).WithFields(map[string]interface{}{
+					"source_domain": sourceDomain,
+					"s3_path":       s3Path,
+					"bucket_name":   s.config.S3BucketName,
+				}).Warn("删除S3目录失败")
 			}
 		}
 		// 真正删除数据库记录（硬删除）
 		if err := s.db.Unscoped().Delete(&softDeletedRule).Error; err != nil {
+			log.WithError(err).WithField("source_domain", sourceDomain).Error("清理已删除的记录失败")
 			return nil, fmt.Errorf("清理已删除的记录失败: %w", err)
 		}
+	}
+
+	// 如果没有指定分组，使用默认分组
+	var finalGroupID *uint
+	if groupID == nil {
+		groupService := NewGroupService(s.db)
+		defaultGroup, err := groupService.GetOrCreateDefaultGroup()
+		if err != nil {
+			log := logger.GetLogger()
+			log.WithError(err).Warn("获取默认分组失败")
+		} else {
+			finalGroupID = &defaultGroup.ID
+		}
+	} else {
+		finalGroupID = groupID
 	}
 
 	// 创建重定向规则
 	rule := &models.RedirectRule{
 		SourceDomain: sourceDomain,
+		GroupID:      finalGroupID,
+		Status:       models.RedirectRuleStatusPending, // 初始状态为待处理
 	}
 
 	if err := s.db.Create(rule).Error; err != nil {
@@ -309,36 +365,116 @@ func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []s
 		return nil, fmt.Errorf("加载重定向规则失败: %w", err)
 	}
 
+	// 如果域名不存在，且提供了dns_provider，先创建域名
+	var domain *models.Domain
+	var domainErr error
+	if s.domainSvc != nil {
+		var existingDomain models.Domain
+		if err := s.db.Where("domain_name = ?", sourceDomain).First(&existingDomain).Error; err != nil {
+			// 域名不存在，如果提供了dns_provider，创建域名
+			if dnsProvider != "" {
+				dnsProviderEnum := models.DNSProviderAWS
+				if dnsProvider == "cloudflare" {
+					dnsProviderEnum = models.DNSProviderCloudflare
+				}
+				// 使用重定向规则的分组ID创建域名，确保它们在同一个分组
+				domain, domainErr = s.domainSvc.TransferDomain(sourceDomain, "系统自动创建", dnsProviderEnum, finalGroupID)
+				if domainErr != nil {
+					log := logger.GetLogger()
+					log.WithError(domainErr).WithFields(map[string]interface{}{
+						"source_domain": sourceDomain,
+						"dns_provider":  dnsProvider,
+						"group_id":      finalGroupID,
+					}).Warn("自动创建域名失败")
+				}
+			}
+		} else {
+			domain = &existingDomain
+		}
+	}
+
 	// 如果没有提供证书ARN，尝试从domain表中查找
 	if certificateARN == "" {
-		certificateARN = s.findCertificateARN(sourceDomain)
+		if domain != nil && domain.CertificateARN != "" {
+			certificateARN = domain.CertificateARN
+		} else {
+			certificateARN = s.findCertificateARN(sourceDomain)
+		}
 	}
 
 	// 收集部署警告信息
 	var deploymentWarnings []string
 
+	// 检查域名是否为 Cloudflare 托管
+	isCloudflare := false
+	if domain != nil && domain.DNSProvider == models.DNSProviderCloudflare {
+		isCloudflare = true
+	} else {
+		// 如果 domain 为空，尝试从数据库查询
+		var domainCheck models.Domain
+		if err := s.db.Where("domain_name = ?", sourceDomain).First(&domainCheck).Error; err == nil {
+			if domainCheck.DNSProvider == models.DNSProviderCloudflare {
+				isCloudflare = true
+			}
+		}
+	}
+
 	// 自动部署到S3和CloudFront
-	// 如果找到了证书ARN，创建CloudFront分发
-	if certificateARN != "" {
+	// Cloudflare 托管的域名可以使用 CloudFront 默认证书（None），不需要证书 ARN
+	// AWS 托管的域名需要证书 ARN
+	if isCloudflare || certificateARN != "" {
+		// Cloudflare 域名或已找到证书，创建 CloudFront 分发
+		// 对于 Cloudflare 域名，certificateARN 可以为空，将使用 CloudFront 默认证书
 		if err := s.deployRedirectRule(rule, certificateARN); err != nil {
 			// 如果部署失败，记录错误但不阻止规则创建
 			// 可以后续通过更新接口重新部署
+			log := logger.GetLogger()
+			log.WithError(err).WithFields(map[string]interface{}{
+				"source_domain":   sourceDomain,
+				"certificate_arn": certificateARN,
+				"is_cloudflare":   isCloudflare,
+			}).Warn("部署重定向规则失败")
 			warningMsg := fmt.Sprintf("部署重定向规则失败: %v", err)
 			deploymentWarnings = append(deploymentWarnings, warningMsg)
-			fmt.Printf("警告: %s\n", warningMsg)
 		}
 	} else {
-		// 如果没有找到证书，先上传HTML文件到S3
+		// AWS 托管域名但没有找到证书，先上传HTML文件到S3
 		// 系统会自动尝试从domain表中查找证书，如果找到会自动创建CloudFront
 		// 如果确实没有证书，可以后续通过BindDomainToCloudFront接口手动绑定CloudFront
 		if err := s.uploadHTMLOnly(rule); err != nil {
+			log := logger.GetLogger()
+			log.WithError(err).WithField("source_domain", sourceDomain).Warn("上传HTML文件失败")
 			warningMsg := fmt.Sprintf("上传HTML文件失败: %v", err)
 			deploymentWarnings = append(deploymentWarnings, warningMsg)
-			fmt.Printf("警告: %s\n", warningMsg)
 		} else {
 			// 上传成功但没有证书，提示用户
 			deploymentWarnings = append(deploymentWarnings, "未找到证书，已上传HTML文件到S3，但未创建CloudFront分发")
 		}
+	}
+
+	// 创建后检查状态，如果所有配置都通过，更新状态为 completed
+	// 如果没有警告，说明部署成功，可以检查状态
+	if len(deploymentWarnings) == 0 {
+		// 检查状态以确保所有配置都通过
+		checkStatus, err := s.CheckRedirectRule(rule.ID)
+		if err == nil && len(checkStatus.Issues) == 0 {
+			rule.Status = models.RedirectRuleStatusCompleted
+		} else if err == nil && len(checkStatus.Issues) > 0 {
+			rule.Status = models.RedirectRuleStatusFailed
+		} else {
+			// 检查失败，设置为 processing
+			rule.Status = models.RedirectRuleStatusProcessing
+		}
+	} else {
+		// 有警告，设置为 processing
+		rule.Status = models.RedirectRuleStatusProcessing
+	}
+
+	// 保存状态更新
+	if err := s.db.Save(rule).Error; err != nil {
+		// 记录错误但不影响创建结果返回
+		log := logger.GetLogger()
+		log.WithError(err).Warn("更新重定向规则状态失败")
 	}
 
 	// 返回规则和警告信息
@@ -431,8 +567,8 @@ func (s *RedirectService) CheckRoute53RecordStatus(domainName, cloudFrontID stri
 		}
 	}
 
-	// 检查是否存在指向 CloudFront 的 A 记录，并验证是否指向正确的分发
-	exists, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName)
+	// 检查是否存在指向 CloudFront 的 DNS 记录，并验证是否指向正确的分发
+	exists, err := s.domainSvc.CheckCloudFrontCNAMERecord(&domain, cloudFrontDomainName)
 	if err != nil {
 		return "error"
 	}
@@ -443,10 +579,12 @@ func (s *RedirectService) CheckRoute53RecordStatus(domainName, cloudFrontID stri
 
 	// 如果指定了 CloudFront 域名但检查失败，可能是指向了错误的分发
 	if cloudFrontDomainName != "" {
-		// 再次检查是否指向了其他 CloudFront（不指定域名）
-		existsAny, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName, "")
-		if err == nil && existsAny {
-			return "mismatched" // 指向了 CloudFront 但不是正确的分发
+		// 对于AWS，再次检查是否指向了其他 CloudFront（不指定域名）
+		if domain.DNSProvider == models.DNSProviderAWS {
+			existsAny, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName, "")
+			if err == nil && existsAny {
+				return "mismatched" // 指向了 CloudFront 但不是正确的分发
+			}
 		}
 	}
 
@@ -477,7 +615,7 @@ func (s *RedirectService) CheckWWWCNAMERecordStatus(domainName string) string {
 	}
 
 	// 检查是否存在 www CNAME 记录
-	exists, err := s.domainSvc.CheckWWWCNAMERecord(domain.HostedZoneID, domainName)
+	exists, err := s.domainSvc.CheckWWWCNAMERecord(&domain)
 	if err != nil {
 		return "error"
 	}
@@ -538,40 +676,49 @@ func (s *RedirectService) createRoute53RecordForCloudFront(domainName, distribut
 	cloudFrontDomainName := *dist.DomainName
 
 	// 先检查是否已存在正确的 DNS 记录
-	exists, err := s.domainSvc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName)
+	exists, err := s.domainSvc.CheckCloudFrontCNAMERecord(&domain, cloudFrontDomainName)
 	if err != nil {
 		// 检查失败，继续尝试创建
 	} else if !exists {
-		// 如果不存在，创建或更新 Alias 记录（使用 UPSERT，如果存在则更新）
-		if err := s.domainSvc.CreateCloudFrontAliasRecord(domain.HostedZoneID, domainName, cloudFrontDomainName); err != nil {
+		// 如果不存在，创建或更新 DNS 记录
+		if err := s.domainSvc.CreateCloudFrontCNAMERecord(&domain, cloudFrontDomainName); err != nil {
 			return err
 		}
 	}
 
 	// 如果域名不是 www 子域名，为 www 子域名创建 CNAME 记录指向根域名
-	// 即使根域名的 A 记录已存在，也要确保 www CNAME 记录存在
+	// 即使根域名的 DNS 记录已存在，也要确保 www CNAME 记录存在
 	if !strings.HasPrefix(domainName, "www.") {
-		if err := s.domainSvc.CreateWWWCNAMERecord(domain.HostedZoneID, domainName); err != nil {
+		if err := s.domainSvc.CreateWWWCNAMERecord(&domain); err != nil {
 			// 记录错误但不阻止流程，因为 www CNAME 不是必需的
-			fmt.Printf("警告: 创建 www CNAME 记录失败: %v\n", err)
+			log := logger.GetLogger()
+			log.WithError(err).WithFields(map[string]interface{}{
+				"domain_name":     domainName,
+				"distribution_id": distributionID,
+			}).Warn("创建 www CNAME 记录失败")
 		}
 	}
 
 	return nil
 }
 
-// ListRedirectRules 列出所有重定向规则
-func (s *RedirectService) ListRedirectRules(page, pageSize int) ([]models.RedirectRule, int64, error) {
+// ListRedirectRules 列出所有重定向规则，支持按分组筛选
+func (s *RedirectService) ListRedirectRules(page, pageSize int, groupID *uint) ([]models.RedirectRule, int64, error) {
 	var rules []models.RedirectRule
 	var total int64
 
 	offset := (page - 1) * pageSize
 
-	if err := s.db.Model(&models.RedirectRule{}).Count(&total).Error; err != nil {
+	query := s.db.Model(&models.RedirectRule{})
+	if groupID != nil {
+		query = query.Where("group_id = ?", *groupID)
+	}
+
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := s.db.Preload("Targets").Offset(offset).Limit(pageSize).Find(&rules).Error; err != nil {
+	if err := query.Preload("Targets").Offset(offset).Limit(pageSize).Find(&rules).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -655,13 +802,21 @@ func (s *RedirectService) AddTarget(ruleID uint, targetURL string) error {
 
 	// 更新S3中的index.html
 	if err := s.redeployHTML(rule); err != nil {
-		fmt.Printf("警告: 重新部署HTML文件失败: %v\n", err)
+		log := logger.GetLogger()
+		log.WithError(err).WithFields(map[string]interface{}{
+			"rule_id":       rule.ID,
+			"source_domain": rule.SourceDomain,
+		}).Warn("重新部署HTML文件失败")
 	}
 
 	// 如果有CloudFront分发，失效缓存
 	if rule.CloudFrontID != "" {
 		if err := s.invalidateCloudFrontCache(rule.CloudFrontID); err != nil {
-			fmt.Printf("警告: 失效CloudFront缓存失败: %v\n", err)
+			log := logger.GetLogger()
+			log.WithError(err).WithFields(map[string]interface{}{
+				"rule_id":         rule.ID,
+				"distribution_id": rule.CloudFrontID,
+			}).Warn("失效CloudFront缓存失败")
 		}
 	}
 
@@ -727,13 +882,21 @@ func (s *RedirectService) RemoveTarget(targetID uint) error {
 
 	// 更新S3中的index.html
 	if err := s.redeployHTML(rule); err != nil {
-		fmt.Printf("警告: 重新部署HTML文件失败: %v\n", err)
+		log := logger.GetLogger()
+		log.WithError(err).WithFields(map[string]interface{}{
+			"rule_id":       rule.ID,
+			"source_domain": rule.SourceDomain,
+		}).Warn("重新部署HTML文件失败")
 	}
 
 	// 如果有CloudFront分发，失效缓存
 	if rule.CloudFrontID != "" {
 		if err := s.invalidateCloudFrontCache(rule.CloudFrontID); err != nil {
-			fmt.Printf("警告: 失效CloudFront缓存失败: %v\n", err)
+			log := logger.GetLogger()
+			log.WithError(err).WithFields(map[string]interface{}{
+				"rule_id":         rule.ID,
+				"distribution_id": rule.CloudFrontID,
+			}).Warn("失效CloudFront缓存失败")
 		}
 	}
 
@@ -818,11 +981,16 @@ func (s *RedirectService) DeleteRule(id uint) error {
 	}
 
 	// 删除CloudFront分发（如果存在）
+	log := logger.GetLogger()
 	if rule.CloudFrontID != "" {
 		// 先禁用分发
 		enabled := false
 		if err := s.cloudFrontSvc.UpdateDistribution(rule.CloudFrontID, nil, "", &enabled); err != nil {
-			fmt.Printf("警告: 禁用CloudFront分发失败: %v\n", err)
+			log.WithError(err).WithFields(map[string]interface{}{
+				"rule_id":         id,
+				"source_domain":   rule.SourceDomain,
+				"distribution_id": rule.CloudFrontID,
+			}).Warn("禁用CloudFront分发失败")
 		}
 
 		// 等待一段时间确保禁用生效（CloudFront需要时间）
@@ -831,7 +999,11 @@ func (s *RedirectService) DeleteRule(id uint) error {
 
 		// 删除分发
 		if err := s.cloudFrontSvc.DeleteDistribution(rule.CloudFrontID); err != nil {
-			fmt.Printf("警告: 删除CloudFront分发失败: %v\n", err)
+			log.WithError(err).WithFields(map[string]interface{}{
+				"rule_id":         id,
+				"source_domain":   rule.SourceDomain,
+				"distribution_id": rule.CloudFrontID,
+			}).Warn("删除CloudFront分发失败")
 		}
 	}
 
@@ -839,7 +1011,12 @@ func (s *RedirectService) DeleteRule(id uint) error {
 	if s.config.S3BucketName != "" {
 		s3Path := fmt.Sprintf("redirects/%s/", rule.SourceDomain)
 		if err := s.s3Svc.DeleteObjectsWithPrefix(s.config.S3BucketName, s3Path); err != nil {
-			fmt.Printf("警告: 删除S3目录失败: %v\n", err)
+			log.WithError(err).WithFields(map[string]interface{}{
+				"rule_id":       id,
+				"source_domain": rule.SourceDomain,
+				"s3_path":       s3Path,
+				"bucket_name":   s.config.S3BucketName,
+			}).Warn("删除S3目录失败")
 		}
 	}
 
@@ -995,7 +1172,7 @@ func (s *RedirectService) CheckRedirectRule(ruleID uint) (*RedirectRuleStatus, e
 				// 查找域名对应的 Route 53 Hosted Zone ID
 				var domain models.Domain
 				if err := s.db.Where("domain_name = ?", rule.SourceDomain).First(&domain).Error; err == nil && domain.HostedZoneID != "" {
-					exists, err := s.domainSvc.CheckWWWCNAMERecord(domain.HostedZoneID, rule.SourceDomain)
+					exists, err := s.domainSvc.CheckWWWCNAMERecord(&domain)
 					if err != nil {
 						status.WWWCNAMEError = fmt.Sprintf("检查www CNAME记录失败: %v", err)
 						status.Issues = append(status.Issues, "检查www CNAME记录失败")
@@ -1048,6 +1225,22 @@ func (s *RedirectService) CheckRedirectRule(ruleID uint) (*RedirectRuleStatus, e
 
 	// 判断是否可以修复
 	status.CanFix = len(status.Issues) > 0 && s.config.S3BucketName != ""
+
+	// 如果所有配置都通过（没有 Issues），更新状态为 completed
+	if len(status.Issues) == 0 {
+		rule.Status = models.RedirectRuleStatusCompleted
+		if err := s.db.Save(rule).Error; err != nil {
+			// 记录错误但不影响检查结果返回
+			fmt.Printf("更新重定向规则状态失败: %v\n", err)
+		}
+	} else {
+		// 如果有问题，更新状态为 failed
+		rule.Status = models.RedirectRuleStatusFailed
+		if err := s.db.Save(rule).Error; err != nil {
+			// 记录错误但不影响检查结果返回
+			fmt.Printf("更新重定向规则状态失败: %v\n", err)
+		}
+	}
 
 	return status, nil
 }
@@ -1162,6 +1355,30 @@ func (s *RedirectService) FixRedirectRule(ruleID uint) (*CreateRedirectRuleResul
 		} else {
 			deploymentWarnings = append(deploymentWarnings, "未找到证书，已上传HTML文件到S3，但未创建CloudFront分发")
 		}
+	}
+
+	// 修复后检查状态，如果所有配置都通过，更新状态为 completed
+	// 如果没有警告，说明修复成功，可以更新状态
+	if len(deploymentWarnings) == 0 {
+		// 再次检查以确保所有配置都通过
+		checkStatus, err := s.CheckRedirectRule(ruleID)
+		if err == nil && len(checkStatus.Issues) == 0 {
+			rule.Status = models.RedirectRuleStatusCompleted
+		} else if err == nil && len(checkStatus.Issues) > 0 {
+			rule.Status = models.RedirectRuleStatusFailed
+		} else {
+			// 检查失败，保持当前状态或设置为 processing
+			rule.Status = models.RedirectRuleStatusProcessing
+		}
+	} else {
+		// 有警告，设置为 processing 或 failed
+		rule.Status = models.RedirectRuleStatusProcessing
+	}
+
+	// 保存状态更新
+	if err := s.db.Save(rule).Error; err != nil {
+		// 记录错误但不影响修复结果返回
+		fmt.Printf("更新重定向规则状态失败: %v\n", err)
 	}
 
 	return &CreateRedirectRuleResult{

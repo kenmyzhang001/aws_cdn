@@ -53,7 +53,7 @@ func InitLogger(logDir, logFileName string, maxSize, maxBackups int, maxAge int)
 func GetLogger() *logrus.Logger {
 	if Log == nil {
 		// 如果没有初始化，使用默认配置
-		InitLogger("./logs", "app", 5120, 10, 0)
+		InitLogger("./logs", "app", 20, 10, 0)
 	}
 	return Log
 }

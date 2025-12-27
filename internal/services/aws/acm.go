@@ -141,3 +141,26 @@ func (s *ACMService) GetCertificateValidationRecords(certificateARN string) ([]C
 
 	return records, nil
 }
+
+// ImportCertificate 导入证书到ACM
+// certificate: 证书内容（PEM格式）
+// privateKey: 私钥内容（PEM格式）
+// certificateChain: 证书链（可选，PEM格式）
+func (s *ACMService) ImportCertificate(certificate, privateKey, certificateChain string) (string, error) {
+	input := &acm.ImportCertificateInput{
+		Certificate: []byte(certificate),
+		PrivateKey:  []byte(privateKey),
+	}
+
+	// 如果提供了证书链，添加到输入中
+	if certificateChain != "" {
+		input.CertificateChain = []byte(certificateChain)
+	}
+
+	result, err := s.client.ImportCertificate(input)
+	if err != nil {
+		return "", fmt.Errorf("导入证书失败: %w", err)
+	}
+
+	return *result.CertificateArn, nil
+}

@@ -37,6 +37,7 @@ func Initialize(cfg DatabaseConfig) (*gorm.DB, error) {
 
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
+		&models.Group{},
 		&models.Domain{},
 		&models.RedirectRule{},
 		&models.RedirectTarget{},
