@@ -4,10 +4,21 @@
       <template #header>
         <div class="card-header">
           <span>下载域名管理</span>
-          <el-button type="primary" @click="openAddDomainDialog">
-            <el-icon><Plus /></el-icon>
-            添加下载域名
-          </el-button>
+          <div style="display: flex; gap: 8px; align-items: center">
+            <el-button
+              type="primary"
+              size="default"
+              :icon="CopyDocument"
+              @click="copyAllFileList"
+              title="复制所有文件列表"
+            >
+              复制所有文件列表
+            </el-button>
+            <el-button type="primary" @click="openAddDomainDialog">
+              <el-icon><Plus /></el-icon>
+              添加下载域名
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -294,15 +305,26 @@
         <div v-if="currentDomain.files && currentDomain.files.length > 0">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px">
             <h3 style="margin: 0">文件列表</h3>
-            <el-button
-              v-if="selectedFiles.length > 0"
-              type="danger"
-              size="small"
-              @click="handleBatchDelete"
-              :loading="batchDeleting"
-            >
-              批量删除 ({{ selectedFiles.length }})
-            </el-button>
+            <div style="display: flex; gap: 8px; align-items: center">
+              <el-button
+                type="primary"
+                size="small"
+                :icon="CopyDocument"
+                @click="copyFileList"
+                title="复制文件列表"
+              >
+                复制文件列表
+              </el-button>
+              <el-button
+                v-if="selectedFiles.length > 0"
+                type="danger"
+                size="small"
+                @click="handleBatchDelete"
+                :loading="batchDeleting"
+              >
+                批量删除 ({{ selectedFiles.length }})
+              </el-button>
+            </div>
           </div>
           <el-table 
             :data="currentDomain.files" 
@@ -1078,6 +1100,93 @@ const copyDownloadUrl = (row) => {
     document.execCommand('copy')
     document.body.removeChild(textarea)
     ElMessage.success('链接已复制到剪贴板')
+  }
+}
+
+// 复制文件列表
+const copyFileList = () => {
+  if (!currentDomain.value || !currentDomain.value.files || currentDomain.value.files.length === 0) {
+    ElMessage.warning('没有可复制的文件')
+    return
+  }
+
+  // 构建文件列表文本，格式：文件名: 下载URL
+  const fileListText = currentDomain.value.files
+    .map((file) => {
+      if (file.download_url) {
+        return `${file.file_name}: ${file.download_url}`
+      } else {
+        return `${file.file_name}: (无下载URL)`
+      }
+    })
+    .join('\n')
+
+  // 复制到剪贴板
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(fileListText).then(() => {
+      ElMessage.success(`已复制 ${currentDomain.value.files.length} 个文件信息到剪贴板`)
+    })
+  } else {
+    // 降级方案
+    const textarea = document.createElement('textarea')
+    textarea.value = fileListText
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
+    ElMessage.success(`已复制 ${currentDomain.value.files.length} 个文件信息到剪贴板`)
+  }
+}
+
+// 复制所有文件列表（主列表）
+const copyAllFileList = async () => {
+  try {
+    // 获取所有下载包
+    const packageParams = {
+      page: 1,
+      page_size: 1000,
+    }
+    if (activeGroupId.value !== null) {
+      packageParams.group_id = activeGroupId.value
+    }
+    const packageResponse = await request.get('/download-packages', {
+      params: packageParams,
+    })
+    const allPackages = packageResponse.data || []
+
+    if (allPackages.length === 0) {
+      ElMessage.warning('没有可复制的文件')
+      return
+    }
+
+    // 构建文件列表文本，格式：文件名: 下载URL
+    const fileListText = allPackages
+      .map((file) => {
+        if (file.download_url) {
+          return `${file.file_name}: ${file.download_url}`
+        } else {
+          return `${file.file_name}: (无下载URL)`
+        }
+      })
+      .join('\n')
+
+    // 复制到剪贴板
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(fileListText).then(() => {
+        ElMessage.success(`已复制 ${allPackages.length} 个文件信息到剪贴板`)
+      })
+    } else {
+      // 降级方案
+      const textarea = document.createElement('textarea')
+      textarea.value = fileListText
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+      ElMessage.success(`已复制 ${allPackages.length} 个文件信息到剪贴板`)
+    }
+  } catch (error) {
+    ElMessage.error('获取文件列表失败: ' + (error.response?.data?.error || error.message))
   }
 }
 
