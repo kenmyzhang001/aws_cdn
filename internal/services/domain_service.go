@@ -460,7 +460,7 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 		}
 
 		// 如果证书状态是 PENDING_VALIDATION，需要添加验证记录
-		if status == "PENDING_VALIDATION" {
+		if status == "pending_validation" {
 			if domain.HostedZoneID == "" {
 				log.WithFields(map[string]interface{}{
 					"domain_id":       id,
