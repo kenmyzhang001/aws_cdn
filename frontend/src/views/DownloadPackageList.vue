@@ -614,32 +614,19 @@ const loadDomains = async () => {
     })
     const allPackages = packageResponse.data || []
 
-    // 2. 获取所有域名（不过滤，显示所有域名包括失败的）
-    const domainParams = { page: 1, page_size: 1000 }
-    if (activeGroupId.value !== null) {
-      domainParams.group_id = activeGroupId.value
-    }
-    const domainResponse = await domainApi.getDomainList(domainParams)
-    const allDomains = domainResponse.data || []
-
-    // 3. 按域名组织数据（只统计文件数量，不加载详细信息）
+    // 2. 按域名组织数据（只统计文件数量，不加载详细信息）
+    // 下载包已经包含 domain_name，无需额外获取域名列表
     const domainMap = {}
-    const domainInfoMap = {}
-    
-    allDomains.forEach((domain) => {
-      domainInfoMap[domain.id] = domain
-    })
 
     allPackages.forEach((pkg) => {
-      const domainInfo = domainInfoMap[pkg.domain_id]
-      if (!domainInfo) {
+      if (!pkg.domain_id || !pkg.domain_name) {
         return
       }
       
       if (!domainMap[pkg.domain_id]) {
         domainMap[pkg.domain_id] = {
-          id: domainInfo.id,
-          domain_name: domainInfo.domain_name,
+          id: pkg.domain_id,
+          domain_name: pkg.domain_name,
           file_count: 0,
           status: null, // 将使用最新下载包的状态
         }
@@ -737,24 +724,6 @@ const loadAvailableDomains = async () => {
     availableDomains.value = allAvailable.filter((d) => !existingDomainIds.has(d.id))
   } catch (error) {
     console.error('加载域名列表失败:', error)
-    // 降级到普通接口
-    try {
-      const response = await domainApi.getDomainList({ page: 1, page_size: 1000 })
-      const allAvailable = (response.data || []).filter((d) => {
-        if (d.used_by_redirect || d.used_by_download_package) {
-          return false
-        }
-        if (d.dns_provider === 'cloudflare') {
-          return d.status === 'completed'
-        }
-        return d.certificate_status === 'issued'
-      })
-      const existingDomainIds = new Set(domainList.value.map((d) => d.id))
-      availableDomains.value = allAvailable.filter((d) => !existingDomainIds.has(d.id))
-    } catch (fallbackError) {
-      console.error('加载域名列表失败（降级方案）:', fallbackError)
-      availableDomains.value = []
-    }
   }
 }
 
