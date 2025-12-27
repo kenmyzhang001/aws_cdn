@@ -483,28 +483,101 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 				"domain_id":       id,
 				"certificate_arn": certificateARN,
 				"record_count":    len(validationRecords),
+				"dns_provider":    domain.DNSProvider,
+				"hosted_zone_id":  domain.HostedZoneID,
 			}).Info("开始添加证书验证记录到DNS提供商")
 
+			// 统计信息
+			cnameCount := 0
+			skippedCount := 0
+			successCount := 0
+
 			// 将验证记录添加到 DNS 提供商
-			for _, record := range validationRecords {
+			for i, record := range validationRecords {
+				log.WithFields(map[string]interface{}{
+					"domain_id":     id,
+					"record_index":  i + 1,
+					"total_records": len(validationRecords),
+					"record_type":   record.Type,
+					"record_name":   record.Name,
+					"record_value":  record.Value,
+					"dns_provider":  domain.DNSProvider,
+				}).Info("处理验证记录")
+
 				if record.Type == "CNAME" {
+					cnameCount++
+					log.WithFields(map[string]interface{}{
+						"domain_id":      id,
+						"record_index":   i + 1,
+						"record_name":    record.Name,
+						"record_value":   record.Value,
+						"dns_provider":   domain.DNSProvider,
+						"hosted_zone_id": domain.HostedZoneID,
+					}).Info("开始添加CNAME验证记录")
+
 					var err error
 					if domain.DNSProvider == models.DNSProviderCloudflare {
+						log.WithFields(map[string]interface{}{
+							"domain_id":    id,
+							"record_name":  record.Name,
+							"record_value": record.Value,
+							"zone_id":      domain.HostedZoneID,
+						}).Info("调用Cloudflare API创建CNAME记录")
 						err = s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
 					} else {
+						log.WithFields(map[string]interface{}{
+							"domain_id":      id,
+							"record_name":    record.Name,
+							"record_value":   record.Value,
+							"hosted_zone_id": domain.HostedZoneID,
+						}).Info("调用Route53 API创建CNAME记录")
 						err = s.route53Svc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
 					}
 					if err != nil {
 						log.WithError(err).WithFields(map[string]interface{}{
-							"domain_id":    id,
-							"record_name":  record.Name,
-							"record_value": record.Value,
-							"dns_provider": domain.DNSProvider,
+							"domain_id":      id,
+							"record_index":   i + 1,
+							"record_name":    record.Name,
+							"record_value":   record.Value,
+							"dns_provider":   domain.DNSProvider,
+							"hosted_zone_id": domain.HostedZoneID,
+							"success_count":  successCount,
+							"failed_count":   1,
 						}).Error("添加CNAME验证记录失败")
 						return fmt.Errorf("添加 CNAME 验证记录失败: %w", err)
 					}
+
+					successCount++
+					log.WithFields(map[string]interface{}{
+						"domain_id":     id,
+						"record_index":  i + 1,
+						"record_name":   record.Name,
+						"record_value":  record.Value,
+						"dns_provider":  domain.DNSProvider,
+						"success_count": successCount,
+						"total_cname":   cnameCount,
+					}).Info("CNAME验证记录添加成功")
+				} else {
+					skippedCount++
+					log.WithFields(map[string]interface{}{
+						"domain_id":     id,
+						"record_index":  i + 1,
+						"record_type":   record.Type,
+						"record_name":   record.Name,
+						"skipped_count": skippedCount,
+					}).Info("跳过非CNAME类型的验证记录")
 				}
 			}
+
+			log.WithFields(map[string]interface{}{
+				"domain_id":       id,
+				"certificate_arn": certificateARN,
+				"total_records":   len(validationRecords),
+				"cname_count":     cnameCount,
+				"success_count":   successCount,
+				"skipped_count":   skippedCount,
+				"dns_provider":    domain.DNSProvider,
+			}).Info("所有验证记录处理完成")
 
 			log.WithFields(map[string]interface{}{
 				"domain_id":       id,
