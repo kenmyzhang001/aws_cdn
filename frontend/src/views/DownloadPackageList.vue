@@ -292,8 +292,26 @@
 
         <!-- 文件列表 -->
         <div v-if="currentDomain.files && currentDomain.files.length > 0">
-          <h3 style="margin-bottom: 10px">文件列表</h3>
-          <el-table :data="currentDomain.files" stripe size="small" border>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px">
+            <h3 style="margin: 0">文件列表</h3>
+            <el-button
+              v-if="selectedFiles.length > 0"
+              type="danger"
+              size="small"
+              @click="handleBatchDelete"
+              :loading="batchDeleting"
+            >
+              批量删除 ({{ selectedFiles.length }})
+            </el-button>
+          </div>
+          <el-table 
+            :data="currentDomain.files" 
+            stripe 
+            size="small" 
+            border
+            @selection-change="handleSelectionChange"
+          >
+            <el-table-column type="selection" width="55" />
             <el-table-column prop="file_name" label="文件名" min-width="200">
               <template #default="{ row }">
                 <el-icon style="margin-right: 4px"><Document /></el-icon>
@@ -532,6 +550,10 @@ const checkStatus = ref(null)
 const checkPackageId = ref(null)
 const fixLoading = ref(false)
 
+// 批量删除相关
+const selectedFiles = ref([])
+const batchDeleting = ref(false)
+
 const addDomainRules = {
   domain_id: [{ required: true, message: '请选择下载域名', trigger: 'change' }],
 }
@@ -622,6 +644,7 @@ const viewDomainDetails = async (domain) => {
   showDetailDialog.value = true
   detailLoading.value = true
   currentDomain.value = null
+  selectedFiles.value = [] // 清空选择
   
   try {
     // 1. 获取域名下的所有下载包
@@ -944,6 +967,11 @@ const handleAddFile = async () => {
   addFileLoading.value = false
 }
 
+// 处理表格选择变化
+const handleSelectionChange = (selection) => {
+  selectedFiles.value = selection
+}
+
 // 删除下载包
 const handleDelete = async (row) => {
   try {
@@ -955,11 +983,83 @@ const handleDelete = async (row) => {
 
     await request.delete(`/download-packages/${row.id}`)
     ElMessage.success('删除成功')
+    
+    // 刷新主列表
     loadDomains()
+    
+    // 如果详情对话框打开，刷新文件列表
+    if (showDetailDialog.value && currentDomain.value) {
+      await viewDomainDetails(currentDomain.value)
+    }
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('删除失败: ' + (error.response?.data?.error || error.message))
     }
+  }
+}
+
+// 批量删除下载包
+const handleBatchDelete = async () => {
+  if (selectedFiles.value.length === 0) {
+    ElMessage.warning('请选择要删除的文件')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedFiles.value.length} 个文件吗？`,
+      '批量删除确认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+
+    batchDeleting.value = true
+    let successCount = 0
+    let failCount = 0
+    const errors = []
+
+    // 使用for循环依次删除每个文件
+    for (const file of selectedFiles.value) {
+      try {
+        await request.delete(`/download-packages/${file.id}`)
+        successCount++
+      } catch (error) {
+        failCount++
+        const errorMsg = error.response?.data?.error || error.message
+        errors.push(`${file.file_name}: ${errorMsg}`)
+      }
+    }
+
+    // 显示结果
+    if (successCount > 0) {
+      ElMessage.success(`成功删除 ${successCount} 个文件`)
+    }
+    if (failCount > 0) {
+      ElMessage.error(`删除失败 ${failCount} 个文件`)
+      errors.forEach(err => {
+        ElMessage.error(err)
+      })
+    }
+
+    // 清空选择
+    selectedFiles.value = []
+    
+    // 刷新主列表
+    loadDomains()
+    
+    // 如果详情对话框打开，刷新文件列表
+    if (showDetailDialog.value && currentDomain.value) {
+      await viewDomainDetails(currentDomain.value)
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('批量删除失败: ' + (error.response?.data?.error || error.message))
+    }
+  } finally {
+    batchDeleting.value = false
   }
 }
 
