@@ -330,7 +330,7 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="下载URL" >
+            <el-table-column label="下载URL"  width="250" >
               <template #default="{ row }">
                 <div v-if="row.download_url" style="display: flex; align-items: center; gap: 8px;">
                   <el-link
