@@ -130,9 +130,8 @@
           <el-input v-model="transferForm.registrar" placeholder="例如: GoDaddy aliyun" />
         </el-form-item>
         <el-form-item label="DNS提供商" required>
-          <el-select v-model="transferForm.dns_provider" placeholder="请选择DNS提供商" style="width: 100%">
+          <el-select v-model="transferForm.dns_provider" disabled style="width: 100%">
             <el-option label="Cloudflare" value="cloudflare" />
-            <el-option label="AWS" value="aws" />
           </el-select>
         </el-form-item>
         <el-form-item label="分组">
