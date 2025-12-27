@@ -163,27 +163,83 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 		requestCetificateDomain = "*." + rootDomain
 	}
 
-	certificateARN, err := s.acmSvc.RequestCertificate(requestCetificateDomain)
+	// 先检查AWS是否已有对应域名的证书
+	log.WithFields(map[string]interface{}{
+		"domain_id":      domain.ID,
+		"domain_name":    domain.DomainName,
+		"request_domain": requestCetificateDomain,
+	}).Info("检查AWS是否已有对应域名的证书")
+
+	var certificateARN string
+	var isNewCertificate bool
+
+	existingCertARN, found, err := s.acmSvc.FindCertificateByDomain(requestCetificateDomain)
 	if err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
 			"domain_id":   domain.ID,
 			"domain_name": domain.DomainName,
-		}).Error("证书请求失败")
-		// 证书请求失败，只更新证书状态，不影响域名转入状态
-		s.db.Model(domain).Update("certificate_status", "failed")
-		return
+		}).Warn("查找现有证书时出错，将继续创建新证书")
+		found = false
 	}
 
-	log.WithFields(map[string]interface{}{
-		"domain_id":       domain.ID,
-		"domain_name":     domain.DomainName,
-		"certificate_arn": certificateARN,
-	}).Info("证书请求成功，开始添加验证记录")
+	if found {
+		log.WithFields(map[string]interface{}{
+			"domain_id":       domain.ID,
+			"domain_name":     domain.DomainName,
+			"certificate_arn": existingCertARN,
+		}).Info("找到已存在的证书，直接复用")
 
-	s.db.Model(domain).Updates(map[string]interface{}{
-		"certificate_arn":    certificateARN,
-		"certificate_status": "pending",
-	})
+		certificateARN = existingCertARN
+		isNewCertificate = false
+
+		// 更新数据库中的证书ARN
+		s.db.Model(domain).Updates(map[string]interface{}{
+			"certificate_arn":    certificateARN,
+			"certificate_status": "pending",
+		})
+
+		// 检查证书状态
+		status, err := s.acmSvc.GetCertificateStatus(existingCertARN)
+		if err == nil {
+			s.db.Model(domain).Update("certificate_status", status)
+
+			// 如果证书已签发，直接返回
+			if status == "issued" {
+				log.WithFields(map[string]interface{}{
+					"domain_id":       domain.ID,
+					"domain_name":     domain.DomainName,
+					"certificate_arn": existingCertARN,
+				}).Info("证书已签发，无需等待验证")
+				return
+			}
+		}
+	} else {
+		// 没有找到现有证书，创建新证书
+		var err error
+		certificateARN, err = s.acmSvc.RequestCertificate(requestCetificateDomain)
+		if err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"domain_id":   domain.ID,
+				"domain_name": domain.DomainName,
+			}).Error("证书请求失败")
+			// 证书请求失败，只更新证书状态，不影响域名转入状态
+			s.db.Model(domain).Update("certificate_status", "failed")
+			return
+		}
+
+		log.WithFields(map[string]interface{}{
+			"domain_id":       domain.ID,
+			"domain_name":     domain.DomainName,
+			"certificate_arn": certificateARN,
+		}).Info("证书请求成功，开始添加验证记录")
+
+		s.db.Model(domain).Updates(map[string]interface{}{
+			"certificate_arn":    certificateARN,
+			"certificate_status": "pending",
+		})
+
+		isNewCertificate = true
+	}
 
 	// 获取证书验证记录并添加到 DNS 提供商
 	if domain.HostedZoneID != "" {
@@ -212,23 +268,49 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 				"domain_id":    domain.ID,
 				"record_count": len(validationRecords),
 				"dns_provider": domain.DNSProvider,
+				"is_new_cert":  isNewCertificate,
 			}).Info("开始添加验证记录到DNS提供商")
 
 			// 记录添加失败的记录数量
 			failedCount := 0
 			successCount := 0
+			skippedCount := 0
 
 			// 将验证记录添加到 DNS 提供商
 			for _, record := range validationRecords {
 				if record.Type == "CNAME" {
 					var err error
 					recordName := record.Name
+					var exists bool
+					var checkErr error
 
 					if domain.DNSProvider == models.DNSProviderCloudflare {
 						// 对于 Cloudflare，如果记录名称是完整域名，提取相对域名部分
 						// AWS ACM 返回的格式可能是：_abc123.example.com. 或 _abc123.example.com
 						// Cloudflare 需要：_abc123（相对于根域名）
 						recordName = extractRelativeDomainName(record.Name, domain.DomainName)
+
+						// 先检查记录是否已存在
+						exists, checkErr = s.cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, recordName, record.Value)
+						if checkErr != nil {
+							log.WithError(checkErr).WithFields(map[string]interface{}{
+								"domain_id":    domain.ID,
+								"record_name":  record.Name,
+								"dns_provider": domain.DNSProvider,
+							}).Warn("检查验证记录是否存在时出错，将尝试创建")
+						}
+
+						if exists {
+							skippedCount++
+							log.WithFields(map[string]interface{}{
+								"domain_id":     domain.ID,
+								"record_name":   record.Name,
+								"relative_name": recordName,
+								"record_value":  record.Value,
+								"dns_provider":  domain.DNSProvider,
+							}).Info("CNAME验证记录已存在，跳过创建")
+							continue
+						}
 
 						log.WithFields(map[string]interface{}{
 							"domain_id":     domain.ID,
@@ -241,6 +323,27 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 
 						err = s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, recordName, record.Value)
 					} else {
+						// 先检查记录是否已存在
+						exists, checkErr = s.route53Svc.CheckCertificateValidationCNAME(domain.HostedZoneID, record.Name, record.Value)
+						if checkErr != nil {
+							log.WithError(checkErr).WithFields(map[string]interface{}{
+								"domain_id":    domain.ID,
+								"record_name":  record.Name,
+								"dns_provider": domain.DNSProvider,
+							}).Warn("检查验证记录是否存在时出错，将尝试创建")
+						}
+
+						if exists {
+							skippedCount++
+							log.WithFields(map[string]interface{}{
+								"domain_id":    domain.ID,
+								"record_name":  record.Name,
+								"record_value": record.Value,
+								"dns_provider": domain.DNSProvider,
+							}).Info("CNAME验证记录已存在，跳过创建")
+							continue
+						}
+
 						err = s.route53Svc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
 					}
 					if err != nil {
@@ -269,14 +372,16 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 					"domain_id":    domain.ID,
 					"success":      successCount,
 					"failed":       failedCount,
+					"skipped":      skippedCount,
 					"dns_provider": domain.DNSProvider,
 				}).Warn("部分验证记录添加失败，证书验证可能会失败")
 			} else {
 				log.WithFields(map[string]interface{}{
 					"domain_id":    domain.ID,
 					"success":      successCount,
+					"skipped":      skippedCount,
 					"dns_provider": domain.DNSProvider,
-				}).Info("所有验证记录添加成功")
+				}).Info("所有验证记录处理完成")
 			}
 		} else {
 			log.WithFields(map[string]interface{}{

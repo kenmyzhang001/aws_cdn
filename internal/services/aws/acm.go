@@ -164,3 +164,141 @@ func (s *ACMService) ImportCertificate(certificate, privateKey, certificateChain
 
 	return *result.CertificateArn, nil
 }
+
+// FindCertificateByDomain 根据域名查找已存在的证书
+// 返回证书ARN和是否找到
+// 优先匹配精确域名，其次匹配泛域名证书（如 *.example.com 可以匹配 www.example.com）
+// 如果 domainName 本身是泛域名（如 *.example.com），则只匹配泛域名证书
+func (s *ACMService) FindCertificateByDomain(domainName string) (string, bool, error) {
+	// 检查是否是泛域名请求
+	isWildcardRequest := strings.HasPrefix(domainName, "*.")
+
+	// 提取根域名（用于泛域名匹配）
+	var rootDomain string
+	var isSubdomain bool
+	if !isWildcardRequest {
+		rootDomain = extractRootDomainFromFullDomain(domainName)
+		isSubdomain = domainName != rootDomain
+	}
+
+	// 列出所有证书
+	input := &acm.ListCertificatesInput{
+		MaxItems: aws.Int64(1000), // 最多列出1000个证书
+	}
+
+	var exactMatchARN string
+	var wildcardMatchARN string
+
+	// 分页获取所有证书
+	for {
+		result, err := s.client.ListCertificates(input)
+		if err != nil {
+			return "", false, fmt.Errorf("列出证书失败: %w", err)
+		}
+
+		// 检查每个证书
+		for _, certSummary := range result.CertificateSummaryList {
+			certARN := aws.StringValue(certSummary.CertificateArn)
+
+			// 获取证书详情以检查域名
+			descInput := &acm.DescribeCertificateInput{
+				CertificateArn: aws.String(certARN),
+			}
+			descResult, err := s.client.DescribeCertificate(descInput)
+			if err != nil {
+				// 如果获取详情失败，跳过这个证书
+				continue
+			}
+
+			cert := descResult.Certificate
+			if cert == nil {
+				continue
+			}
+
+			// 检查证书状态，只考虑已签发或待验证的证书
+			status := aws.StringValue(cert.Status)
+			if status != "ISSUED" && status != "PENDING_VALIDATION" {
+				continue
+			}
+
+			// 检查主域名
+			certDomain := aws.StringValue(cert.DomainName)
+			if certDomain == domainName {
+				exactMatchARN = certARN
+			}
+
+			// 如果请求的是泛域名，检查证书是否也是泛域名且根域名匹配
+			if isWildcardRequest {
+				if strings.HasPrefix(certDomain, "*.") {
+					if certDomain == domainName {
+						exactMatchARN = certARN
+					}
+				}
+			} else {
+				// 如果请求的是普通域名，检查是否是泛域名证书且能匹配
+				if strings.HasPrefix(certDomain, "*.") {
+					wildcardRoot := strings.TrimPrefix(certDomain, "*.")
+					if isSubdomain && wildcardRoot == rootDomain {
+						if wildcardMatchARN == "" {
+							wildcardMatchARN = certARN
+						}
+					}
+				}
+			}
+
+			// 检查 SubjectAlternativeNames（SAN）
+			if cert.SubjectAlternativeNames != nil {
+				for _, san := range cert.SubjectAlternativeNames {
+					sanDomain := aws.StringValue(san)
+					if sanDomain == domainName {
+						exactMatchARN = certARN
+					}
+
+					// 如果请求的是泛域名，检查SAN是否也是泛域名且匹配
+					if isWildcardRequest {
+						if strings.HasPrefix(sanDomain, "*.") && sanDomain == domainName {
+							exactMatchARN = certARN
+						}
+					} else {
+						// 如果请求的是普通域名，检查SAN是否是泛域名且能匹配
+						if strings.HasPrefix(sanDomain, "*.") {
+							wildcardRoot := strings.TrimPrefix(sanDomain, "*.")
+							if isSubdomain && wildcardRoot == rootDomain {
+								if wildcardMatchARN == "" {
+									wildcardMatchARN = certARN
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 如果还有更多证书，继续获取
+		if result.NextToken == nil {
+			break
+		}
+		input.NextToken = result.NextToken
+	}
+
+	// 优先返回精确匹配，其次返回泛域名匹配
+	if exactMatchARN != "" {
+		return exactMatchARN, true, nil
+	}
+	if wildcardMatchARN != "" {
+		return wildcardMatchARN, true, nil
+	}
+
+	return "", false, nil
+}
+
+// extractRootDomainFromFullDomain 从完整域名中提取根域名
+// 例如: www.example.com -> example.com, sub.example.com -> example.com
+func extractRootDomainFromFullDomain(domain string) string {
+	domain = strings.TrimSuffix(domain, ".")
+	parts := strings.Split(domain, ".")
+	if len(parts) >= 2 {
+		return strings.Join(parts[len(parts)-2:], ".")
+	}
+	return domain
+}
