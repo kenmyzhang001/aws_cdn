@@ -929,24 +929,24 @@ func (s *DomainService) DeleteDomain(id uint) error {
 		"hosted_zone_id":  domain.HostedZoneID,
 	}).Info("获取域名信息成功，开始删除相关资源")
 
-	// 删除 ACM 证书（如果存在）- 所有DNS提供商都需要删除
-	if domain.CertificateARN != "" {
-		log.WithFields(map[string]interface{}{
-			"domain_id":       id,
-			"certificate_arn": domain.CertificateARN,
-		}).Info("开始删除ACM证书")
-		if err := s.acmSvc.DeleteCertificate(domain.CertificateARN); err != nil {
-			log.WithError(err).WithFields(map[string]interface{}{
-				"domain_id":       id,
-				"certificate_arn": domain.CertificateARN,
-			}).Warn("删除ACM证书失败（可能已不存在）")
-		} else {
-			log.WithFields(map[string]interface{}{
-				"domain_id":       id,
-				"certificate_arn": domain.CertificateARN,
-			}).Info("ACM证书删除成功")
-		}
-	}
+	// 不要删除 ACM 证书
+	//if domain.CertificateARN != "" {
+	//	log.WithFields(map[string]interface{}{
+	//		"domain_id":       id,
+	//		"certificate_arn": domain.CertificateARN,
+	//	}).Info("开始删除ACM证书")
+	//	if err := s.acmSvc.DeleteCertificate(domain.CertificateARN); err != nil {
+	//		log.WithError(err).WithFields(map[string]interface{}{
+	//			"domain_id":       id,
+	//			"certificate_arn": domain.CertificateARN,
+	//		}).Warn("删除ACM证书失败（可能已不存在）")
+	//	} else {
+	//		log.WithFields(map[string]interface{}{
+	//			"domain_id":       id,
+	//			"certificate_arn": domain.CertificateARN,
+	//		}).Info("ACM证书删除成功")
+	//	}
+	//}
 
 	// 删除 Route53 Hosted Zone（如果存在且是AWS托管的域名）
 	if domain.DNSProvider == models.DNSProviderAWS && domain.HostedZoneID != "" {
