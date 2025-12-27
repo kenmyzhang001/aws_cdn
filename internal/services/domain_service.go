@@ -431,6 +431,14 @@ func (s *DomainService) GetDomain(id uint) (*models.Domain, error) {
 	return &domain, nil
 }
 
+func (s *DomainService) GetDomainByName(domainName string) (*models.Domain, error) {
+	var domain models.Domain
+	if err := s.db.Where("domain_name = ? AND deleted_at IS NULL", domainName).First(&domain).Error; err != nil {
+		return nil, fmt.Errorf("域名不存在: %w", err)
+	}
+	return &domain, nil
+}
+
 // DomainWithUsage 带使用状态的域名信息
 type DomainWithUsage struct {
 	models.Domain

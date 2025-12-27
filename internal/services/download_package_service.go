@@ -905,24 +905,10 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 		// 计算originPath：同一域名下的所有文件都使用相同的目录路径 downloads/{domain_name}/
 		originPath := fmt.Sprintf("/downloads/%s", pkg.DomainName)
 
-		// 查找适合域名的证书ARN（子域名使用泛域名证书，根域名使用根域名证书）
-		certificateARN := ""
-
-		// 对于AWS托管的域名，查找合适的证书
-		var err error
-		certificateARN, err = s.domainService.FindCertificateARNForDomain(pkg.DomainName)
-		if err != nil {
-			// 如果查找失败，回退到使用域名的证书
-			certificateARN = domain.CertificateARN
-		} else if certificateARN == "" {
-			// 如果没找到证书，回退到使用域名的证书
-			certificateARN = domain.CertificateARN
-		}
-
 		// 创建CloudFront分发
 		cloudFrontID, err := s.cloudFrontSvc.CreateDistributionForLargeFileDownload(
 			pkg.DomainName,
-			certificateARN,
+			domain.CertificateARN,
 			s3Origin,
 			originPath,
 		)
