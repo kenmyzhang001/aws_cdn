@@ -466,25 +466,28 @@ onMounted(() => {
 
 const loadGroups = async () => {
   try {
-    const res = await groupApi.getGroupList()
+    // 使用优化接口，一次性获取分组列表和统计信息
+    const res = await groupApi.getGroupListWithStats()
     groups.value = res
-    // 加载每个分组的重定向数量
+    // 设置每个分组的重定向数量
     for (const group of groups.value) {
-      const res = await redirectApi.getRedirectList({
-        page: 1,
-        page_size: 1,
-        group_id: group.id,
-      })
-      group.count = res.total
+      group.count = group.redirect_count || 0
     }
-    // 加载全部数量
-    const resAll = await redirectApi.getRedirectList({
-      page: 1,
-      page_size: 1,
-    })
-    totalAll.value = resAll.total
+    // 计算全部数量
+    totalAll.value = groups.value.reduce((sum, group) => sum + (group.redirect_count || 0), 0)
   } catch (error) {
     console.error('加载分组列表失败:', error)
+    // 降级到普通接口
+    try {
+      const res = await groupApi.getGroupList()
+      groups.value = res
+      for (const group of groups.value) {
+        group.count = 0
+      }
+      totalAll.value = 0
+    } catch (fallbackError) {
+      console.error('加载分组列表失败（降级方案）:', fallbackError)
+    }
   }
 }
 
@@ -496,14 +499,25 @@ const handleGroupChange = () => {
 // 加载可用域名列表（只显示未被重定向和下载包使用的域名）
 const loadAvailableDomains = async () => {
   try {
-    const response = await domainApi.getDomainList({ page: 1, page_size: 1000 })
+    // 使用轻量级接口，不查询证书状态，提升性能
+    const response = await domainApi.getDomainListForSelect({ dns_provider: createForm.value.dns_provider })
     // 过滤：只显示未被重定向使用且未被下载包使用的域名（允许手动输入，所以不过滤证书状态）
     // 但下拉列表中只显示未被重定向和下载包使用的域名
-    availableDomains.value = (response.data || []).filter(
+    availableDomains.value = (response || []).filter(
       (d) => !d.used_by_redirect && !d.used_by_download_package
     )
   } catch (error) {
     console.error('加载域名列表失败:', error)
+    // 降级到普通接口
+    try {
+      const response = await domainApi.getDomainList({ page: 1, page_size: 1000 })
+      availableDomains.value = (response.data || []).filter(
+        (d) => !d.used_by_redirect && !d.used_by_download_package
+      )
+    } catch (fallbackError) {
+      console.error('加载域名列表失败（降级方案）:', fallbackError)
+      availableDomains.value = []
+    }
   }
 }
 

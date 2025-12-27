@@ -671,9 +671,10 @@ const viewDomainDetails = async (domain) => {
 // 加载可用域名列表（用于添加新域名）
 const loadAvailableDomains = async () => {
   try {
-    const response = await domainApi.getDomainList({ page: 1, page_size: 1000 })
+    // 使用轻量级接口，不查询证书状态，提升性能
+    const response = await domainApi.getDomainListForSelect({ dns_provider: addDomainForm.value.dns_provider })
     // 过滤：AWS域名需要证书已签发，Cloudflare域名只需要域名状态为completed
-    const allAvailable = (response.data || []).filter((d) => {
+    const allAvailable = (response || []).filter((d) => {
       // 必须未被重定向使用且未被下载包使用
       if (d.used_by_redirect || d.used_by_download_package) {
         return false
@@ -682,7 +683,7 @@ const loadAvailableDomains = async () => {
       if (d.dns_provider === 'cloudflare') {
         return d.status === 'completed'
       }
-      // AWS域名：需要证书已签发
+      // AWS域名：需要证书已签发（使用数据库中的证书状态，不查询AWS）
       return d.certificate_status === 'issued'
     })
     
@@ -691,6 +692,24 @@ const loadAvailableDomains = async () => {
     availableDomains.value = allAvailable.filter((d) => !existingDomainIds.has(d.id))
   } catch (error) {
     console.error('加载域名列表失败:', error)
+    // 降级到普通接口
+    try {
+      const response = await domainApi.getDomainList({ page: 1, page_size: 1000 })
+      const allAvailable = (response.data || []).filter((d) => {
+        if (d.used_by_redirect || d.used_by_download_package) {
+          return false
+        }
+        if (d.dns_provider === 'cloudflare') {
+          return d.status === 'completed'
+        }
+        return d.certificate_status === 'issued'
+      })
+      const existingDomainIds = new Set(domainList.value.map((d) => d.id))
+      availableDomains.value = allAvailable.filter((d) => !existingDomainIds.has(d.id))
+    } catch (fallbackError) {
+      console.error('加载域名列表失败（降级方案）:', fallbackError)
+      availableDomains.value = []
+    }
   }
 }
 
@@ -1133,51 +1152,28 @@ const getDomainStatusText = (status) => {
 
 const loadGroups = async () => {
   try {
-    const res = await groupApi.getGroupList()
+    // 使用优化接口，一次性获取分组列表和统计信息
+    const res = await groupApi.getGroupListWithStats()
     groups.value = res
-    // 加载每个分组的下载包数量（通过域名统计）
+    // 设置每个分组的下载包数量
     for (const group of groups.value) {
-      const domainRes = await domainApi.getDomainList({
-        page: 1,
-        page_size: 1000,
-        group_id: group.id,
-      })
-      const domainsInGroup = domainRes.data || []
-      // 统计这些域名下的下载包数量
-      let count = 0
-      for (const domain of domainsInGroup) {
-        const packageRes = await request.get('/download-packages', {
-          params: {
-            page: 1,
-            page_size: 1000,
-            group_id: group.id,
-          },
-        })
-        const packages = (packageRes.data || []).filter(p => p.domain_id === domain.id)
-        count += packages.length
-      }
-      group.count = count
+      group.count = group.download_package_count || 0
     }
-    // 加载全部数量
-    const domainResAll = await domainApi.getDomainList({
-      page: 1,
-      page_size: 1000,
-    })
-    const allDomains = domainResAll.data || []
-    let totalCount = 0
-    for (const domain of allDomains) {
-      const packageRes = await request.get('/download-packages', {
-        params: {
-          page: 1,
-          page_size: 1000,
-        },
-      })
-      const packages = (packageRes.data || []).filter(p => p.domain_id === domain.id)
-      totalCount += packages.length
-    }
-    totalAll.value = totalCount
+    // 计算全部数量
+    totalAll.value = groups.value.reduce((sum, group) => sum + (group.download_package_count || 0), 0)
   } catch (error) {
     console.error('加载分组列表失败:', error)
+    // 降级到普通接口
+    try {
+      const res = await groupApi.getGroupList()
+      groups.value = res
+      for (const group of groups.value) {
+        group.count = 0
+      }
+      totalAll.value = 0
+    } catch (fallbackError) {
+      console.error('加载分组列表失败（降级方案）:', fallbackError)
+    }
   }
 }
 

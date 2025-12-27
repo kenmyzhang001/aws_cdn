@@ -50,6 +50,11 @@ export const domainApi = {
   fixCertificate(id) {
     return request.post(`/domains/${id}/certificate/fix`)
   },
+
+  // 获取域名列表（轻量级，用于下拉选择框）
+  getDomainListForSelect(params) {
+    return request.get('/domains/for-select', { params })
+  },
 }
 
 

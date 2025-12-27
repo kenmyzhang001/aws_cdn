@@ -283,25 +283,28 @@ onMounted(() => {
 
 const loadGroups = async () => {
   try {
-    const res = await groupApi.getGroupList()
+    // 使用优化接口，一次性获取分组列表和统计信息
+    const res = await groupApi.getGroupListWithStats()
     groups.value = res
-    // 加载每个分组的域名数量
+    // 设置每个分组的域名数量
     for (const group of groups.value) {
-      const res = await domainApi.getDomainList({
-        page: 1,
-        page_size: 1,
-        group_id: group.id,
-      })
-      group.count = res.total
+      group.count = group.domain_count || 0
     }
-    // 加载全部数量
-    const resAll = await domainApi.getDomainList({
-      page: 1,
-      page_size: 1,
-    })
-    totalAll.value = resAll.total
+    // 计算全部数量
+    totalAll.value = groups.value.reduce((sum, group) => sum + (group.domain_count || 0), 0)
   } catch (error) {
     console.error('加载分组列表失败:', error)
+    // 降级到普通接口
+    try {
+      const res = await groupApi.getGroupList()
+      groups.value = res
+      for (const group of groups.value) {
+        group.count = 0
+      }
+      totalAll.value = 0
+    } catch (fallbackError) {
+      console.error('加载分组列表失败（降级方案）:', fallbackError)
+    }
   }
 }
 
