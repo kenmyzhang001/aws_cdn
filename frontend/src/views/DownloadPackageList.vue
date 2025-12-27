@@ -1083,7 +1083,7 @@ const copyFileList = () => {
   const fileListText = currentDomain.value.files
     .map((file) => {
       if (file.download_url) {
-        return `${file.file_name}: ${file.download_url}`
+        return `${file.download_url}`
       } else {
         return `${file.file_name}: (无下载URL)`
       }
@@ -1132,7 +1132,7 @@ const copyAllFileList = async () => {
     const fileListText = allPackages
       .map((file) => {
         if (file.download_url) {
-          return `${file.file_name}: ${file.download_url}`
+          return `${file.download_url}`
         } else {
           return `${file.file_name}: (无下载URL)`
         }

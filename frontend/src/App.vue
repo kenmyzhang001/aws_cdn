@@ -20,10 +20,10 @@
             <el-icon><Link /></el-icon>
             <span>域名管理</span>
           </el-menu-item>
-          <el-menu-item index="/redirects">
+          <!--el-menu-item index="/redirects">
             <el-icon><RefreshRight /></el-icon>
             <span>轮播管理</span>
-          </el-menu-item>
+          </el-menu-item-->
           <el-menu-item index="/download-packages">
             <el-icon><Download /></el-icon>
             <span>下载包管理</span>
