@@ -34,6 +34,7 @@ type DownloadPackage struct {
 	DownloadURL      string                `json:"download_url" gorm:"type:varchar(500)"`                               // 下载URL（通过域名访问）
 	Status           DownloadPackageStatus `json:"status" gorm:"default:'pending'"`
 	ErrorMessage     string                `json:"error_message" gorm:"type:text"` // 错误信息
+	Note             string                `json:"note" gorm:"type:text"`            // 备注
 	CreatedAt        time.Time             `json:"created_at"`
 	UpdatedAt        time.Time             `json:"updated_at"`
 	DeletedAt        gorm.DeletedAt        `json:"-" gorm:"index"`

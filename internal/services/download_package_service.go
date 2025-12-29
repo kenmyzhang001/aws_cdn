@@ -981,3 +981,8 @@ func (s *DownloadPackageService) CheckS3BucketPolicyForDownloads() (bool, error)
 	}
 	return s.s3Svc.CheckBucketPolicyForDownloads(s.config.S3BucketName)
 }
+
+// UpdateDownloadPackageNote 更新下载包备注
+func (s *DownloadPackageService) UpdateDownloadPackageNote(id uint, note string) error {
+	return s.db.Model(&models.DownloadPackage{}).Where("id = ?", id).Update("note", note).Error
+}

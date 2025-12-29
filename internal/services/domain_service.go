@@ -954,6 +954,11 @@ func (s *DomainService) UpdateDomainStatus(id uint, status models.DomainStatus) 
 	return s.db.Model(&models.Domain{}).Where("id = ?", id).Update("status", status).Error
 }
 
+// UpdateDomainNote 更新域名备注
+func (s *DomainService) UpdateDomainNote(id uint, note string) error {
+	return s.db.Model(&models.Domain{}).Where("id = ?", id).Update("note", note).Error
+}
+
 // DeleteDomain 删除域名
 // 删除域名时会同时删除相关的 AWS 资源（Route53 Hosted Zone 和 ACM 证书）
 // 对于 Cloudflare 托管的域名，只删除 ACM 证书和数据库记录（不删除 Cloudflare Zone）

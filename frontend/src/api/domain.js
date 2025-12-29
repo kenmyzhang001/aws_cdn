@@ -55,6 +55,11 @@ export const domainApi = {
   getDomainListForSelect(params) {
     return request.get('/domains/for-select', { params })
   },
+
+  // 更新域名备注
+  updateDomainNote(id, note) {
+    return request.put(`/domains/${id}/note`, { note })
+  },
 }
 
 

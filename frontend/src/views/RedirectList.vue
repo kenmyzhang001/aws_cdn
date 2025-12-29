@@ -50,6 +50,24 @@
             <el-tag size="small">{{ row.targets?.length || 0 }} 个目标</el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="note" label="备注" width="200">
+          <template #default="{ row }">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span v-if="row.note" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="row.note">
+                {{ row.note }}
+              </span>
+              <span v-else style="color: #c0c4cc; font-size: 12px;">-</span>
+              <el-button
+                size="small"
+                type="text"
+                @click="editNote(row)"
+                style="padding: 0; min-height: auto;"
+              >
+                <el-icon><Edit /></el-icon>
+              </el-button>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="120">
           <template #default="{ row }">
             <el-tag v-if="row.status" :type="getRedirectStatusType(row.status)" size="small">
@@ -425,6 +443,28 @@
       </template>
     </el-dialog>
 
+    <!-- 编辑备注对话框 -->
+    <el-dialog v-model="showNoteDialog" title="编辑备注" width="500px">
+      <el-form :model="noteForm" label-width="80px">
+        <el-form-item label="备注">
+          <el-input
+            v-model="noteForm.note"
+            type="textarea"
+            :rows="4"
+            placeholder="请输入备注信息"
+            maxlength="500"
+            show-word-limit
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showNoteDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveNote" :loading="noteLoading">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -434,7 +474,7 @@ import { redirectApi } from '@/api/redirect'
 import { domainApi } from '@/api/domain'
 import { groupApi } from '@/api/group'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search } from '@element-plus/icons-vue'
+import { Plus, Search, Edit } from '@element-plus/icons-vue'
 
 const loading = ref(false)
 const redirectList = ref([])
@@ -476,6 +516,13 @@ const fixLoading = ref(false)
 const checkRuleId = ref(null)
 
 const availableDomains = ref([])
+
+const showNoteDialog = ref(false)
+const noteForm = ref({
+  id: null,
+  note: '',
+})
+const noteLoading = ref(false)
 
 onMounted(() => {
   loadGroups()
@@ -1005,6 +1052,28 @@ const getRedirectStatusText = (status) => {
     failed: '失败',
   }
   return statusTextMap[status] || status || '未知'
+}
+
+const editNote = (row) => {
+  noteForm.value = {
+    id: row.id,
+    note: row.note || '',
+  }
+  showNoteDialog.value = true
+}
+
+const saveNote = async () => {
+  noteLoading.value = true
+  try {
+    await redirectApi.updateRedirectRuleNote(noteForm.value.id, noteForm.value.note)
+    ElMessage.success('备注更新成功')
+    showNoteDialog.value = false
+    loadRedirects()
+  } catch (error) {
+    // 错误已在拦截器中处理
+  } finally {
+    noteLoading.value = false
+  }
 }
 </script>
 

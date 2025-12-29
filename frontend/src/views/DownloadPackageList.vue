@@ -70,6 +70,24 @@
               <span v-else style="color: #909399; font-size: 12px">-</span>
             </template>
           </el-table-column>
+          <el-table-column prop="note" label="备注" width="200">
+            <template #default="{ row }">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span v-if="row.note" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="row.note">
+                  {{ row.note }}
+                </span>
+                <span v-else style="color: #c0c4cc; font-size: 12px;">-</span>
+                <el-button
+                  size="small"
+                  type="text"
+                  @click="editDomainNote(row)"
+                  style="padding: 0; min-height: auto;"
+                >
+                  <el-icon><Edit /></el-icon>
+                </el-button>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="200" fixed="right">
             <template #default="{ row }">
               <el-button
@@ -369,6 +387,24 @@
                 {{ row.file_name }}
               </template>
             </el-table-column>
+            <el-table-column prop="note" label="备注" width="200">
+              <template #default="{ row }">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span v-if="row.note" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="row.note">
+                    {{ row.note }}
+                  </span>
+                  <span v-else style="color: #c0c4cc; font-size: 12px;">-</span>
+                  <el-button
+                    size="small"
+                    type="text"
+                    @click="editPackageNote(row)"
+                    style="padding: 0; min-height: auto;"
+                  >
+                    <el-icon><Edit /></el-icon>
+                  </el-button>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column prop="file_size" label="文件大小" width="120">
               <template #default="{ row }">
                 {{ formatFileSize(row.file_size) }}
@@ -540,13 +576,35 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 编辑备注对话框 -->
+    <el-dialog v-model="showNoteDialog" :title="noteForm.type === 'domain' ? '编辑域名备注' : '编辑文件备注'" width="500px">
+      <el-form :model="noteForm" label-width="80px">
+        <el-form-item label="备注">
+          <el-input
+            v-model="noteForm.note"
+            type="textarea"
+            :rows="4"
+            placeholder="请输入备注信息"
+            maxlength="500"
+            show-word-limit
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showNoteDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveNote" :loading="noteLoading">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Document, CopyDocument, Search } from '@element-plus/icons-vue'
+import { Plus, Document, CopyDocument, Search, Edit } from '@element-plus/icons-vue'
 import request from '@/api/request'
 import { domainApi } from '@/api/domain'
 import { downloadPackageApi } from '@/api/download_package'
@@ -612,6 +670,15 @@ const fixLoading = ref(false)
 const selectedFiles = ref([])
 const batchDeleting = ref(false)
 
+// 备注相关
+const showNoteDialog = ref(false)
+const noteForm = ref({
+  id: null,
+  note: '',
+  type: 'domain', // 'domain' 或 'package'
+})
+const noteLoading = ref(false)
+
 const addDomainRules = {
   domain_id: [{ required: true, message: '请选择下载域名', trigger: 'change' }],
 }
@@ -654,7 +721,24 @@ const loadDomains = async () => {
     })
     const allPackages = packageResponse.data || []
 
-    // 2. 按域名组织数据（只统计文件数量，不加载详细信息）
+    // 2. 获取所有相关域名的备注信息
+    const domainIds = [...new Set(allPackages.map(pkg => pkg.domain_id).filter(id => id))]
+    const domainNotesMap = {}
+    if (domainIds.length > 0) {
+      try {
+        const domainResponse = await domainApi.getDomainList({ page: 1, page_size: 1000 })
+        const domains = domainResponse.data || []
+        domains.forEach(domain => {
+          if (domainIds.includes(domain.id)) {
+            domainNotesMap[domain.id] = domain.note || ''
+          }
+        })
+      } catch (error) {
+        console.error('获取域名备注失败:', error)
+      }
+    }
+
+    // 3. 按域名组织数据（只统计文件数量，不加载详细信息）
     // 下载包已经包含 domain_name，无需额外获取域名列表
     const domainMap = {}
 
@@ -669,6 +753,7 @@ const loadDomains = async () => {
           domain_name: pkg.domain_name,
           file_count: 0,
           status: null, // 将使用最新下载包的状态
+          note: domainNotesMap[pkg.domain_id] || '', // 添加备注
         }
       }
       
@@ -680,15 +765,15 @@ const loadDomains = async () => {
       }
     })
 
-    // 3. 将域名列表转换为数组并按域名名称排序
+    // 4. 将域名列表转换为数组并按域名名称排序
     const allDomains = Object.values(domainMap).sort((a, b) => {
       return a.domain_name.localeCompare(b.domain_name)
     })
 
-    // 4. 设置总数
+    // 5. 设置总数
     totalDomains.value = allDomains.length
 
-    // 5. 分页处理
+    // 6. 分页处理
     const start = (currentPage.value - 1) * pageSize.value
     const end = start + pageSize.value
     domainList.value = allDomains.slice(start, end)
@@ -1434,6 +1519,48 @@ const handleSizeChange = (newSize) => {
 const handleCurrentChange = (newPage) => {
   currentPage.value = newPage
   loadDomains()
+}
+
+const editDomainNote = (row) => {
+  noteForm.value = {
+    id: row.id,
+    note: row.note || '',
+    type: 'domain',
+  }
+  showNoteDialog.value = true
+}
+
+const editPackageNote = (row) => {
+  noteForm.value = {
+    id: row.id,
+    note: row.note || '',
+    type: 'package',
+  }
+  showNoteDialog.value = true
+}
+
+const saveNote = async () => {
+  noteLoading.value = true
+  try {
+    if (noteForm.value.type === 'domain') {
+      await domainApi.updateDomainNote(noteForm.value.id, noteForm.value.note)
+      ElMessage.success('备注更新成功')
+      showNoteDialog.value = false
+      loadDomains()
+    } else {
+      await downloadPackageApi.updateDownloadPackageNote(noteForm.value.id, noteForm.value.note)
+      ElMessage.success('备注更新成功')
+      showNoteDialog.value = false
+      // 如果详情对话框打开，刷新文件列表
+      if (showDetailDialog.value && currentDomain.value) {
+        await viewDomainDetails(currentDomain.value)
+      }
+    }
+  } catch (error) {
+    // 错误已在拦截器中处理
+  } finally {
+    noteLoading.value = false
+  }
 }
 
 onMounted(() => {

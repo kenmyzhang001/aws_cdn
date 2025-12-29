@@ -346,3 +346,33 @@ func (h *RedirectHandler) FixRedirectRule(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, response)
 }
+
+// UpdateRedirectRuleNote 更新重定向规则备注
+func (h *RedirectHandler) UpdateRedirectRuleNote(c *gin.Context) {
+	log := logger.GetLogger()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		log.WithError(err).WithField("id_param", c.Param("id")).Error("更新重定向规则备注失败：无效的规则ID")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的规则 ID"})
+		return
+	}
+
+	var req struct {
+		Note string `json:"note"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.WithError(err).Error("更新重定向规则备注失败：请求参数验证失败")
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.service.UpdateRedirectRuleNote(uint(id), req.Note); err != nil {
+		log.WithError(err).WithField("rule_id", id).Error("更新重定向规则备注操作失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.WithField("rule_id", id).Info("重定向规则备注更新成功")
+	c.JSON(http.StatusOK, gin.H{"message": "备注更新成功"})
+}

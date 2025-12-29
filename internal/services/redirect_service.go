@@ -996,6 +996,11 @@ func (s *RedirectService) UpdateRule(id uint, sourceDomain string) error {
 	return s.db.Model(&models.RedirectRule{}).Where("id = ?", id).Update("source_domain", sourceDomain).Error
 }
 
+// UpdateRedirectRuleNote 更新重定向规则备注
+func (s *RedirectService) UpdateRedirectRuleNote(id uint, note string) error {
+	return s.db.Model(&models.RedirectRule{}).Where("id = ?", id).Update("note", note).Error
+}
+
 // DeleteRule 删除重定向规则（同时删除CloudFront分发和S3目录）
 func (s *RedirectService) DeleteRule(id uint) error {
 	// 获取规则信息

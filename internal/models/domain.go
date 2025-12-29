@@ -37,6 +37,7 @@ type Domain struct {
 	CertificateStatus string         `json:"certificate_status" gorm:"default:'pending'"` // 证书状态: pending, issued, failed
 	CertificateARN    string         `json:"certificate_arn"`                             // ACM 证书 ARN
 	HostedZoneID      string         `json:"hosted_zone_id"`                              // Route53 Hosted Zone ID 或 Cloudflare Zone ID
+	Note              string         `json:"note" gorm:"type:text"`                       // 备注
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 	DeletedAt         gorm.DeletedAt `json:"-" gorm:"index"`

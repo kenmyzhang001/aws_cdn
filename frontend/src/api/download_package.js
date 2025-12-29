@@ -42,5 +42,10 @@ export const downloadPackageApi = {
   fixDownloadPackage(id) {
     return request.post(`/download-packages/${id}/fix`)
   },
+
+  // 更新下载包备注
+  updateDownloadPackageNote(id, note) {
+    return request.put(`/download-packages/${id}/note`, { note })
+  },
 }
 

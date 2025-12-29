@@ -25,6 +25,7 @@ type RedirectRule struct {
 	Targets      []RedirectTarget   `json:"targets" gorm:"foreignKey:RuleID;constraint:OnDelete:CASCADE"`
 	CloudFrontID string             `json:"cloudfront_id"`                                    // CloudFront Distribution ID
 	Status       RedirectRuleStatus `json:"status" gorm:"type:varchar(32);default:'pending'"` // 状态
+	Note         string             `json:"note" gorm:"type:text"`                            // 备注
 	CreatedAt    time.Time          `json:"created_at"`
 	UpdatedAt    time.Time          `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt     `json:"-" gorm:"index"`

@@ -102,6 +102,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			domains.GET("/:id/certificate/status", domainHandler.GetCertificateStatus)
 			domains.GET("/:id/certificate/check", domainHandler.CheckCertificate)
 			domains.POST("/:id/certificate/fix", domainHandler.FixCertificate)
+			domains.PUT("/:id/note", domainHandler.UpdateDomainNote)
 		}
 
 		// 轮播管理
@@ -116,6 +117,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			redirects.POST("/:id/bind-cloudfront", redirectHandler.BindDomainToCloudFront)
 			redirects.GET("/:id/check", redirectHandler.CheckRedirectRule)
 			redirects.POST("/:id/fix", redirectHandler.FixRedirectRule)
+			redirects.PUT("/:id/note", redirectHandler.UpdateRedirectRuleNote)
 		}
 
 		// CloudFront 管理
@@ -138,6 +140,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			downloadPackages.DELETE("/:id", downloadPackageHandler.DeleteDownloadPackage)
 			downloadPackages.GET("/:id/check", downloadPackageHandler.CheckDownloadPackage)
 			downloadPackages.POST("/:id/fix", downloadPackageHandler.FixDownloadPackage)
+			downloadPackages.PUT("/:id/note", downloadPackageHandler.UpdateDownloadPackageNote)
 		}
 
 		// 分组管理

@@ -45,6 +45,11 @@ export const redirectApi = {
   fixRedirectRule(ruleId) {
     return request.post(`/redirects/${ruleId}/fix`)
   },
+
+  // 更新重定向规则备注
+  updateRedirectRuleNote(id, note) {
+    return request.put(`/redirects/${id}/note`, { note })
+  },
 }
 
 
