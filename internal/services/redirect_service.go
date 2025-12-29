@@ -722,8 +722,8 @@ func (s *RedirectService) createRoute53RecordForCloudFront(domainName, distribut
 	return nil
 }
 
-// ListRedirectRules 列出所有重定向规则，支持按分组筛选
-func (s *RedirectService) ListRedirectRules(page, pageSize int, groupID *uint) ([]models.RedirectRule, int64, error) {
+// ListRedirectRules 列出所有重定向规则，支持按分组筛选和搜索
+func (s *RedirectService) ListRedirectRules(page, pageSize int, groupID *uint, search *string) ([]models.RedirectRule, int64, error) {
 	var rules []models.RedirectRule
 	var total int64
 
@@ -732,6 +732,10 @@ func (s *RedirectService) ListRedirectRules(page, pageSize int, groupID *uint) (
 	query := s.db.Model(&models.RedirectRule{})
 	if groupID != nil {
 		query = query.Where("group_id = ?", *groupID)
+	}
+	if search != nil && *search != "" {
+		searchPattern := "%" + *search + "%"
+		query = query.Where("source_domain LIKE ?", searchPattern)
 	}
 
 	if err := query.Count(&total).Error; err != nil {

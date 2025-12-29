@@ -22,6 +22,22 @@
         </div>
       </template>
 
+      <!-- 搜索框 -->
+      <div style="margin-bottom: 20px">
+        <el-input
+          v-model="searchKeyword"
+          placeholder="搜索域名..."
+          clearable
+          style="width: 300px"
+          @input="handleSearch"
+          @clear="handleSearch"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+      </div>
+
       <!-- 分组Tab -->
       <el-tabs v-model="activeGroupId" @tab-change="handleGroupChange" style="margin-bottom: 20px">
         <el-tab-pane :label="`全部 (${totalAll})`" :name="null"></el-tab-pane>
@@ -75,6 +91,19 @@
         </el-table>
 
         <el-empty v-else description="暂无下载域名，请先添加下载域名" />
+
+        <!-- 分页组件 -->
+        <div v-if="totalDomains > 0" style="margin-top: 20px; display: flex; justify-content: flex-end">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :page-sizes="[10, 20, 50, 100]"
+            :total="totalDomains"
+            layout="total, sizes, prev, pager, next, jumper"
+            @size-change="handleSizeChange"
+            @current-change="handleCurrentChange"
+          />
+        </div>
       </div>
     </el-card>
 
@@ -517,7 +546,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Document, CopyDocument } from '@element-plus/icons-vue'
+import { Plus, Document, CopyDocument, Search } from '@element-plus/icons-vue'
 import request from '@/api/request'
 import { domainApi } from '@/api/domain'
 import { downloadPackageApi } from '@/api/download_package'
@@ -528,6 +557,11 @@ const loading = ref(false)
 const domainList = ref([]) // 域名列表，只包含基本域名信息
 const totalAll = ref(0)
 
+// 分页相关
+const currentPage = ref(1)
+const pageSize = ref(10)
+const totalDomains = ref(0)
+
 // 详情相关
 const showDetailDialog = ref(false)
 const detailLoading = ref(false)
@@ -535,6 +569,8 @@ const currentDomain = ref(null)
 
 const activeGroupId = ref(null)
 const groups = ref([])
+const searchKeyword = ref('')
+let searchTimer = null
 
 // 添加下载域名
 const showAddDomainDialog = ref(false)
@@ -602,12 +638,16 @@ const loadDomains = async () => {
   loading.value = true
   try {
     // 1. 获取所有下载包（只获取基本信息，不查询状态）
+    // 为了正确分页域名，需要获取所有下载包来统计域名
     const packageParams = {
       page: 1,
-      page_size: 1000,
+      page_size: 10000, // 获取足够多的数据以统计所有域名
     }
     if (activeGroupId.value !== null) {
       packageParams.group_id = activeGroupId.value
+    }
+    if (searchKeyword.value && searchKeyword.value.trim()) {
+      packageParams.search = searchKeyword.value.trim()
     }
     const packageResponse = await request.get('/download-packages', {
       params: packageParams,
@@ -640,7 +680,18 @@ const loadDomains = async () => {
       }
     })
 
-    domainList.value = Object.values(domainMap)
+    // 3. 将域名列表转换为数组并按域名名称排序
+    const allDomains = Object.values(domainMap).sort((a, b) => {
+      return a.domain_name.localeCompare(b.domain_name)
+    })
+
+    // 4. 设置总数
+    totalDomains.value = allDomains.length
+
+    // 5. 分页处理
+    const start = (currentPage.value - 1) * pageSize.value
+    const end = start + pageSize.value
+    domainList.value = allDomains.slice(start, end)
   } catch (error) {
     ElMessage.error('加载下载域名列表失败: ' + (error.response?.data?.error || error.message))
   } finally {
@@ -1356,6 +1407,32 @@ const loadGroups = async () => {
 }
 
 const handleGroupChange = () => {
+  currentPage.value = 1 // 切换分组时重置到第一页
+  loadDomains()
+}
+
+const handleSearch = () => {
+  // 清除之前的定时器
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+  }
+  // 设置新的定时器，300ms后执行搜索
+  searchTimer = setTimeout(() => {
+    currentPage.value = 1 // 搜索时重置到第一页
+    loadDomains()
+  }, 300)
+}
+
+// 处理分页大小变化
+const handleSizeChange = (newSize) => {
+  pageSize.value = newSize
+  currentPage.value = 1 // 改变每页数量时重置到第一页
+  loadDomains()
+}
+
+// 处理当前页变化
+const handleCurrentChange = (newPage) => {
+  currentPage.value = newPage
   loadDomains()
 }
 

@@ -294,7 +294,7 @@ func (h *DownloadPackageHandler) ListDownloadPackagesByDomain(c *gin.Context) {
 	})
 }
 
-// ListDownloadPackages 列出所有下载包，支持按分组筛选
+// ListDownloadPackages 列出所有下载包，支持按分组筛选和搜索
 // 只返回基本域名列表信息，不进行状态检测以提升性能
 func (h *DownloadPackageHandler) ListDownloadPackages(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -308,7 +308,12 @@ func (h *DownloadPackageHandler) ListDownloadPackages(c *gin.Context) {
 		}
 	}
 
-	packages, total, err := h.service.ListDownloadPackages(page, pageSize, groupID)
+	var search *string
+	if searchStr := c.Query("search"); searchStr != "" {
+		search = &searchStr
+	}
+
+	packages, total, err := h.service.ListDownloadPackages(page, pageSize, groupID, search)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -469,8 +469,8 @@ func (s *DomainService) CheckDomainUsage(domainName string) (usedByRedirect bool
 	return usedByRedirect, usedByDownloadPackage, nil
 }
 
-// ListDomains 列出所有域名，支持按分组筛选
-func (s *DomainService) ListDomains(page, pageSize int, groupID *uint) ([]DomainWithUsage, int64, error) {
+// ListDomains 列出所有域名，支持按分组筛选和搜索
+func (s *DomainService) ListDomains(page, pageSize int, groupID *uint, search *string) ([]DomainWithUsage, int64, error) {
 	var domains []models.Domain
 	var total int64
 
@@ -479,6 +479,10 @@ func (s *DomainService) ListDomains(page, pageSize int, groupID *uint) ([]Domain
 	query := s.db.Model(&models.Domain{}).Where("deleted_at IS NULL")
 	if groupID != nil {
 		query = query.Where("group_id = ?", *groupID)
+	}
+	if search != nil && *search != "" {
+		searchPattern := "%" + *search + "%"
+		query = query.Where("domain_name LIKE ?", searchPattern)
 	}
 
 	if err := query.Count(&total).Error; err != nil {

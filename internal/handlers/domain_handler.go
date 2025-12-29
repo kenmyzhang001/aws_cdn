@@ -91,7 +91,7 @@ func (h *DomainHandler) GetDomain(c *gin.Context) {
 	c.JSON(http.StatusOK, domain)
 }
 
-// ListDomains 列出所有域名，支持按分组筛选
+// ListDomains 列出所有域名，支持按分组筛选和搜索
 func (h *DomainHandler) ListDomains(c *gin.Context) {
 	log := logger.GetLogger()
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -105,12 +105,18 @@ func (h *DomainHandler) ListDomains(c *gin.Context) {
 		}
 	}
 
-	domains, total, err := h.service.ListDomains(page, pageSize, groupID)
+	var search *string
+	if searchStr := c.Query("search"); searchStr != "" {
+		search = &searchStr
+	}
+
+	domains, total, err := h.service.ListDomains(page, pageSize, groupID, search)
 	if err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
 			"page":      page,
 			"page_size": pageSize,
 			"group_id":  groupID,
+			"search":    search,
 		}).Error("列出域名失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

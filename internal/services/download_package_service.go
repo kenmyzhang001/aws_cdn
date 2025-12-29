@@ -587,8 +587,8 @@ func (s *DownloadPackageService) GetCloudFrontOriginPathInfo(pkg *models.Downloa
 	return currentPath, expectedPath, nil
 }
 
-// ListDownloadPackages 列出所有下载包，支持按分组筛选
-func (s *DownloadPackageService) ListDownloadPackages(page, pageSize int, groupID *uint) ([]models.DownloadPackage, int64, error) {
+// ListDownloadPackages 列出所有下载包，支持按分组筛选和搜索
+func (s *DownloadPackageService) ListDownloadPackages(page, pageSize int, groupID *uint, search *string) ([]models.DownloadPackage, int64, error) {
 	var packages []models.DownloadPackage
 	var total int64
 
@@ -597,6 +597,10 @@ func (s *DownloadPackageService) ListDownloadPackages(page, pageSize int, groupI
 	query := s.db.Model(&models.DownloadPackage{}).Where("deleted_at IS NULL")
 	if groupID != nil {
 		query = query.Where("group_id = ?", *groupID)
+	}
+	if search != nil && *search != "" {
+		searchPattern := "%" + *search + "%"
+		query = query.Where("domain_name LIKE ?", searchPattern)
 	}
 
 	if err := query.Count(&total).Error; err != nil {

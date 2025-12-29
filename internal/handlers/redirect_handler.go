@@ -170,7 +170,12 @@ func (h *RedirectHandler) ListRedirectRules(c *gin.Context) {
 		}
 	}
 
-	rules, total, err := h.service.ListRedirectRules(page, pageSize, groupID)
+	var search *string
+	if searchStr := c.Query("search"); searchStr != "" {
+		search = &searchStr
+	}
+
+	rules, total, err := h.service.ListRedirectRules(page, pageSize, groupID, search)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

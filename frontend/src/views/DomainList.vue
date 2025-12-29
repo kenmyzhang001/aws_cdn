@@ -11,6 +11,22 @@
         </div>
       </template>
 
+      <!-- 搜索框 -->
+      <div style="margin-bottom: 20px">
+        <el-input
+          v-model="searchKeyword"
+          placeholder="搜索域名..."
+          clearable
+          style="width: 300px"
+          @input="handleSearch"
+          @clear="handleSearch"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+      </div>
+
       <!-- 分组Tab -->
       <el-tabs v-model="activeGroupId" @tab-change="handleGroupChange" style="margin-bottom: 20px">
         <el-tab-pane :label="`全部 (${totalAll})`" :name="null"></el-tab-pane>
@@ -245,7 +261,7 @@ import { ref, onMounted } from 'vue'
 import { domainApi } from '@/api/domain'
 import { groupApi } from '@/api/group'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Search } from '@element-plus/icons-vue'
 
 const loading = ref(false)
 const domainList = ref([])
@@ -256,6 +272,8 @@ const totalAll = ref(0)
 
 const activeGroupId = ref(null)
 const groups = ref([])
+const searchKeyword = ref('')
+let searchTimer = null
 
 const showTransferDialog = ref(false)
 const transferLoading = ref(false)
@@ -322,6 +340,9 @@ const loadDomains = async () => {
     if (activeGroupId.value !== null) {
       params.group_id = activeGroupId.value
     }
+    if (searchKeyword.value && searchKeyword.value.trim()) {
+      params.search = searchKeyword.value.trim()
+    }
     const res = await domainApi.getDomainList(params)
     domainList.value = res.data
     total.value = res.total
@@ -330,6 +351,18 @@ const loadDomains = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const handleSearch = () => {
+  // 清除之前的定时器
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+  }
+  // 设置新的定时器，300ms后执行搜索
+  searchTimer = setTimeout(() => {
+    currentPage.value = 1 // 搜索时重置到第一页
+    loadDomains()
+  }, 300)
 }
 
 const handleTransfer = async () => {
