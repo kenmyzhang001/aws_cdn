@@ -471,26 +471,57 @@ func (s *DomainService) CheckDomainUsage(domainName string) (usedByRedirect bool
 }
 
 // ListDomains 列出所有域名，支持按分组筛选和搜索
-func (s *DomainService) ListDomains(page, pageSize int, groupID *uint, search *string) ([]DomainWithUsage, int64, error) {
+// usedStatus: nil 表示全部, "used" 表示已使用, "unused" 表示未使用
+func (s *DomainService) ListDomains(page, pageSize int, groupID *uint, search *string, usedStatus *string) ([]DomainWithUsage, int64, error) {
 	var domains []models.Domain
 	var total int64
 
 	offset := (page - 1) * pageSize
 
-	query := s.db.Model(&models.Domain{}).Where("deleted_at IS NULL")
+	// 构建基础查询
+	query := s.db.Model(&models.Domain{}).Where("domains.deleted_at IS NULL")
+
+	// 分组筛选
 	if groupID != nil {
-		query = query.Where("group_id = ?", *groupID)
+		query = query.Where("domains.group_id = ?", *groupID)
 	}
+
+	// 搜索筛选
 	if search != nil && *search != "" {
 		searchPattern := "%" + *search + "%"
-		query = query.Where("domain_name LIKE ?", searchPattern)
+		query = query.Where("domains.domain_name LIKE ?", searchPattern)
+	}
+
+	// 使用状态筛选：使用子查询检查域名是否被使用
+	if usedStatus != nil && (*usedStatus == "used" || *usedStatus == "unused") {
+		// 检查是否被重定向使用
+		redirectSubQuery := s.db.Table("redirect_rules").
+			Select("1").
+			Where("redirect_rules.source_domain = domains.domain_name").
+			Where("redirect_rules.deleted_at IS NULL").
+			Limit(1)
+
+		// 检查是否被下载包使用
+		downloadPackageSubQuery := s.db.Table("download_packages").
+			Select("1").
+			Where("download_packages.domain_name = domains.domain_name").
+			Where("download_packages.deleted_at IS NULL").
+			Limit(1)
+
+		if *usedStatus == "used" {
+			// 已使用：被重定向或下载包使用
+			query = query.Where("EXISTS (?) OR EXISTS (?)", redirectSubQuery, downloadPackageSubQuery)
+		} else {
+			// 未使用：既不被重定向使用，也不被下载包使用
+			query = query.Where("NOT EXISTS (?) AND NOT EXISTS (?)", redirectSubQuery, downloadPackageSubQuery)
+		}
 	}
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := query.Order("id DESC").Offset(offset).Limit(pageSize).Find(&domains).Error; err != nil {
+	if err := query.Order("domains.id DESC").Offset(offset).Limit(pageSize).Find(&domains).Error; err != nil {
 		return nil, 0, err
 	}
 

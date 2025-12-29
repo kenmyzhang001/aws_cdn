@@ -110,13 +110,22 @@ func (h *DomainHandler) ListDomains(c *gin.Context) {
 		search = &searchStr
 	}
 
-	domains, total, err := h.service.ListDomains(page, pageSize, groupID, search)
+	var usedStatus *string
+	if usedStatusStr := c.Query("used_status"); usedStatusStr != "" {
+		// 只接受 "used" 或 "unused"
+		if usedStatusStr == "used" || usedStatusStr == "unused" {
+			usedStatus = &usedStatusStr
+		}
+	}
+
+	domains, total, err := h.service.ListDomains(page, pageSize, groupID, search, usedStatus)
 	if err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
-			"page":      page,
-			"page_size": pageSize,
-			"group_id":  groupID,
-			"search":    search,
+			"page":        page,
+			"page_size":   pageSize,
+			"group_id":    groupID,
+			"search":      search,
+			"used_status": usedStatus,
 		}).Error("列出域名失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -172,7 +172,7 @@
             </el-option>
           </el-select>
           <div style="margin-top: 5px; color: #909399; font-size: 12px">
-            AWS域名需要证书已签发，Cloudflare域名只需要域名状态为已完成，且未被重定向和下载包使用
+            域名状态需要为已完成，且未被重定向和下载包使用
           </div>
         </el-form-item>
         <el-form-item label="上传第一个APK文件" prop="file">
@@ -841,18 +841,14 @@ const loadAvailableDomains = async () => {
   try {
     // 使用轻量级接口，不查询证书状态，提升性能
     const response = await domainApi.getDomainListForSelect({ dns_provider: addDomainForm.value.dns_provider })
-    // 过滤：AWS域名需要证书已签发，Cloudflare域名只需要域名状态为completed
+    // 过滤：只需要域名状态为completed，且未被重定向和下载包使用
     const allAvailable = (response || []).filter((d) => {
       // 必须未被重定向使用且未被下载包使用
       if (d.used_by_redirect || d.used_by_download_package) {
         return false
       }
-      // Cloudflare域名：只需要域名状态为completed
-      if (d.dns_provider === 'cloudflare') {
-        return d.status === 'completed'
-      }
-      // AWS域名：需要证书已签发（使用数据库中的证书状态，不查询AWS）
-      return d.certificate_status === 'issued'
+      // 所有域名：只需要域名状态为completed
+      return d.status === 'completed'
     })
     
     // 排除已经在下载域名列表中的域名
