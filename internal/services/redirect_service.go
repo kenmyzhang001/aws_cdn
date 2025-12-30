@@ -198,6 +198,49 @@ func (s *RedirectService) deployRedirectRule(rule *models.RedirectRule, certific
 		return fmt.Errorf("创建CloudFront分发失败: %w", err)
 	}
 
+	// 如果 distributionID 为空，说明 CNAME 已存在但未找到对应的分发，尝试通过列表查找
+	if distributionID == "" {
+		log := logger.GetLogger()
+		if log != nil {
+			log.WithFields(map[string]interface{}{
+				"source_domain": rule.SourceDomain,
+			}).Warn("CNAME 已存在但未找到对应的 CloudFront 分发，尝试通过列表查找")
+		}
+		// 尝试通过列出所有分发来查找
+		distList, listErr := s.cloudFrontSvc.ListDistributions()
+		if listErr == nil && distList != nil && distList.Items != nil {
+			for _, dist := range distList.Items {
+				if dist != nil && dist.Aliases != nil && dist.Aliases.Items != nil {
+					for _, alias := range dist.Aliases.Items {
+						if alias != nil && *alias == rule.SourceDomain {
+							distributionID = *dist.Id
+							if log != nil {
+								log.WithFields(map[string]interface{}{
+									"source_domain":   rule.SourceDomain,
+									"distribution_id": distributionID,
+								}).Info("通过列表查找找到 CloudFront 分发")
+							}
+							break
+						}
+					}
+					if distributionID != "" {
+						break
+					}
+				}
+			}
+		}
+		// 如果还是找不到，记录警告但跳过 CloudFront 相关操作
+		if distributionID == "" {
+			if log != nil {
+				log.WithFields(map[string]interface{}{
+					"source_domain": rule.SourceDomain,
+				}).Warn("无法找到 CloudFront 分发，但 CNAME 已存在，跳过 CloudFront 相关操作（当作正常处理）")
+			}
+			// 跳过 CloudFront 相关操作，继续处理其他步骤
+			return nil
+		}
+	}
+
 	// 更新规则中的CloudFront ID
 	rule.CloudFrontID = distributionID
 	if err := s.db.Save(rule).Error; err != nil {

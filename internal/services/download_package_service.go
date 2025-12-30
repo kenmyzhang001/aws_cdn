@@ -399,7 +399,44 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 				"status":        models.DownloadPackageStatusFailed,
 				"error_message": fmt.Sprintf("创建CloudFront分发失败: %v", err),
 			})
-			return
+		}
+
+		// 如果 cloudFrontID 为空，说明 CNAME 已存在但未找到对应的分发，尝试通过列表查找
+		if cloudFrontID == "" {
+			log.WithFields(map[string]interface{}{
+				"package_id":  pkg.ID,
+				"domain_name": pkg.DomainName,
+			}).Warn("CNAME 已存在但未找到对应的 CloudFront 分发，尝试通过列表查找")
+			// 尝试通过列出所有分发来查找
+			distList, listErr := s.cloudFrontSvc.ListDistributions()
+			if listErr == nil && distList != nil && distList.Items != nil {
+				for _, dist := range distList.Items {
+					if dist != nil && dist.Aliases != nil && dist.Aliases.Items != nil {
+						for _, alias := range dist.Aliases.Items {
+							if alias != nil && *alias == pkg.DomainName {
+								cloudFrontID = *dist.Id
+								log.WithFields(map[string]interface{}{
+									"package_id":    pkg.ID,
+									"cloudfront_id": cloudFrontID,
+								}).Info("通过列表查找找到 CloudFront 分发")
+								break
+							}
+						}
+						if cloudFrontID != "" {
+							break
+						}
+					}
+				}
+			}
+			// 如果还是找不到，记录警告但跳过 CloudFront 相关操作
+			if cloudFrontID == "" {
+				log.WithFields(map[string]interface{}{
+					"package_id":  pkg.ID,
+					"domain_name": pkg.DomainName,
+				}).Warn("无法找到 CloudFront 分发，但 CNAME 已存在，跳过 CloudFront 相关操作（当作正常处理）")
+				// 跳过 CloudFront 相关操作，继续处理其他步骤
+				return
+			}
 		}
 
 		log.WithFields(map[string]interface{}{
@@ -917,7 +954,58 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 			originPath,
 		)
 		if err != nil {
-			return fmt.Errorf("创建CloudFront分发失败: %w", err)
+			log := logger.GetLogger()
+			if log != nil {
+				log.WithError(err).WithFields(map[string]interface{}{
+					"package_id":  pkg.ID,
+					"domain_name": pkg.DomainName,
+				}).Error("创建CloudFront分发失败")
+			}
+		}
+
+		// 如果 cloudFrontID 为空，说明 CNAME 已存在但未找到对应的分发，尝试通过列表查找
+		if cloudFrontID == "" {
+			log := logger.GetLogger()
+			if log != nil {
+				log.WithFields(map[string]interface{}{
+					"package_id":  pkg.ID,
+					"domain_name": pkg.DomainName,
+				}).Warn("CNAME 已存在但未找到对应的 CloudFront 分发，尝试通过列表查找")
+			}
+			// 尝试通过列出所有分发来查找
+			distList, listErr := s.cloudFrontSvc.ListDistributions()
+			if listErr == nil && distList != nil && distList.Items != nil {
+				for _, dist := range distList.Items {
+					if dist != nil && dist.Aliases != nil && dist.Aliases.Items != nil {
+						for _, alias := range dist.Aliases.Items {
+							if alias != nil && *alias == pkg.DomainName {
+								cloudFrontID = *dist.Id
+								if log != nil {
+									log.WithFields(map[string]interface{}{
+										"package_id":    pkg.ID,
+										"cloudfront_id": cloudFrontID,
+									}).Info("通过列表查找找到 CloudFront 分发")
+								}
+								break
+							}
+						}
+						if cloudFrontID != "" {
+							break
+						}
+					}
+				}
+			}
+			// 如果还是找不到，记录警告但跳过 CloudFront 相关操作
+			if cloudFrontID == "" {
+				if log != nil {
+					log.WithFields(map[string]interface{}{
+						"package_id":  pkg.ID,
+						"domain_name": pkg.DomainName,
+					}).Warn("无法找到 CloudFront 分发，但 CNAME 已存在，跳过 CloudFront 相关操作（当作正常处理）")
+				}
+				// 跳过 CloudFront 相关操作，继续处理其他步骤
+				return nil
+			}
 		}
 
 		// 获取CloudFront域名
