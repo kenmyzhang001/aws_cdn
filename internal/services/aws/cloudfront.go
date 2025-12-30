@@ -642,7 +642,9 @@ func (s *CloudFrontService) findDistributionByDomain(domainName string) (string,
 
 // ListDistributions 列出所有 CloudFront 分发
 func (s *CloudFrontService) ListDistributions() (*cloudfront.DistributionList, error) {
-	input := &cloudfront.ListDistributionsInput{}
+	input := &cloudfront.ListDistributionsInput{
+		MaxItems: aws.Int64(200),
+	}
 
 	result, err := s.client.ListDistributions(input)
 	if err != nil {
