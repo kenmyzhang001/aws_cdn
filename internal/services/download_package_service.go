@@ -411,6 +411,12 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 			distList, listErr := s.cloudFrontSvc.ListDistributions()
 			if listErr == nil && distList != nil && distList.Items != nil {
 				for _, dist := range distList.Items {
+					log.WithFields(map[string]interface{}{
+						"distribution_id": *dist.Id,
+						"package_id":      pkg.ID,
+						"domain_name":     pkg.DomainName,
+						"dist":            dist,
+					}).Info("检查CloudFront分发")
 					if dist != nil && dist.Aliases != nil && dist.Aliases.Items != nil {
 						for _, alias := range dist.Aliases.Items {
 							if alias != nil && *alias == pkg.DomainName {
@@ -976,6 +982,12 @@ func (s *DownloadPackageService) FixDownloadPackage(id uint) error {
 			distList, listErr := s.cloudFrontSvc.ListDistributions()
 			if listErr == nil && distList != nil && distList.Items != nil {
 				for _, dist := range distList.Items {
+					log.WithFields(map[string]interface{}{
+						"distribution_id": *dist.Id,
+						"package_id":      pkg.ID,
+						"domain_name":     pkg.DomainName,
+						"dist":            dist,
+					}).Info("检查CloudFront分发")
 					if dist != nil && dist.Aliases != nil && dist.Aliases.Items != nil {
 						for _, alias := range dist.Aliases.Items {
 							if alias != nil && *alias == pkg.DomainName {
