@@ -191,6 +191,67 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 
 	result, err := s.client.CreateDistribution(input)
 	if err != nil {
+		// 检查是否是 CNAMEAlreadyExists 错误
+		errStr := err.Error()
+		if strings.Contains(errStr, "CNAMEAlreadyExists") {
+			// CNAME 已存在，尝试查找已存在的分发
+			log := logger.GetLogger()
+			if log != nil {
+				log.WithFields(logrus.Fields{
+					"domain_name": domainName,
+					"origin":      s3Origin,
+					"origin_path": originPath,
+				}).Warn("CNAME 已存在，尝试查找已存在的 CloudFront 分发")
+			}
+
+			// 尝试查找已存在的分发（立即查找）
+			existingID, findErr := s.findDistributionByDomain(domainName)
+			if findErr == nil && existingID != "" {
+				// 找到已存在的分发，返回其 ID
+				if log != nil {
+					log.WithFields(logrus.Fields{
+						"domain_name":     domainName,
+						"distribution_id": existingID,
+					}).Info("找到已存在的 CloudFront 分发，复用该分发")
+				}
+				return existingID, nil
+			}
+
+			// 如果第一次找不到，等待 3 秒后再次尝试查找
+			// 因为 CloudFront 分发创建后可能需要一些时间才能出现在列表中
+			if log != nil {
+				log.WithFields(logrus.Fields{
+					"domain_name": domainName,
+				}).Info("首次查找未找到分发，等待 3 秒后重试")
+			}
+			time.Sleep(3 * time.Second)
+
+			existingID, findErr = s.findDistributionByDomain(domainName)
+			if findErr == nil && existingID != "" {
+				// 找到已存在的分发，返回其 ID
+				if log != nil {
+					log.WithFields(logrus.Fields{
+						"domain_name":     domainName,
+						"distribution_id": existingID,
+					}).Info("重试后找到已存在的 CloudFront 分发，复用该分发")
+				}
+				return existingID, nil
+			}
+
+			// 如果还是找不到，记录警告但当作成功处理
+			// 因为 CNAME 已存在说明分发可能已经存在，只是我们无法找到
+			if log != nil {
+				log.WithFields(logrus.Fields{
+					"domain_name": domainName,
+					"origin":      s3Origin,
+					"origin_path": originPath,
+				}).Warn("CNAME 已存在但未找到对应的 CloudFront 分发，跳过创建（当作正常处理）")
+			}
+			// 返回空字符串和 nil 错误，表示跳过创建
+			// 调用方需要检查返回值是否为空，如果为空则跳过后续操作
+			return "", nil
+		}
+
 		// 提供更详细的错误信息，包括使用的 origin 域名
 		return "", fmt.Errorf("创建 CloudFront 分发失败 (Origin: %s, OriginPath: %s): %w", s3Origin, originPath, err)
 	}
@@ -466,6 +527,67 @@ func (s *CloudFrontService) CreateDistributionForLargeFileDownload(domainName st
 
 	result, err := s.client.CreateDistribution(input)
 	if err != nil {
+		// 检查是否是 CNAMEAlreadyExists 错误
+		errStr := err.Error()
+		if strings.Contains(errStr, "CNAMEAlreadyExists") {
+			// CNAME 已存在，尝试查找已存在的分发
+			log := logger.GetLogger()
+			if log != nil {
+				log.WithFields(logrus.Fields{
+					"domain_name": domainName,
+					"origin":      s3Origin,
+					"origin_path": originPath,
+				}).Warn("CNAME 已存在，尝试查找已存在的 CloudFront 分发")
+			}
+
+			// 尝试查找已存在的分发（立即查找）
+			existingID, findErr := s.findDistributionByDomain(domainName)
+			if findErr == nil && existingID != "" {
+				// 找到已存在的分发，返回其 ID
+				if log != nil {
+					log.WithFields(logrus.Fields{
+						"domain_name":     domainName,
+						"distribution_id": existingID,
+					}).Info("找到已存在的 CloudFront 分发，复用该分发")
+				}
+				return existingID, nil
+			}
+
+			// 如果第一次找不到，等待 3 秒后再次尝试查找
+			// 因为 CloudFront 分发创建后可能需要一些时间才能出现在列表中
+			if log != nil {
+				log.WithFields(logrus.Fields{
+					"domain_name": domainName,
+				}).Info("首次查找未找到分发，等待 3 秒后重试")
+			}
+			time.Sleep(3 * time.Second)
+
+			existingID, findErr = s.findDistributionByDomain(domainName)
+			if findErr == nil && existingID != "" {
+				// 找到已存在的分发，返回其 ID
+				if log != nil {
+					log.WithFields(logrus.Fields{
+						"domain_name":     domainName,
+						"distribution_id": existingID,
+					}).Info("重试后找到已存在的 CloudFront 分发，复用该分发")
+				}
+				return existingID, nil
+			}
+
+			// 如果还是找不到，记录警告但当作成功处理
+			// 因为 CNAME 已存在说明分发可能已经存在，只是我们无法找到
+			if log != nil {
+				log.WithFields(logrus.Fields{
+					"domain_name": domainName,
+					"origin":      s3Origin,
+					"origin_path": originPath,
+				}).Warn("CNAME 已存在但未找到对应的 CloudFront 分发，跳过创建（当作正常处理）")
+			}
+			// 返回空字符串和 nil 错误，表示跳过创建
+			// 调用方需要检查返回值是否为空，如果为空则跳过后续操作
+			return "", nil
+		}
+
 		return "", fmt.Errorf("创建 CloudFront 分发失败 (Origin: %s, OriginPath: %s): %w", s3Origin, originPath, err)
 	}
 
