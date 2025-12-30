@@ -384,7 +384,14 @@ const loadGroups = async () => {
   }
 }
 
-const handleGroupChange = () => {
+const handleGroupChange = (value) => {
+  // 确保当切换到"全部"时，activeGroupId 为 null
+  // el-tabs 可能会将 null 转换为字符串 "null"，需要处理这种情况
+  if (value === null || value === 'null' || value === undefined || value === '') {
+    activeGroupId.value = null
+  } else {
+    activeGroupId.value = value
+  }
   currentPage.value = 1
   loadDomains()
 }
@@ -396,7 +403,8 @@ const loadDomains = async () => {
       page: currentPage.value,
       page_size: pageSize.value,
     }
-    if (activeGroupId.value !== null) {
+    // 确保只有当 activeGroupId 是有效的数字时才添加 group_id 参数
+    if (activeGroupId.value !== null && activeGroupId.value !== undefined && activeGroupId.value !== 'null' && activeGroupId.value !== '') {
       params.group_id = activeGroupId.value
     }
     if (searchKeyword.value && searchKeyword.value.trim()) {
