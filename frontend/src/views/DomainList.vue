@@ -144,6 +144,13 @@
             <el-button size="small" @click="refreshStatus(row)">刷新状态</el-button>
             <el-button
               size="small"
+              type="info"
+              @click="openMoveGroupDialog(row)"
+            >
+              移动分组
+            </el-button>
+            <el-button
+              size="small"
               type="danger"
               @click="handleDelete(row)"
             >
@@ -304,6 +311,31 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 移动分组对话框 -->
+    <el-dialog v-model="showMoveGroupDialog" title="移动分组" width="500px">
+      <el-form :model="moveGroupForm" label-width="100px">
+        <el-form-item label="域名">
+          <el-input v-model="moveGroupForm.domain_name" disabled />
+        </el-form-item>
+        <el-form-item label="目标分组">
+          <el-select v-model="moveGroupForm.group_id" placeholder="请选择分组（不选则使用默认分组）" clearable style="width: 100%">
+            <el-option
+              v-for="group in groups"
+              :key="group.id"
+              :label="group.name"
+              :value="group.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showMoveGroupDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleMoveGroup" :loading="moveGroupLoading">
+          确认移动
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -351,6 +383,14 @@ const noteForm = ref({
   note: '',
 })
 const noteLoading = ref(false)
+
+const showMoveGroupDialog = ref(false)
+const moveGroupForm = ref({
+  id: null,
+  domain_name: '',
+  group_id: null,
+})
+const moveGroupLoading = ref(false)
 
 onMounted(() => {
   loadGroups()
@@ -652,6 +692,30 @@ const saveNote = async () => {
     // 错误已在拦截器中处理
   } finally {
     noteLoading.value = false
+  }
+}
+
+const openMoveGroupDialog = (row) => {
+  moveGroupForm.value = {
+    id: row.id,
+    domain_name: row.domain_name,
+    group_id: row.group_id,
+  }
+  showMoveGroupDialog.value = true
+}
+
+const handleMoveGroup = async () => {
+  moveGroupLoading.value = true
+  try {
+    await domainApi.moveDomainToGroup(moveGroupForm.value.id, moveGroupForm.value.group_id)
+    ElMessage.success('域名移动分组成功')
+    showMoveGroupDialog.value = false
+    loadGroups()
+    loadDomains()
+  } catch (error) {
+    // 错误已在拦截器中处理
+  } finally {
+    moveGroupLoading.value = false
   }
 }
 </script>

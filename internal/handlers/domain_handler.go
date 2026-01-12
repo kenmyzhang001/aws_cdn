@@ -98,7 +98,7 @@ func (h *DomainHandler) ListDomains(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 
 	var groupID *uint
-	if groupIDStr := c.Query("group_id"); groupIDStr != "" {
+	if groupIDStr := c.Query("group_id"); groupIDStr != "" && groupIDStr != "0" {
 		if id, err := strconv.ParseUint(groupIDStr, 10, 32); err == nil {
 			gid := uint(id)
 			groupID = &gid
@@ -320,4 +320,40 @@ func (h *DomainHandler) UpdateDomainNote(c *gin.Context) {
 
 	log.WithField("domain_id", id).Info("域名备注更新成功")
 	c.JSON(http.StatusOK, gin.H{"message": "备注更新成功"})
+}
+
+// MoveDomainToGroup 将域名移动到指定分组
+func (h *DomainHandler) MoveDomainToGroup(c *gin.Context) {
+	log := logger.GetLogger()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		log.WithError(err).WithField("id_param", c.Param("id")).Error("移动域名到分组失败：无效的域名ID")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的域名 ID"})
+		return
+	}
+
+	var req struct {
+		GroupID *uint `json:"group_id"` // 分组ID，nil表示移动到默认分组
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.WithError(err).Error("移动域名到分组失败：请求参数验证失败")
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.service.MoveDomainToGroup(uint(id), req.GroupID); err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"domain_id": id,
+			"group_id":  req.GroupID,
+		}).Error("移动域名到分组操作失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.WithFields(map[string]interface{}{
+		"domain_id": id,
+		"group_id":  req.GroupID,
+	}).Info("域名移动分组成功")
+	c.JSON(http.StatusOK, gin.H{"message": "域名移动分组成功"})
 }

@@ -60,6 +60,11 @@ export const domainApi = {
   updateDomainNote(id, note) {
     return request.put(`/domains/${id}/note`, { note })
   },
+
+  // 移动域名到分组
+  moveDomainToGroup(id, groupId) {
+    return request.put(`/domains/${id}/group`, { group_id: groupId })
+  },
 }
 
 

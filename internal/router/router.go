@@ -103,6 +103,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			domains.GET("/:id/certificate/check", domainHandler.CheckCertificate)
 			domains.POST("/:id/certificate/fix", domainHandler.FixCertificate)
 			domains.PUT("/:id/note", domainHandler.UpdateDomainNote)
+			domains.PUT("/:id/group", domainHandler.MoveDomainToGroup)
 		}
 
 		// 轮播管理

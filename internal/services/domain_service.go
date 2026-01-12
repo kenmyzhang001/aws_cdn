@@ -1021,6 +1021,65 @@ func (s *DomainService) UpdateDomainNote(id uint, note string) error {
 	return s.db.Model(&models.Domain{}).Where("id = ?", id).Update("note", note).Error
 }
 
+// MoveDomainToGroup 将域名移动到指定分组
+// 如果 groupID 为 nil，则自动添加到默认分组
+func (s *DomainService) MoveDomainToGroup(domainID uint, groupID *uint) error {
+	log := logger.GetLogger()
+
+	// 检查域名是否存在
+	domain, err := s.GetDomain(domainID)
+	if err != nil {
+		log.WithError(err).WithField("domain_id", domainID).Error("移动域名到分组失败：域名不存在")
+		return fmt.Errorf("域名不存在: %w", err)
+	}
+
+	var finalGroupID *uint
+
+	// 如果没有指定分组ID，自动获取或创建默认分组
+	if groupID == nil {
+		groupService := NewGroupService(s.db)
+		defaultGroup, err := groupService.GetOrCreateDefaultGroup()
+		if err != nil {
+			log.WithError(err).WithField("domain_id", domainID).Error("移动域名到分组失败：获取默认分组失败")
+			return fmt.Errorf("获取默认分组失败: %w", err)
+		}
+		finalGroupID = &defaultGroup.ID
+		log.WithFields(map[string]interface{}{
+			"domain_id":        domainID,
+			"domain_name":      domain.DomainName,
+			"default_group_id": defaultGroup.ID,
+		}).Info("未指定分组，自动使用默认分组")
+	} else {
+		// 如果指定了分组ID，验证分组是否存在
+		groupService := NewGroupService(s.db)
+		_, err := groupService.GetGroup(*groupID)
+		if err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"domain_id": domainID,
+				"group_id":  *groupID,
+			}).Error("移动域名到分组失败：分组不存在")
+			return fmt.Errorf("分组不存在: %w", err)
+		}
+		finalGroupID = groupID
+	}
+
+	// 更新域名的分组ID
+	if err := s.db.Model(domain).Update("group_id", finalGroupID).Error; err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"domain_id": domainID,
+			"group_id":  finalGroupID,
+		}).Error("移动域名到分组失败：更新数据库失败")
+		return fmt.Errorf("更新域名分组失败: %w", err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"domain_id":   domainID,
+		"domain_name": domain.DomainName,
+		"group_id":    finalGroupID,
+	}).Info("域名移动分组成功")
+	return nil
+}
+
 // DeleteDomain 删除域名
 // 删除域名时会同时删除相关的 AWS 资源（Route53 Hosted Zone 和 ACM 证书）
 // 对于 Cloudflare 托管的域名，只删除 ACM 证书和数据库记录（不删除 Cloudflare Zone）
