@@ -5,6 +5,7 @@ import (
 	"aws_cdn/internal/models"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -41,15 +42,35 @@ func (s *URLCheckerService) CheckDownloadURLs() error {
 	}
 
 	var invalidURLs []string
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// 创建并发控制 channel，限制并发数为 30
+	semaphore := make(chan struct{}, 30)
+
 	for _, pkg := range packages {
-		if !s.isURLValid(pkg.DownloadURL) {
-			invalidURLs = append(invalidURLs, pkg.DownloadURL)
-			log.WithFields(map[string]interface{}{
-				"package_id":   pkg.ID,
-				"download_url": pkg.DownloadURL,
-			}).Warn("检测到不可用的下载链接")
-		}
+		wg.Add(1)
+		go func(p models.DownloadPackage) {
+			defer wg.Done()
+
+			// 获取信号量，控制并发数
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			if !s.isURLValid(p.DownloadURL) {
+				mu.Lock()
+				invalidURLs = append(invalidURLs, p.DownloadURL)
+				mu.Unlock()
+				log.WithFields(map[string]interface{}{
+					"package_id":   p.ID,
+					"download_url": p.DownloadURL,
+				}).Warn("检测到不可用的下载链接")
+			}
+		}(pkg)
 	}
+
+	// 等待所有 goroutine 完成
+	wg.Wait()
 
 	if len(invalidURLs) > 0 {
 		log.WithField("count", len(invalidURLs)).Info("发现不可用的下载链接，准备发送到 Telegram")
@@ -86,6 +107,10 @@ func (s *URLCheckerService) isURLValid(url string) bool {
 
 	// 200 和 206 (Partial Content) 都认为是可用的
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusPartialContent {
+		log.WithFields(map[string]interface{}{
+			"url":         url,
+			"status_code": resp.StatusCode,
+		}).Debug("URL 返回成功状态码")
 		return true
 	}
 
