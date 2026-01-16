@@ -110,13 +110,13 @@ func (s *URLCheckerService) isURLValid(url string) bool {
 		log.WithFields(map[string]interface{}{
 			"url":         url,
 			"status_code": resp.StatusCode,
-		}).Debug("URL 返回成功状态码")
+		}).Info("URL 返回成功状态码")
 		return true
 	}
 
 	log.WithFields(map[string]interface{}{
 		"url":         url,
 		"status_code": resp.StatusCode,
-	}).Debug("URL 返回非成功状态码")
+	}).Error("URL 返回非成功状态码")
 	return false
 }
