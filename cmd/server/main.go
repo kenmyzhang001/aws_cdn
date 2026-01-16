@@ -5,7 +5,9 @@ import (
 	"aws_cdn/internal/database"
 	"aws_cdn/internal/logger"
 	"aws_cdn/internal/router"
+	"aws_cdn/internal/services"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -43,6 +45,20 @@ func main() {
 
 	// 初始化路由
 	r := router.SetupRouter(db, cfg)
+
+	// 初始化 Telegram 服务
+	botToken := "7366631415:AAGQm8flfcjfrYDv5ZawwebczZqNSg_nbqo"
+	chatID := int64(-5247584308)
+	telegramService := services.NewTelegramService(botToken, chatID)
+
+	// 初始化 URL 检查服务
+	urlCheckerService := services.NewURLCheckerService(db, telegramService)
+
+	// 初始化并启动定时任务（每10分钟检查一次）
+	schedulerService := services.NewSchedulerService(urlCheckerService, 10*time.Minute)
+	go schedulerService.Start()
+
+	log.Info("URL 检查定时任务已启动（每10分钟检查一次）")
 
 	// 启动服务器
 	port := os.Getenv("SERVER_PORT")
