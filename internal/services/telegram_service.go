@@ -14,14 +14,16 @@ import (
 type TelegramService struct {
 	botToken string
 	chatID   int64
+	sitename string
 	client   *http.Client
 }
 
 // NewTelegramService 创建 Telegram 服务
-func NewTelegramService(botToken string, chatID int64) *TelegramService {
+func NewTelegramService(botToken string, chatID int64, sitename string) *TelegramService {
 	return &TelegramService{
 		botToken: botToken,
 		chatID:   chatID,
+		sitename: sitename,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -96,6 +98,9 @@ func (s *TelegramService) SendMessagesBatch(urls []string) error {
 
 		batch := urls[start:end]
 		message := "检测到不可用的下载链接：\n\n"
+		if s.sitename != "" {
+			message = fmt.Sprintf("[%s] 检测到不可用的下载链接：\n\n", s.sitename)
+		}
 		for j, url := range batch {
 			message += fmt.Sprintf("%d. %s", start+j+1, url)
 			if j < len(batch)-1 {

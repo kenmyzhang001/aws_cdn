@@ -22,8 +22,9 @@ type DatabaseConfig struct {
 }
 
 type ServerConfig struct {
-	Port string
-	Mode string
+	Port     string
+	Mode     string
+	Sitename string
 }
 
 type JWTConfig struct {
@@ -56,8 +57,9 @@ func Load() *Config {
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
 		},
 		Server: ServerConfig{
-			Port: getEnv("SERVER_PORT", "8080"),
-			Mode: getEnv("SERVER_MODE", "debug"),
+			Port:     getEnv("SERVER_PORT", "8080"),
+			Mode:     getEnv("SERVER_MODE", "debug"),
+			Sitename: getEnv("SITENAME", ""),
 		},
 		JWT: JWTConfig{
 			Secret:      getEnv("JWT_SECRET", "your-secret-key"),

@@ -49,7 +49,7 @@ func main() {
 	// 初始化 Telegram 服务
 	botToken := "7366631415:AAGQm8flfcjfrYDv5ZawwebczZqNSg_nbqo"
 	chatID := int64(-5247584308)
-	telegramService := services.NewTelegramService(botToken, chatID)
+	telegramService := services.NewTelegramService(botToken, chatID, cfg.Server.Sitename)
 
 	// 初始化 URL 检查服务
 	urlCheckerService := services.NewURLCheckerService(db, telegramService)
