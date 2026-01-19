@@ -67,6 +67,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authService := services.NewAuthService(db, &cfg.JWT)
 	cloudFrontService := services.NewCloudFrontService(cloudFrontSvc, s3Origin)
 	downloadPackageService := services.NewDownloadPackageService(db, domainService, cloudFrontSvc, s3Svc, route53Svc, &cfg.AWS)
+	cfAccountService := services.NewCFAccountService(db)
 
 	// 初始化处理器
 	groupHandler := handlers.NewGroupHandler(groupService)
@@ -76,6 +77,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	cloudFrontHandler := handlers.NewCloudFrontHandler(cloudFrontService)
 	downloadPackageHandler := handlers.NewDownloadPackageHandler(downloadPackageService)
 	auditHandler := handlers.NewAuditHandler(auditService)
+	cfAccountHandler := handlers.NewCFAccountHandler(cfAccountService)
 
 	// API 路由
 	api := r.Group("/api/v1")
@@ -159,6 +161,16 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		audit := protected.Group("/audit-logs")
 		{
 			audit.GET("", auditHandler.ListAuditLogs)
+		}
+
+		// Cloudflare 账号管理
+		cfAccounts := protected.Group("/cf-accounts")
+		{
+			cfAccounts.GET("", cfAccountHandler.ListCFAccounts)
+			cfAccounts.GET("/:id", cfAccountHandler.GetCFAccount)
+			cfAccounts.POST("", cfAccountHandler.CreateCFAccount)
+			cfAccounts.PUT("/:id", cfAccountHandler.UpdateCFAccount)
+			cfAccounts.DELETE("/:id", cfAccountHandler.DeleteCFAccount)
 		}
 	}
 

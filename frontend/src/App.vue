@@ -32,6 +32,10 @@
             <el-icon><Document /></el-icon>
             <span>审计日志</span>
           </el-menu-item>
+          <el-menu-item index="/cf-accounts">
+            <el-icon><User /></el-icon>
+            <span>CF 账号管理</span>
+          </el-menu-item>
           <!--el-menu-item index="/cloudfront">
             <el-icon><Connection /></el-icon>
             <span>CloudFront 管理</span>
@@ -48,7 +52,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Link, RefreshRight, Connection, Download, Document, Folder } from '@element-plus/icons-vue'
+import { Link, RefreshRight, Connection, Download, Document, Folder, User } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)

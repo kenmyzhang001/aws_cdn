@@ -5,6 +5,7 @@ import CloudFrontList from '@/views/CloudFrontList.vue'
 import DownloadPackageList from '@/views/DownloadPackageList.vue'
 import AuditLogList from '@/views/AuditLogList.vue'
 import GroupList from '@/views/GroupList.vue'
+import CfAccountList from '@/views/CfAccountList.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -46,6 +47,11 @@ const routes = [
     path: '/groups',
     name: 'GroupList',
     component: GroupList,
+  },
+  {
+    path: '/cf-accounts',
+    name: 'CfAccountList',
+    component: CfAccountList,
   },
 ]
 
