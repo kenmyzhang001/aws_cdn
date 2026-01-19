@@ -69,6 +69,12 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 	downloadPackageService := services.NewDownloadPackageService(db, domainService, cloudFrontSvc, s3Svc, route53Svc, &cfg.AWS)
 	cfAccountService := services.NewCFAccountService(db)
 
+	// 初始化 R2 服务
+	r2BucketService := services.NewR2BucketService(db, cfAccountService)
+	r2CustomDomainService := services.NewR2CustomDomainService(db, cfAccountService, cloudflareSvc)
+	r2CacheRuleService := services.NewR2CacheRuleService(db, cfAccountService, cloudflareSvc)
+	r2FileService := services.NewR2FileService(db, cfAccountService)
+
 	// 初始化处理器
 	groupHandler := handlers.NewGroupHandler(groupService)
 	domainHandler := handlers.NewDomainHandler(domainService)
@@ -78,6 +84,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 	downloadPackageHandler := handlers.NewDownloadPackageHandler(downloadPackageService)
 	auditHandler := handlers.NewAuditHandler(auditService)
 	cfAccountHandler := handlers.NewCFAccountHandler(cfAccountService)
+	r2Handler := handlers.NewR2Handler(r2BucketService, r2CustomDomainService, r2CacheRuleService, r2FileService)
 
 	// API 路由
 	api := r.Group("/api/v1")
@@ -171,6 +178,42 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 			cfAccounts.POST("", cfAccountHandler.CreateCFAccount)
 			cfAccounts.PUT("/:id", cfAccountHandler.UpdateCFAccount)
 			cfAccounts.DELETE("/:id", cfAccountHandler.DeleteCFAccount)
+			cfAccounts.POST("/:cf_account_id/enable-r2", r2Handler.EnableR2)
+		}
+
+		// R2 存储桶管理
+		r2Buckets := protected.Group("/r2-buckets")
+		{
+			r2Buckets.GET("", r2Handler.ListR2Buckets)
+			r2Buckets.GET("/:id", r2Handler.GetR2Bucket)
+			r2Buckets.POST("", r2Handler.CreateR2Bucket)
+			r2Buckets.DELETE("/:id", r2Handler.DeleteR2Bucket)
+			r2Buckets.PUT("/:id/note", r2Handler.UpdateR2BucketNote)
+			r2Buckets.PUT("/:id/cors", r2Handler.ConfigureCORS)
+		}
+
+		// R2 自定义域名管理
+		r2CustomDomains := protected.Group("/r2-custom-domains")
+		{
+			r2CustomDomains.GET("/buckets/:r2_bucket_id", r2Handler.ListR2CustomDomains)
+			r2CustomDomains.POST("/buckets/:r2_bucket_id", r2Handler.AddR2CustomDomain)
+			r2CustomDomains.DELETE("/:id", r2Handler.DeleteR2CustomDomain)
+		}
+
+		// R2 缓存规则管理
+		r2CacheRules := protected.Group("/r2-cache-rules")
+		{
+			r2CacheRules.GET("/domains/:r2_custom_domain_id", r2Handler.ListR2CacheRules)
+			r2CacheRules.POST("/domains/:r2_custom_domain_id", r2Handler.CreateR2CacheRule)
+			r2CacheRules.DELETE("/:id", r2Handler.DeleteR2CacheRule)
+		}
+
+		// R2 文件管理
+		r2Files := protected.Group("/r2-files")
+		{
+			r2Files.POST("/buckets/:r2_bucket_id/upload", r2Handler.UploadFile)
+			r2Files.POST("/buckets/:r2_bucket_id/directories", r2Handler.CreateDirectory)
+			r2Files.GET("/buckets/:r2_bucket_id", r2Handler.ListFiles)
 		}
 	}
 
