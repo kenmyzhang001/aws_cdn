@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
+func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.TelegramService) *gin.Engine {
 	// 设置 Gin 模式
 	gin.SetMode(cfg.Server.Mode)
 
@@ -172,6 +172,12 @@ func SetupRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			cfAccounts.PUT("/:id", cfAccountHandler.UpdateCFAccount)
 			cfAccounts.DELETE("/:id", cfAccountHandler.DeleteCFAccount)
 		}
+	}
+
+	// Telegram webhook（公共路由，无需认证）
+	if telegramService != nil {
+		telegramHandler := handlers.NewTelegramHandler(telegramService)
+		r.POST("/webhook/telegram", telegramHandler.HandleWebhook)
 	}
 
 	// 健康检查

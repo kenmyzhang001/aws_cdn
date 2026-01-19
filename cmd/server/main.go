@@ -43,9 +43,6 @@ func main() {
 		log.WithError(err).Fatal("数据库迁移失败")
 	}
 
-	// 初始化路由
-	r := router.SetupRouter(db, cfg)
-
 	// 初始化 Telegram 服务
 	botToken := "7366631415:AAGQm8flfcjfrYDv5ZawwebczZqNSg_nbqo"
 	chatID := int64(-5247584308)
@@ -54,11 +51,36 @@ func main() {
 	// 初始化 URL 检查服务
 	urlCheckerService := services.NewURLCheckerService(db, telegramService)
 
-	// 初始化并启动定时任务（每10分钟检查一次）
-	schedulerService := services.NewSchedulerService(urlCheckerService, 10*time.Minute)
+	// 初始化下载速度探测服务
+	downloadSpeedService := services.NewDownloadSpeedService(db, telegramService)
+
+	// 设置 Telegram 命令回调
+	telegramService.SetSpeedCheckCallback(func() error {
+		return downloadSpeedService.CheckDownloadSpeed()
+	})
+
+	// 初始化并启动定时任务服务
+	schedulerService := services.NewSchedulerService()
+	
+	// 添加 URL 检查任务（每10分钟检查一次）
+	schedulerService.AddTask("URL检查", func() error {
+		return urlCheckerService.CheckDownloadURLs()
+	}, 10*time.Minute)
+
+	// 添加下载速度探测任务（每20分钟检查一次）
+	schedulerService.AddTask("下载速度探测", func() error {
+		return downloadSpeedService.CheckDownloadSpeed()
+	}, 20*time.Minute)
+
+	// 启动所有定时任务
 	go schedulerService.Start()
 
-	log.Info("URL 检查定时任务已启动（每10分钟检查一次）")
+	log.Info("定时任务服务已启动")
+	log.Info("  - URL 检查任务：每10分钟执行一次")
+	log.Info("  - 下载速度探测任务：每20分钟执行一次")
+
+	// 初始化路由（传入 Telegram 服务以支持 webhook）
+	r := router.SetupRouter(db, cfg, telegramService)
 
 	// 启动服务器
 	port := os.Getenv("SERVER_PORT")

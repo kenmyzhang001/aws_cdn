@@ -12,10 +12,11 @@ import (
 
 // TelegramService Telegram 服务
 type TelegramService struct {
-	botToken string
-	chatID   int64
-	sitename string
-	client   *http.Client
+	botToken           string
+	chatID             int64
+	sitename           string
+	client             *http.Client
+	speedCheckCallback func() error // 下载速度探测回调函数
 }
 
 // NewTelegramService 创建 Telegram 服务
@@ -28,6 +29,11 @@ func NewTelegramService(botToken string, chatID int64, sitename string) *Telegra
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// SetSpeedCheckCallback 设置下载速度探测回调函数
+func (s *TelegramService) SetSpeedCheckCallback(callback func() error) {
+	s.speedCheckCallback = callback
 }
 
 // SendMessage 发送消息到 Telegram
@@ -116,6 +122,95 @@ func (s *TelegramService) SendMessagesBatch(urls []string) error {
 		if i < totalBatches-1 {
 			time.Sleep(1 * time.Second)
 		}
+	}
+
+	return nil
+}
+
+// TelegramUpdate Telegram webhook 更新结构
+type TelegramUpdate struct {
+	UpdateID int64 `json:"update_id"`
+	Message  *struct {
+		MessageID int64 `json:"message_id"`
+		From      *struct {
+			ID        int64  `json:"id"`
+			IsBot     bool   `json:"is_bot"`
+			FirstName string `json:"first_name"`
+			Username  string `json:"username"`
+		} `json:"from"`
+		Chat struct {
+			ID    int64  `json:"id"`
+			Type  string `json:"type"`
+			Title string `json:"title"`
+		} `json:"chat"`
+		Date     int64  `json:"date"`
+		Text     string `json:"text"`
+		Entities []struct {
+			Type   string `json:"type"`
+			Offset int    `json:"offset"`
+			Length int    `json:"length"`
+		} `json:"entities"`
+	} `json:"message"`
+}
+
+// HandleWebhook 处理 Telegram webhook 更新
+func (s *TelegramService) HandleWebhook(update TelegramUpdate) error {
+	log := logger.GetLogger()
+
+	// 只处理来自指定chatID的消息
+	if update.Message == nil || update.Message.Chat.ID != s.chatID {
+		return nil
+	}
+
+	// 检查是否是命令
+	text := update.Message.Text
+	if len(text) == 0 || text[0] != '/' {
+		return nil
+	}
+
+	// 解析命令
+	command := text
+	if len(text) > 1 {
+		// 移除 / 符号
+		command = text[1:]
+		// 移除可能的 @botname
+		if idx := len(command); idx > 0 {
+			for i := 0; i < idx; i++ {
+				if command[i] == ' ' || command[i] == '@' {
+					command = command[:i]
+					break
+				}
+			}
+		}
+	}
+
+	log.WithFields(map[string]interface{}{
+		"chat_id": update.Message.Chat.ID,
+		"command": command,
+		"text":    text,
+	}).Info("收到 Telegram 命令")
+
+	// 处理命令
+	switch command {
+	case "speed", "speedcheck", "check_speed":
+		if s.speedCheckCallback != nil {
+			// 发送确认消息
+			s.SendMessage("正在执行下载速度探测，请稍候...")
+			// 异步执行探测
+			go func() {
+				if err := s.speedCheckCallback(); err != nil {
+					log.WithError(err).Error("下载速度探测失败")
+					s.SendMessage(fmt.Sprintf("下载速度探测失败: %v", err))
+				}
+			}()
+		} else {
+			s.SendMessage("下载速度探测功能未配置")
+		}
+	default:
+		// 未知命令，发送帮助信息
+		helpText := "可用命令：\n"
+		helpText += "/speed - 执行下载速度探测"
+		s.SendMessage(helpText)
 	}
 
 	return nil
