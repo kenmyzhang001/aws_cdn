@@ -137,6 +137,9 @@ func (s *DownloadSpeedService) CheckDownloadSpeed() error {
 
 	// 构建消息
 	message := "📊 下载速度探测报告\n\n"
+	if s.telegram.GetSitename() != "" {
+		message = fmt.Sprintf("[%s] 📊 下载速度探测报告\n\n", s.telegram.GetSitename())
+	}
 	message += fmt.Sprintf("总链接数: %d\n", len(packages))
 	message += fmt.Sprintf("成功测试: %d\n", successCount)
 	message += fmt.Sprintf("失败数量: %d\n", len(packages)-successCount)
@@ -195,6 +198,9 @@ func (s *DownloadSpeedService) sendSpeedAlerts(slowURLs []SpeedResult) error {
 
 		batch := slowURLs[start:end]
 		message := fmt.Sprintf("⚠️ 下载速度告警（阈值: %.2f KB/s）\n\n", s.speedThreshold)
+		if s.telegram.GetSitename() != "" {
+			message = fmt.Sprintf("[%s] ⚠️ 下载速度告警（阈值: %.2f KB/s）\n\n", s.telegram.GetSitename(), s.speedThreshold)
+		}
 
 		for j, result := range batch {
 			message += fmt.Sprintf("%d. %s\n", start+j+1, result.FileName)

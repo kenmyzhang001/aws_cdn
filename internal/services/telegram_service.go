@@ -36,6 +36,11 @@ func (s *TelegramService) SetSpeedCheckCallback(callback func() error) {
 	s.speedCheckCallback = callback
 }
 
+// GetSitename 获取站点名称
+func (s *TelegramService) GetSitename() string {
+	return s.sitename
+}
+
 // SendMessage 发送消息到 Telegram
 func (s *TelegramService) SendMessage(text string) error {
 	log := logger.GetLogger()
