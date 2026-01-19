@@ -127,6 +127,14 @@ func (s *DownloadSpeedService) CheckDownloadSpeed() error {
 		avgSpeed = totalSpeed / float64(successCount)
 	}
 
+	// 检查速度告警（只检查成功的测试）
+	var slowURLs []SpeedResult
+	for _, result := range results {
+		if result.Error == nil && result.Speed < s.speedThreshold {
+			slowURLs = append(slowURLs, result)
+		}
+	}
+
 	// 构建消息
 	message := "📊 下载速度探测报告\n\n"
 	message += fmt.Sprintf("总链接数: %d\n", len(packages))
@@ -137,19 +145,13 @@ func (s *DownloadSpeedService) CheckDownloadSpeed() error {
 	} else {
 		message += "平均速度: 无可用数据\n"
 	}
+	message += fmt.Sprintf("慢速链接: %d 个（低于 %.2f KB/s）\n", len(slowURLs), s.speedThreshold)
+	message += "\n⚠️ 提示：慢速链接将单独发送告警\n"
 
 	// 发送到 Telegram
 	if err := s.telegram.SendMessage(message); err != nil {
 		log.WithError(err).Error("发送 Telegram 消息失败")
 		return fmt.Errorf("发送 Telegram 消息失败: %w", err)
-	}
-
-	// 检查速度告警（只检查成功的测试）
-	var slowURLs []SpeedResult
-	for _, result := range results {
-		if result.Error == nil && result.Speed < s.speedThreshold {
-			slowURLs = append(slowURLs, result)
-		}
 	}
 
 	// 如果有慢速链接，发送告警
