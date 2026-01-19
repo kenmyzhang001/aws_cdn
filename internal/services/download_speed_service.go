@@ -14,9 +14,10 @@ import (
 
 // DownloadSpeedService 下载速度探测服务
 type DownloadSpeedService struct {
-	db       *gorm.DB
-	client   *http.Client
-	telegram *TelegramService
+	db             *gorm.DB
+	client         *http.Client
+	telegram       *TelegramService
+	speedThreshold float64 // 速度阈值（KB/s），低于此值将发送告警
 }
 
 // NewDownloadSpeedService 创建下载速度探测服务
@@ -26,16 +27,24 @@ func NewDownloadSpeedService(db *gorm.DB, telegram *TelegramService) *DownloadSp
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		telegram: telegram,
+		telegram:       telegram,
+		speedThreshold: 100.0, // 默认阈值：100 KB/s
 	}
+}
+
+// SetSpeedThreshold 设置速度阈值
+func (s *DownloadSpeedService) SetSpeedThreshold(threshold float64) {
+	s.speedThreshold = threshold
 }
 
 // SpeedResult 速度测试结果
 type SpeedResult struct {
-	URL      string
-	Speed    float64 // KB/s
-	Duration time.Duration
-	Error    error
+	URL       string
+	Speed     float64 // KB/s
+	Duration  time.Duration
+	Error     error
+	PackageID uint   // 包ID
+	FileName  string // 文件名
 }
 
 // CheckDownloadSpeed 检查所有 DownloadPackage 的下载速度
@@ -76,6 +85,9 @@ func (s *DownloadSpeedService) CheckDownloadSpeed() error {
 			defer func() { <-semaphore }()
 
 			result := s.measureSpeed(p.DownloadURL)
+			// 添加包信息
+			result.PackageID = p.ID
+			result.FileName = p.FileName
 			mu.Lock()
 			results = append(results, result)
 			mu.Unlock()
@@ -132,11 +144,74 @@ func (s *DownloadSpeedService) CheckDownloadSpeed() error {
 		return fmt.Errorf("发送 Telegram 消息失败: %w", err)
 	}
 
+	// 检查速度告警（只检查成功的测试）
+	var slowURLs []SpeedResult
+	for _, result := range results {
+		if result.Error == nil && result.Speed < s.speedThreshold {
+			slowURLs = append(slowURLs, result)
+		}
+	}
+
+	// 如果有慢速链接，发送告警
+	if len(slowURLs) > 0 {
+		log.WithFields(map[string]interface{}{
+			"slow_count":      len(slowURLs),
+			"speed_threshold": s.speedThreshold,
+		}).Warn("检测到下载速度低于阈值的链接")
+
+		if err := s.sendSpeedAlerts(slowURLs); err != nil {
+			log.WithError(err).Error("发送速度告警失败")
+			// 不返回错误，因为主报告已发送成功
+		}
+	}
+
 	log.WithFields(map[string]interface{}{
 		"total_count":   len(packages),
 		"success_count": successCount,
 		"avg_speed":     avgSpeed,
+		"slow_count":    len(slowURLs),
 	}).Info("下载速度探测完成")
+
+	return nil
+}
+
+// sendSpeedAlerts 发送速度告警消息（每5条合并发送）
+func (s *DownloadSpeedService) sendSpeedAlerts(slowURLs []SpeedResult) error {
+	if len(slowURLs) == 0 {
+		return nil
+	}
+
+	const batchSize = 5
+	totalBatches := (len(slowURLs) + batchSize - 1) / batchSize
+
+	for i := 0; i < totalBatches; i++ {
+		start := i * batchSize
+		end := start + batchSize
+		if end > len(slowURLs) {
+			end = len(slowURLs)
+		}
+
+		batch := slowURLs[start:end]
+		message := fmt.Sprintf("⚠️ 下载速度告警（阈值: %.2f KB/s）\n\n", s.speedThreshold)
+
+		for j, result := range batch {
+			message += fmt.Sprintf("%d. %s\n", start+j+1, result.FileName)
+			message += fmt.Sprintf("   速度: %.2f KB/s\n", result.Speed)
+			message += fmt.Sprintf("   URL: %s\n", result.URL)
+			if j < len(batch)-1 {
+				message += "\n"
+			}
+		}
+
+		if err := s.telegram.SendMessage(message); err != nil {
+			return fmt.Errorf("发送第 %d 批告警消息失败: %w", i+1, err)
+		}
+
+		// 如果不是最后一批，等待1秒
+		if i < totalBatches-1 {
+			time.Sleep(1 * time.Second)
+		}
+	}
 
 	return nil
 }
