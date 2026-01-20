@@ -13,7 +13,7 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'https://aws_cdn.aglobalpay.com',
+        target: 'https://awscdn-pro.aglobalpay.com',
         changeOrigin: true,
       },
     },
