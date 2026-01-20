@@ -66,7 +66,7 @@ func (s *R2BucketService) EnableR2(cfAccountID uint) error {
 }
 
 // CreateR2Bucket 创建 R2 存储桶
-func (s *R2BucketService) CreateR2Bucket(cfAccountID uint, bucketName, location, note string) (*models.R2Bucket, error) {
+func (s *R2BucketService) CreateR2Bucket(cfAccountID uint, bucketName, location, accountID, note string) (*models.R2Bucket, error) {
 	// 获取 CF 账号信息
 	cfAccount, err := s.cfAccountService.GetCFAccount(cfAccountID)
 	if err != nil {
@@ -82,10 +82,16 @@ func (s *R2BucketService) CreateR2Bucket(cfAccountID uint, bucketName, location,
 	// 创建 R2 API 服务
 	r2API := cloudflare.NewR2APIService(apiToken)
 
-	// 获取账户 ID
-	accountID, err := r2API.GetAccountID()
-	if err != nil {
-		return nil, fmt.Errorf("获取账户ID失败: %w", err)
+	// 优先使用传入的 Account ID，其次使用 CF 账号的 Account ID，最后尝试通过 API Token 获取
+	if accountID == "" {
+		accountID = cfAccount.AccountID
+	}
+	if accountID == "" {
+		var err error
+		accountID, err = r2API.GetAccountID()
+		if err != nil {
+			return nil, fmt.Errorf("获取账户ID失败: %w。请在 CF 账号设置中配置 Account ID 或手动提供", err)
+		}
 	}
 
 	// 检查 R2 是否已启用

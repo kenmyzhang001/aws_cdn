@@ -35,7 +35,7 @@ func (s *CFAccountService) GetCFAccount(id uint) (*models.CFAccount, error) {
 }
 
 // CreateCFAccount 创建 Cloudflare 账号
-func (s *CFAccountService) CreateCFAccount(email, password, apiToken, note string) (*models.CFAccount, error) {
+func (s *CFAccountService) CreateCFAccount(email, password, apiToken, accountID, note string) (*models.CFAccount, error) {
 	// 检查邮箱是否已存在
 	var existingAccount models.CFAccount
 	if err := s.db.Where("email = ?", email).First(&existingAccount).Error; err == nil {
@@ -51,10 +51,11 @@ func (s *CFAccountService) CreateCFAccount(email, password, apiToken, note strin
 	}
 
 	account := &models.CFAccount{
-		Email:    email,
-		Password: string(hashedPassword),
-		APIToken: apiToken, // 暂时明文存储，后续可以改进为加密存储
-		Note:     note,
+		Email:     email,
+		Password:  string(hashedPassword),
+		APIToken:  apiToken, // 暂时明文存储，后续可以改进为加密存储
+		AccountID: accountID,
+		Note:      note,
 	}
 
 	if err := s.db.Create(account).Error; err != nil {
@@ -65,7 +66,7 @@ func (s *CFAccountService) CreateCFAccount(email, password, apiToken, note strin
 }
 
 // UpdateCFAccount 更新 Cloudflare 账号
-func (s *CFAccountService) UpdateCFAccount(id uint, email, password, apiToken, note *string) (*models.CFAccount, error) {
+func (s *CFAccountService) UpdateCFAccount(id uint, email, password, apiToken, accountID, note *string) (*models.CFAccount, error) {
 	account, err := s.GetCFAccount(id)
 	if err != nil {
 		return nil, err
@@ -94,6 +95,11 @@ func (s *CFAccountService) UpdateCFAccount(id uint, email, password, apiToken, n
 	// 如果更新 API Token（只有非空字符串才更新）
 	if apiToken != nil && *apiToken != "" {
 		account.APIToken = *apiToken // 暂时明文存储，后续可以改进为加密存储
+	}
+
+	// 如果更新 Account ID
+	if accountID != nil {
+		account.AccountID = *accountID
 	}
 
 	// 如果更新备注

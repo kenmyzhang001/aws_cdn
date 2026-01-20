@@ -88,6 +88,7 @@ func (h *R2Handler) CreateR2Bucket(c *gin.Context) {
 		CFAccountID uint   `json:"cf_account_id" binding:"required"`
 		BucketName  string `json:"bucket_name" binding:"required"`
 		Location    string `json:"location"`
+		AccountID   string `json:"account_id"` // 可选，如果不提供会尝试自动获取
 		Note        string `json:"note"`
 	}
 
@@ -97,7 +98,7 @@ func (h *R2Handler) CreateR2Bucket(c *gin.Context) {
 		return
 	}
 
-	bucket, err := h.bucketService.CreateR2Bucket(req.CFAccountID, req.BucketName, req.Location, req.Note)
+	bucket, err := h.bucketService.CreateR2Bucket(req.CFAccountID, req.BucketName, req.Location, req.AccountID, req.Note)
 	if err != nil {
 		log.WithError(err).Error("创建R2存储桶操作失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
