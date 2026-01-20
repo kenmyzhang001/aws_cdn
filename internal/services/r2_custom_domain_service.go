@@ -10,15 +10,15 @@ import (
 )
 
 type R2CustomDomainService struct {
-	db              *gorm.DB
-	cfAccountService *CFAccountService
+	db                *gorm.DB
+	cfAccountService  *CFAccountService
 	cloudflareService *cloudflare.CloudflareService
 }
 
 func NewR2CustomDomainService(db *gorm.DB, cfAccountService *CFAccountService, cloudflareService *cloudflare.CloudflareService) *R2CustomDomainService {
 	return &R2CustomDomainService{
-		db:               db,
-		cfAccountService: cfAccountService,
+		db:                db,
+		cfAccountService:  cfAccountService,
 		cloudflareService: cloudflareService,
 	}
 }
@@ -64,11 +64,7 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 	// 创建 R2 API 服务
 	r2API := cloudflare.NewR2APIService(r2APIToken)
 
-	// 获取账户 ID
-	accountID, err := r2API.GetAccountID()
-	if err != nil {
-		return nil, fmt.Errorf("获取账户ID失败: %w", err)
-	}
+	accountID := cfAccount.AccountID
 
 	// 添加自定义域名
 	domainID, err := r2API.AddCustomDomain(accountID, bucket.BucketName, domain)

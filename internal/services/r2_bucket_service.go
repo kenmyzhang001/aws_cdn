@@ -56,11 +56,7 @@ func (s *R2BucketService) EnableR2(cfAccountID uint) error {
 	// 创建 R2 API 服务
 	r2API := cloudflare.NewR2APIService(r2APIToken)
 
-	// 获取账户 ID
-	accountID, err := r2API.GetAccountID()
-	if err != nil {
-		return fmt.Errorf("获取账户ID失败: %w", err)
-	}
+	accountID := cfAccount.AccountID
 
 	// 检查 R2 是否已启用
 	return r2API.EnableR2(accountID)
@@ -88,11 +84,7 @@ func (s *R2BucketService) CreateR2Bucket(cfAccountID uint, bucketName, location,
 		accountID = cfAccount.AccountID
 	}
 	if accountID == "" {
-		var err error
-		accountID, err = r2API.GetAccountID()
-		if err != nil {
-			return nil, fmt.Errorf("获取账户ID失败: %w。请在 CF 账号设置中配置 Account ID 或手动提供", err)
-		}
+		return nil, fmt.Errorf("获取账户ID失败: %w。请在 CF 账号设置中配置 Account ID 或手动提供", err)
 	}
 
 	// 创建存储桶（使用从 CF 账号获取的 API Token）
@@ -219,11 +211,7 @@ func (s *R2BucketService) ConfigureCORS(id uint, corsConfig []map[string]interfa
 	// 创建 R2 API 服务
 	r2API := cloudflare.NewR2APIService(r2APIToken)
 
-	// 获取账户 ID
-	accountID, err := r2API.GetAccountID()
-	if err != nil {
-		return fmt.Errorf("获取账户ID失败: %w", err)
-	}
+	accountID := cfAccount.AccountID
 
 	// 配置 CORS
 	if err := r2API.ConfigureCORS(accountID, bucket.BucketName, corsConfig); err != nil {

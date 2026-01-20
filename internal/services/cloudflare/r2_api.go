@@ -37,7 +37,7 @@ func (s *R2APIService) getAuthHeaders() map[string]string {
 // EnableR2 启用 R2（检查账户是否已启用 R2）
 func (s *R2APIService) EnableR2(accountID string) error {
 	log := logger.GetLogger()
-	
+
 	// 通过列出存储桶来检查 R2 是否已启用
 	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/r2/buckets", accountID)
 	req, err := http.NewRequest("GET", url, nil)
@@ -72,16 +72,16 @@ func (s *R2APIService) EnableR2(accountID string) error {
 		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
 			errorMsg := errorResp.Errors[0].Message
 			log.WithFields(map[string]interface{}{
-				"account_id": accountID,
-				"status_code": resp.StatusCode,
-				"error_code": errorResp.Errors[0].Code,
+				"account_id":    accountID,
+				"status_code":   resp.StatusCode,
+				"error_code":    errorResp.Errors[0].Code,
 				"error_message": errorMsg,
 			}).Error("R2 启用检查失败")
 			return fmt.Errorf("R2 未启用或权限不足: %s (错误代码: %d)", errorMsg, errorResp.Errors[0].Code)
 		}
 		log.WithFields(map[string]interface{}{
-			"account_id": accountID,
-			"status_code": resp.StatusCode,
+			"account_id":    accountID,
+			"status_code":   resp.StatusCode,
 			"response_body": string(body),
 		}).Error("R2 启用检查失败")
 		return fmt.Errorf("检查 R2 状态失败 (状态码: %d): %s", resp.StatusCode, string(body))
@@ -94,7 +94,7 @@ func (s *R2APIService) EnableR2(accountID string) error {
 // CreateBucket 创建 R2 存储桶
 func (s *R2APIService) CreateBucket(accountID, bucketName, location string) error {
 	log := logger.GetLogger()
-	
+
 	payload := map[string]interface{}{
 		"name": bucketName,
 	}
@@ -140,10 +140,10 @@ func (s *R2APIService) CreateBucket(accountID, bucketName, location string) erro
 		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
 			errorMsg := errorResp.Errors[0].Message
 			log.WithFields(map[string]interface{}{
-				"account_id": accountID,
-				"bucket_name": bucketName,
-				"status_code": resp.StatusCode,
-				"error_code": errorResp.Errors[0].Code,
+				"account_id":    accountID,
+				"bucket_name":   bucketName,
+				"status_code":   resp.StatusCode,
+				"error_code":    errorResp.Errors[0].Code,
 				"error_message": errorMsg,
 			}).Error("创建存储桶失败")
 			if resp.StatusCode == http.StatusConflict {
@@ -155,9 +155,9 @@ func (s *R2APIService) CreateBucket(accountID, bucketName, location string) erro
 			return fmt.Errorf("创建存储桶失败: %s (错误代码: %d)", errorMsg, errorResp.Errors[0].Code)
 		}
 		log.WithFields(map[string]interface{}{
-			"account_id": accountID,
-			"bucket_name": bucketName,
-			"status_code": resp.StatusCode,
+			"account_id":    accountID,
+			"bucket_name":   bucketName,
+			"status_code":   resp.StatusCode,
 			"response_body": string(body),
 		}).Error("创建存储桶失败")
 		return fmt.Errorf("创建存储桶失败 (状态码: %d): %s", resp.StatusCode, string(body))
@@ -173,7 +173,7 @@ func (s *R2APIService) CreateBucket(accountID, bucketName, location string) erro
 // ConfigureCORS 配置 CORS
 func (s *R2APIService) ConfigureCORS(accountID, bucketName string, corsConfig []map[string]interface{}) error {
 	log := logger.GetLogger()
-	
+
 	payload := map[string]interface{}{
 		"cors": corsConfig,
 	}
@@ -229,7 +229,7 @@ func (s *R2APIService) ConfigureCORS(accountID, bucketName string, corsConfig []
 // AddCustomDomain 添加自定义域名
 func (s *R2APIService) AddCustomDomain(accountID, bucketName, domain string) (string, error) {
 	log := logger.GetLogger()
-	
+
 	payload := map[string]interface{}{
 		"domain": domain,
 	}
@@ -307,14 +307,14 @@ func (s *R2APIService) AddCustomDomain(accountID, bucketName, domain string) (st
 // CreateCacheRule 创建缓存规则
 func (s *R2APIService) CreateCacheRule(zoneID, ruleName, expression, cacheStatus, edgeTTL, browserTTL string) (string, error) {
 	log := logger.GetLogger()
-	
+
 	payload := map[string]interface{}{
 		"name":       ruleName,
 		"expression": expression,
 		"action": map[string]interface{}{
 			"cache": map[string]interface{}{
-				"status":     cacheStatus,
-				"edge_ttl":   map[string]interface{}{"mode": "override", "value": edgeTTL},
+				"status":      cacheStatus,
+				"edge_ttl":    map[string]interface{}{"mode": "override", "value": edgeTTL},
 				"browser_ttl": map[string]interface{}{"mode": "override", "value": browserTTL},
 			},
 		},
@@ -338,7 +338,7 @@ func (s *R2APIService) CreateCacheRule(zoneID, ruleName, expression, cacheStatus
 	resp, err := s.client.Do(req)
 	if err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
-			"zone_id":  zoneID,
+			"zone_id":   zoneID,
 			"rule_name": ruleName,
 		}).Error("创建缓存规则失败")
 		return "", fmt.Errorf("请求失败: %w", err)
@@ -385,94 +385,4 @@ func (s *R2APIService) CreateCacheRule(zoneID, ruleName, expression, cacheStatus
 		"rule_id":   result.Result.ID,
 	}).Info("缓存规则创建成功")
 	return result.Result.ID, nil
-}
-
-// GetAccountID 获取账户 ID（通过 API Token）
-func (s *R2APIService) GetAccountID() (string, error) {
-	url := "https://api.cloudflare.com/client/v4/user/tokens/verify"
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %w", err)
-	}
-
-	for k, v := range s.getAuthHeaders() {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("验证 Token 失败 (状态码: %d): %s", resp.StatusCode, string(body))
-	}
-
-	var result struct {
-		Success bool `json:"success"`
-		Result  struct {
-			ID       string `json:"id"`
-			Status   string `json:"status"`
-			NotBefore string `json:"not_before"`
-			ExpiresOn string `json:"expires_on"`
-		} `json:"result"`
-	}
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("解析响应失败: %w", err)
-	}
-
-	if !result.Success {
-		return "", fmt.Errorf("验证 Token 失败")
-	}
-
-	// 获取账户列表
-	accountsURL := "https://api.cloudflare.com/client/v4/accounts"
-	accountsReq, err := http.NewRequest("GET", accountsURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %w", err)
-	}
-
-	for k, v := range s.getAuthHeaders() {
-		accountsReq.Header.Set(k, v)
-	}
-
-	accountsResp, err := s.client.Do(accountsReq)
-	if err != nil {
-		return "", fmt.Errorf("请求失败: %w", err)
-	}
-	defer accountsResp.Body.Close()
-
-	accountsBody, err := io.ReadAll(accountsResp.Body)
-	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %w", err)
-	}
-
-	if accountsResp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("获取账户列表失败 (状态码: %d): %s", accountsResp.StatusCode, string(accountsBody))
-	}
-
-	var accountsResult struct {
-		Success bool `json:"success"`
-		Result  []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		} `json:"result"`
-	}
-
-	if err := json.Unmarshal(accountsBody, &accountsResult); err != nil {
-		return "", fmt.Errorf("解析响应失败: %w", err)
-	}
-
-	if !accountsResult.Success || len(accountsResult.Result) == 0 {
-		return "", fmt.Errorf("未找到账户")
-	}
-
-	return accountsResult.Result[0].ID, nil
 }
