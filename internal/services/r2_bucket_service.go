@@ -106,6 +106,30 @@ func (s *R2BucketService) CreateR2Bucket(cfAccountID uint, bucketName, location,
 		return nil, fmt.Errorf("保存存储桶信息失败: %w", err)
 	}
 
+	// 自动配置 CORS
+	defaultCORSConfig := []map[string]interface{}{
+		{
+			"allowed": map[string]interface{}{
+				"origins": []string{"*"},
+				"methods": []string{"GET", "HEAD", "PUT", "POST", "DELETE"},
+				"headers": []string{"*"},
+			},
+			"exposeHeaders": []string{"ETag", "Content-Length", "Content-Type"},
+			"maxAgeSeconds": 3600,
+			"id":            "rule-0",
+		},
+	}
+
+	// 尝试配置 CORS，如果失败只记录警告，不影响 bucket 创建
+	if err := s.ConfigureCORS(bucket.ID, defaultCORSConfig); err != nil {
+		log := logger.GetLogger()
+		log.WithError(err).WithFields(map[string]interface{}{
+			"bucket_id":   bucket.ID,
+			"bucket_name": bucketName,
+		}).Warn("自动配置 CORS 失败，但存储桶已创建成功")
+		// 不返回错误，因为 bucket 已经创建成功
+	}
+
 	return bucket, nil
 }
 
