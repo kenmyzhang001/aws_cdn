@@ -129,7 +129,7 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 	}
 
 	// 添加自定义域名（enabled 默认为 true）
-	domainID, err := r2API.AddCustomDomain(accountID, bucket.BucketName, domain, zoneID, true)
+	domainID, err := cloudflareSvc.AddCustomDomain(accountID, bucket.BucketName, domain, zoneID, true)
 	if err != nil {
 		return nil, fmt.Errorf("添加自定义域名失败: %w", err)
 	}
