@@ -38,7 +38,7 @@ func NewR2S3Service(cfg *R2S3Config) (*R2S3Service, error) {
 
 	// 创建 AWS session（使用 R2 的 S3 兼容端点）
 	sess, err := session.NewSession(&aws.Config{
-		Region:      aws.String("auto"), // R2 使用 "auto" 作为区域
+		Region: aws.String("auto"), // R2 使用 "auto" 作为区域
 		Credentials: credentials.NewStaticCredentials(
 			cfg.AccessKeyID,
 			cfg.SecretAccessKey,
@@ -94,7 +94,7 @@ func (s *R2S3Service) UploadFile(key string, body io.ReadSeeker, contentType str
 // CreateDirectory 创建目录（实际上是在 R2 中创建一个空对象，以 "/" 结尾）
 func (s *R2S3Service) CreateDirectory(prefix string) error {
 	log := logger.GetLogger()
-	
+
 	// 确保前缀以 "/" 结尾
 	if !strings.HasSuffix(prefix, "/") {
 		prefix = prefix + "/"
@@ -149,7 +149,14 @@ func (s *R2S3Service) ListFiles(prefix string) ([]string, error) {
 		log.WithError(err).WithFields(map[string]interface{}{
 			"bucket_name": s.bucketName,
 			"prefix":      prefix,
+			"account_id":  s.accountID,
 		}).Error("列出 R2 文件失败")
+
+		// 提供更详细的错误信息
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "Unauthorized") || strings.Contains(errMsg, "401") {
+			return nil, fmt.Errorf("认证失败: R2 Access Key ID 或 Secret Access Key 无效。请检查：1) Access Key ID 和 Secret Access Key 是否正确 2) 是否在 Cloudflare Dashboard → R2 → Manage R2 API Tokens 中创建了正确的 Token 3) Token 权限是否包含该存储桶的读写权限。原始错误: %w", err)
+		}
 		return nil, fmt.Errorf("列出文件失败: %w", err)
 	}
 

@@ -10,13 +10,13 @@ import (
 )
 
 type R2FileService struct {
-	db              *gorm.DB
+	db               *gorm.DB
 	cfAccountService *CFAccountService
 }
 
 func NewR2FileService(db *gorm.DB, cfAccountService *CFAccountService) *R2FileService {
 	return &R2FileService{
-		db:              db,
+		db:               db,
 		cfAccountService: cfAccountService,
 	}
 }
@@ -34,7 +34,7 @@ func (s *R2FileService) getR2S3Service(bucket *models.R2Bucket) (*cloudflare.R2S
 	r2SecretAccessKey := s.cfAccountService.GetR2SecretAccessKey(cfAccount)
 
 	if r2AccessKeyID == "" || r2SecretAccessKey == "" {
-		return nil, fmt.Errorf("CF 账号未配置 R2 Access Key 和 Secret Key，请在 CF 账号设置中配置")
+		return nil, fmt.Errorf("CF 账号未配置 R2 Access Key 和 Secret Key。请在 CF 账号管理中配置：1) 进入 Cloudflare Dashboard → R2 → Manage R2 API Tokens 2) 创建 API Token（选择 Read and Write 权限）3) 将 Access Key ID 和 Secret Access Key 填入 CF 账号设置")
 	}
 
 	// 获取 Account ID（优先使用账号中的 Account ID）
