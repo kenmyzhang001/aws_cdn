@@ -166,7 +166,22 @@ func (s *R2S3Service) ListFiles(prefix string) ([]string, error) {
 	log.WithFields(map[string]interface{}{
 		"bucket_name": s.bucketName,
 		"prefix":      prefix,
+		"account_id":  s.accountID,
+		"endpoint":    fmt.Sprintf("https://%s.r2.cloudflarestorage.com", s.accountID),
 	}).Info("开始列出 R2 文件")
+
+	// 先尝试 HeadBucket 来验证认证和权限
+	headInput := &s3.HeadBucketInput{
+		Bucket: aws.String(s.bucketName),
+	}
+	_, headErr := s.client.HeadBucket(headInput)
+	if headErr != nil {
+		log.WithError(headErr).WithFields(map[string]interface{}{
+			"bucket_name": s.bucketName,
+			"account_id":  s.accountID,
+		}).Error("HeadBucket 验证失败")
+		// 不直接返回，继续尝试 ListObjectsV2
+	}
 
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(s.bucketName),
@@ -174,6 +189,12 @@ func (s *R2S3Service) ListFiles(prefix string) ([]string, error) {
 	if prefix != "" {
 		input.Prefix = aws.String(prefix)
 	}
+
+	log.WithFields(map[string]interface{}{
+		"bucket_name": s.bucketName,
+		"prefix":      prefix,
+		"max_keys":    aws.Int64Value(input.MaxKeys),
+	}).Debug("准备调用 ListObjectsV2")
 
 	result, err := s.client.ListObjectsV2(input)
 	if err != nil {
