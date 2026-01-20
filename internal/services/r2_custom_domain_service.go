@@ -88,8 +88,6 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 	}
 
 	// 创建 R2 API 服务
-	r2API := cloudflare.NewR2APIService(r2APIToken)
-
 	accountID := cfAccount.AccountID
 
 	// 根据 CF 账号信息创建 CloudflareService
