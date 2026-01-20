@@ -13,7 +13,8 @@
 
       <el-table :data="accountList" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="email" label="账号邮箱" />
+        <el-table-column prop="email" label="账号邮箱"  width="200"/>
+        <el-table-column prop="account_id" label="Account ID" width="200" />
         <el-table-column prop="note" label="备注" show-overflow-tooltip />
         <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">
@@ -60,6 +61,15 @@
             placeholder="请输入 Cloudflare API Token（可选）"
           />
         </el-form-item>
+        <el-form-item label="Account ID">
+          <el-input
+            v-model="createForm.account_id"
+            placeholder="请输入 Cloudflare Account ID（可选）"
+          />
+          <div style="font-size: 12px; color: #909399; margin-top: 5px">
+            可在 Cloudflare Dashboard 右侧边栏找到 Account ID
+          </div>
+        </el-form-item>
         <el-form-item label="备注">
           <el-input
             v-model="createForm.note"
@@ -98,6 +108,15 @@
             :rows="3"
             placeholder="留空则不修改 API Token"
           />
+        </el-form-item>
+        <el-form-item label="Account ID">
+          <el-input
+            v-model="editForm.account_id"
+            placeholder="留空则不修改 Account ID"
+          />
+          <div style="font-size: 12px; color: #909399; margin-top: 5px">
+            可在 Cloudflare Dashboard 右侧边栏找到 Account ID
+          </div>
         </el-form-item>
         <el-form-item label="备注">
           <el-input
@@ -144,6 +163,7 @@ const editForm = ref({
   email: '',
   password: '',
   api_token: '',
+  account_id: '',
   note: '',
 })
 const editFormRef = ref(null)
@@ -187,6 +207,7 @@ const resetCreateForm = () => {
     email: '',
     password: '',
     api_token: '',
+    account_id: '',
     note: '',
   }
   if (createFormRef.value) {
@@ -200,6 +221,7 @@ const resetEditForm = () => {
     email: '',
     password: '',
     api_token: '',
+    account_id: '',
     note: '',
   }
   if (editFormRef.value) {
@@ -233,6 +255,7 @@ const editAccount = (row) => {
     email: row.email,
     password: '',
     api_token: '',
+    account_id: row.account_id || '',
     note: row.note || '',
   }
   showEditDialog.value = true
@@ -259,6 +282,11 @@ const handleUpdate = async () => {
       // 只有填写了 API Token 才更新
       if (editForm.value.api_token) {
         updateData.api_token = editForm.value.api_token
+      }
+
+      // 只有填写了 Account ID 才更新
+      if (editForm.value.account_id !== undefined) {
+        updateData.account_id = editForm.value.account_id
       }
 
       await cfAccountApi.updateCFAccount(editForm.value.id, updateData)

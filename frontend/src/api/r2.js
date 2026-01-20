@@ -27,10 +27,11 @@ export const r2Api = {
     return request.put(`/r2-buckets/${id}/note`, { note })
   },
 
-  updateR2BucketCredentials(id, accessKeyID, secretAccessKey) {
+  updateR2BucketCredentials(id, accessKeyID, secretAccessKey, accountID = '') {
     return request.put(`/r2-buckets/${id}/credentials`, {
       access_key_id: accessKeyID,
       secret_access_key: secretAccessKey,
+      account_id: accountID,
     })
   },
 

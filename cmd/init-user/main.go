@@ -105,7 +105,7 @@ func main() {
 		isTwoFactorEnabled = true
 		// 生成 TOTP 密钥
 		key, err := totp.Generate(totp.GenerateOpts{
-			Issuer:      "AWS CDN 管理平台",
+			Issuer:      "CDN 管理平台",
 			AccountName: username,
 		})
 		if err != nil {

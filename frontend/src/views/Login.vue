@@ -3,7 +3,7 @@
     <el-card class="login-card">
       <template #header>
         <div class="card-header">
-          <h2>AWS CDN 管理平台</h2>
+          <h2>CDN 管理平台</h2>
           <p>请登录您的账户</p>
         </div>
       </template>

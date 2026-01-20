@@ -60,6 +60,12 @@
             />
           </el-select>
         </el-form-item>
+        <el-form-item label="Account ID">
+          <el-input v-model="createForm.account_id" placeholder="请输入 Cloudflare Account ID（可选，会自动尝试获取）" />
+          <div style="font-size: 12px; color: #909399; margin-top: 5px">
+            可在 Cloudflare Dashboard 右侧边栏找到 Account ID。如果 API Token 无效，建议手动输入
+          </div>
+        </el-form-item>
         <el-form-item label="存储桶名称" prop="bucket_name">
           <el-input v-model="createForm.bucket_name" placeholder="请输入存储桶名称（小写字母、数字、连字符）" />
         </el-form-item>
@@ -171,6 +177,15 @@
         </template>
       </el-alert>
       <el-form :model="credentialsForm" :rules="credentialsFormRules" ref="credentialsFormRef" label-width="140px">
+        <el-form-item label="Account ID">
+          <el-input
+            v-model="credentialsForm.account_id"
+            placeholder="请输入 Cloudflare Account ID（可选，会自动尝试获取）"
+          />
+          <div style="font-size: 12px; color: #909399; margin-top: 5px">
+            可在 Cloudflare Dashboard 右侧边栏找到 Account ID
+          </div>
+        </el-form-item>
         <el-form-item label="Access Key ID" prop="access_key_id">
           <el-input
             v-model="credentialsForm.access_key_id"
@@ -215,6 +230,7 @@ const showCreateDialog = ref(false)
 const createLoading = ref(false)
 const createForm = ref({
   cf_account_id: null,
+  account_id: '',
   bucket_name: '',
   location: '',
   note: '',
@@ -254,6 +270,7 @@ const showCredentialsDialog = ref(false)
 const credentialsLoading = ref(false)
 const credentialsForm = ref({
   bucketId: null,
+  account_id: '',
   access_key_id: '',
   secret_access_key: '',
 })
@@ -308,6 +325,7 @@ const loadCFAccounts = async () => {
 const resetCreateForm = () => {
   createForm.value = {
     cf_account_id: null,
+    account_id: '',
     bucket_name: '',
     location: '',
     note: '',
@@ -411,6 +429,7 @@ const closeFileDialog = () => {
 const configureCredentials = (row) => {
   credentialsForm.value = {
     bucketId: row.id,
+    account_id: row.account_id || '',
     access_key_id: '',
     secret_access_key: '',
   }
@@ -420,6 +439,7 @@ const configureCredentials = (row) => {
 const resetCredentialsForm = () => {
   credentialsForm.value = {
     bucketId: null,
+    account_id: '',
     access_key_id: '',
     secret_access_key: '',
   }
@@ -439,7 +459,8 @@ const handleUpdateCredentials = async () => {
       await r2Api.updateR2BucketCredentials(
         credentialsForm.value.bucketId,
         credentialsForm.value.access_key_id,
-        credentialsForm.value.secret_access_key
+        credentialsForm.value.secret_access_key,
+        credentialsForm.value.account_id
       )
       ElMessage.success('凭证配置成功')
       showCredentialsDialog.value = false
