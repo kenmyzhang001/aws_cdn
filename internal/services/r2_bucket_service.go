@@ -1,6 +1,8 @@
 package services
 
 import (
+	"aws_cdn/internal/config"
+	"aws_cdn/internal/logger"
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/cloudflare"
 	"fmt"
@@ -202,19 +204,21 @@ func (s *R2BucketService) ConfigureCORS(id uint, corsConfig []map[string]interfa
 		return err
 	}
 
-	// 获取 R2 API Token（优先使用 R2APIToken，如果没有则使用 APIToken）
-	r2APIToken := s.cfAccountService.GetR2APIToken(cfAccount)
-	if r2APIToken == "" {
-		return fmt.Errorf("Cloudflare账号未配置 R2 API Token 或 API Token")
+	cfg := &config.CloudflareConfig{
+		APIToken: cfAccount.APIToken,
 	}
-
-	// 创建 R2 API 服务
-	r2API := cloudflare.NewR2APIService(r2APIToken)
+	// 初始化 Cloudflare 服务
+	cloudflareSvc, err := cloudflare.NewCloudflareService(cfg)
+	if err != nil {
+		log := logger.GetLogger()
+		log.WithError(err).Warn("Cloudflare服务初始化失败，Cloudflare功能将不可用")
+		cloudflareSvc = nil
+	}
 
 	accountID := cfAccount.AccountID
 
 	// 配置 CORS
-	if err := r2API.ConfigureCORS(accountID, bucket.BucketName, corsConfig); err != nil {
+	if err := cloudflareSvc.ConfigureCORS(accountID, bucket.BucketName, corsConfig); err != nil {
 		return fmt.Errorf("配置CORS失败: %w", err)
 	}
 

@@ -170,62 +170,6 @@ func (s *R2APIService) CreateBucket(accountID, bucketName, location string) erro
 	return nil
 }
 
-// ConfigureCORS 配置 CORS
-func (s *R2APIService) ConfigureCORS(accountID, bucketName string, corsConfig []map[string]interface{}) error {
-	log := logger.GetLogger()
-
-	payload := map[string]interface{}{
-		"cors": corsConfig,
-	}
-
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("序列化请求失败: %w", err)
-	}
-
-	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/r2/buckets/%s/cors", accountID, bucketName)
-	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return fmt.Errorf("创建请求失败: %w", err)
-	}
-
-	for k, v := range s.getAuthHeaders() {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		log.WithError(err).WithField("bucket_name", bucketName).Error("配置 CORS 失败")
-		return fmt.Errorf("请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("读取响应失败: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errorResp struct {
-			Success bool `json:"success"`
-			Errors  []struct {
-				Message string `json:"message"`
-				Code    int    `json:"code"`
-			} `json:"errors"`
-		}
-		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
-			return fmt.Errorf("配置 CORS 失败: %s", errorResp.Errors[0].Message)
-		}
-		return fmt.Errorf("配置 CORS 失败 (状态码: %d): %s", resp.StatusCode, string(body))
-	}
-
-	log.WithFields(map[string]interface{}{
-		"account_id":  accountID,
-		"bucket_name": bucketName,
-	}).Info("CORS 配置成功")
-	return nil
-}
-
 // CreateCacheRule 创建缓存规则
 func (s *R2APIService) CreateCacheRule(zoneID, ruleName, expression, cacheStatus, edgeTTL, browserTTL string) (string, error) {
 	log := logger.GetLogger()

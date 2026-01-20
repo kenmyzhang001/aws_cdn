@@ -52,7 +52,6 @@
       <el-table :data="domainList" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="domain_name" label="域名" width="200" />
-        <el-table-column prop="registrar" label="原注册商" />
         <el-table-column prop="dns_provider" label="DNS提供商" width="120">
           <template #default="{ row }">
             <el-tag :type="row.dns_provider === 'cloudflare' ? 'success' : 'primary'">
