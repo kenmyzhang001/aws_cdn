@@ -239,7 +239,15 @@ func (s *R2APIService) AddCustomDomain(accountID, bucketName, domain string) (st
 		return "", fmt.Errorf("序列化请求失败: %w", err)
 	}
 
-	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/r2/buckets/%s/domains", accountID, bucketName)
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/r2/buckets/%s/custom_domains", accountID, bucketName)
+
+	log.WithFields(map[string]interface{}{
+		"account_id":  accountID,
+		"bucket_name": bucketName,
+		"domain":      domain,
+		"url":         url,
+	}).Info("准备添加 R2 自定义域名")
+
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("创建请求失败: %w", err)
@@ -252,9 +260,11 @@ func (s *R2APIService) AddCustomDomain(accountID, bucketName, domain string) (st
 	resp, err := s.client.Do(req)
 	if err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
+			"account_id":  accountID,
 			"bucket_name": bucketName,
 			"domain":      domain,
-		}).Error("添加自定义域名失败")
+			"url":         url,
+		}).Error("添加自定义域名失败：请求失败")
 		return "", fmt.Errorf("请求失败: %w", err)
 	}
 	defer resp.Body.Close()
@@ -264,7 +274,7 @@ func (s *R2APIService) AddCustomDomain(accountID, bucketName, domain string) (st
 		return "", fmt.Errorf("读取响应失败: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		var errorResp struct {
 			Success bool `json:"success"`
 			Errors  []struct {
@@ -273,8 +283,26 @@ func (s *R2APIService) AddCustomDomain(accountID, bucketName, domain string) (st
 			} `json:"errors"`
 		}
 		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
-			return "", fmt.Errorf("添加自定义域名失败: %s", errorResp.Errors[0].Message)
+			log.WithFields(map[string]interface{}{
+				"account_id":    accountID,
+				"bucket_name":   bucketName,
+				"domain":        domain,
+				"url":           url,
+				"status_code":   resp.StatusCode,
+				"error_code":    errorResp.Errors[0].Code,
+				"error_message": errorResp.Errors[0].Message,
+				"response_body": string(body),
+			}).Error("添加自定义域名失败：API 返回错误")
+			return "", fmt.Errorf("添加自定义域名失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
 		}
+		log.WithFields(map[string]interface{}{
+			"account_id":    accountID,
+			"bucket_name":   bucketName,
+			"domain":        domain,
+			"url":           url,
+			"status_code":   resp.StatusCode,
+			"response_body": string(body),
+		}).Error("添加自定义域名失败：非预期状态码")
 		return "", fmt.Errorf("添加自定义域名失败 (状态码: %d): %s", resp.StatusCode, string(body))
 	}
 
