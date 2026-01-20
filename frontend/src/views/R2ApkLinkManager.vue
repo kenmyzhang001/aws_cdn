@@ -3,7 +3,7 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>APK 链接管理</span>
+          <span>下载包管理</span>
           <div style="display: flex; gap: 10px; align-items: center">
             <el-select
               v-model="selectedBucketId"
