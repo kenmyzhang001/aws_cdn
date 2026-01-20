@@ -38,10 +38,10 @@ func main() {
 		log.WithError(err).Fatal("数据库初始化失败")
 	}
 
-	// 自动迁移数据库
-	if err := database.AutoMigrate(db); err != nil {
-		log.WithError(err).Fatal("数据库迁移失败")
-	}
+	//// 自动迁移数据库
+	//if err := database.AutoMigrate(db); err != nil {
+	//	log.WithError(err).Fatal("数据库迁移失败")
+	//}
 
 	// 初始化 Telegram 服务
 	botToken := "7366631415:AAGQm8flfcjfrYDv5ZawwebczZqNSg_nbqo"
@@ -61,7 +61,7 @@ func main() {
 
 	// 初始化并启动定时任务服务
 	schedulerService := services.NewSchedulerService()
-	
+
 	// 添加 URL 检查任务（每10分钟检查一次）
 	schedulerService.AddTask("URL检查", func() error {
 		return urlCheckerService.CheckDownloadURLs()
