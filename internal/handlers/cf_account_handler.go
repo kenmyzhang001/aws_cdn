@@ -57,6 +57,7 @@ func (h *CFAccountHandler) CreateCFAccount(c *gin.Context) {
 		Email             string `json:"email" binding:"required,email"`
 		Password          string `json:"password" binding:"required"`
 		APIToken          string `json:"api_token"`
+		R2APIToken        string `json:"r2_api_token"`
 		AccountID         string `json:"account_id"`
 		R2AccessKeyID     string `json:"r2_access_key_id"`
 		R2SecretAccessKey string `json:"r2_secret_access_key"`
@@ -71,7 +72,7 @@ func (h *CFAccountHandler) CreateCFAccount(c *gin.Context) {
 		return
 	}
 
-	account, err := h.service.CreateCFAccount(req.Email, req.Password, req.APIToken, req.AccountID, req.R2AccessKeyID, req.R2SecretAccessKey, req.Note)
+	account, err := h.service.CreateCFAccount(req.Email, req.Password, req.APIToken, req.R2APIToken, req.AccountID, req.R2AccessKeyID, req.R2SecretAccessKey, req.Note)
 	if err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
 			"email": req.Email,
@@ -101,6 +102,7 @@ func (h *CFAccountHandler) UpdateCFAccount(c *gin.Context) {
 		Email             *string `json:"email"`
 		Password          *string `json:"password"`
 		APIToken          *string `json:"api_token"`
+		R2APIToken        *string `json:"r2_api_token"`
 		AccountID         *string `json:"account_id"`
 		R2AccessKeyID     *string `json:"r2_access_key_id"`
 		R2SecretAccessKey *string `json:"r2_secret_access_key"`
@@ -126,7 +128,7 @@ func (h *CFAccountHandler) UpdateCFAccount(c *gin.Context) {
 		}
 	}
 
-	account, err := h.service.UpdateCFAccount(uint(id), req.Email, req.Password, req.APIToken, req.AccountID, req.R2AccessKeyID, req.R2SecretAccessKey, req.Note)
+	account, err := h.service.UpdateCFAccount(uint(id), req.Email, req.Password, req.APIToken, req.R2APIToken, req.AccountID, req.R2AccessKeyID, req.R2SecretAccessKey, req.Note)
 	if err != nil {
 		log.WithError(err).WithField("account_id", id).Error("更新Cloudflare账号操作失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

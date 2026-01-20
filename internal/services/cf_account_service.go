@@ -35,7 +35,7 @@ func (s *CFAccountService) GetCFAccount(id uint) (*models.CFAccount, error) {
 }
 
 // CreateCFAccount 创建 Cloudflare 账号
-func (s *CFAccountService) CreateCFAccount(email, password, apiToken, accountID, r2AccessKeyID, r2SecretAccessKey, note string) (*models.CFAccount, error) {
+func (s *CFAccountService) CreateCFAccount(email, password, apiToken, r2APIToken, accountID, r2AccessKeyID, r2SecretAccessKey, note string) (*models.CFAccount, error) {
 	// 检查邮箱是否已存在
 	var existingAccount models.CFAccount
 	if err := s.db.Where("email = ?", email).First(&existingAccount).Error; err == nil {
@@ -53,7 +53,8 @@ func (s *CFAccountService) CreateCFAccount(email, password, apiToken, accountID,
 	account := &models.CFAccount{
 		Email:             email,
 		Password:          string(hashedPassword),
-		APIToken:          apiToken, // 暂时明文存储，后续可以改进为加密存储
+		APIToken:          apiToken,   // Cloudflare API Token（暂时明文存储，后续可以改进为加密存储）
+		R2APIToken:        r2APIToken, // R2 API Token（暂时明文存储，后续可以改进为加密存储）
 		AccountID:         accountID,
 		R2AccessKeyID:     r2AccessKeyID,     // R2 Access Key ID（账号维度）
 		R2SecretAccessKey: r2SecretAccessKey, // R2 Secret Access Key（账号维度）
@@ -68,7 +69,7 @@ func (s *CFAccountService) CreateCFAccount(email, password, apiToken, accountID,
 }
 
 // UpdateCFAccount 更新 Cloudflare 账号
-func (s *CFAccountService) UpdateCFAccount(id uint, email, password, apiToken, accountID, r2AccessKeyID, r2SecretAccessKey, note *string) (*models.CFAccount, error) {
+func (s *CFAccountService) UpdateCFAccount(id uint, email, password, apiToken, r2APIToken, accountID, r2AccessKeyID, r2SecretAccessKey, note *string) (*models.CFAccount, error) {
 	account, err := s.GetCFAccount(id)
 	if err != nil {
 		return nil, err
@@ -97,6 +98,11 @@ func (s *CFAccountService) UpdateCFAccount(id uint, email, password, apiToken, a
 	// 如果更新 API Token（只有非空字符串才更新）
 	if apiToken != nil && *apiToken != "" {
 		account.APIToken = *apiToken // 暂时明文存储，后续可以改进为加密存储
+	}
+
+	// 如果更新 R2 API Token（只有非空字符串才更新）
+	if r2APIToken != nil && *r2APIToken != "" {
+		account.R2APIToken = *r2APIToken // 暂时明文存储，后续可以改进为加密存储
 	}
 
 	// 如果更新 Account ID
@@ -156,10 +162,20 @@ func (s *CFAccountService) VerifyPassword(account *models.CFAccount, password st
 	return err == nil
 }
 
-// GetAPIToken 获取 API Token（解密后返回）
+// GetAPIToken 获取 Cloudflare API Token（解密后返回）
 func (s *CFAccountService) GetAPIToken(account *models.CFAccount) string {
 	// 暂时直接返回，后续可以改进为解密
 	return account.APIToken
+}
+
+// GetR2APIToken 获取 R2 API Token（解密后返回）
+func (s *CFAccountService) GetR2APIToken(account *models.CFAccount) string {
+	// 暂时直接返回，后续可以改进为解密
+	// 如果 R2APIToken 为空，使用 APIToken（向后兼容）
+	if account.R2APIToken == "" {
+		return account.APIToken
+	}
+	return account.R2APIToken
 }
 
 // GetR2AccessKeyID 获取 R2 Access Key ID

@@ -58,7 +58,15 @@
             v-model="createForm.api_token"
             type="textarea"
             :rows="3"
-            placeholder="请输入 Cloudflare API Token（可选）"
+            placeholder="请输入 Cloudflare API Token（用于管理 R2 存储桶、自定义域名等，可选）"
+          />
+        </el-form-item>
+        <el-form-item label="R2 API Token">
+          <el-input
+            v-model="createForm.r2_api_token"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入 R2 API Token（用于 R2 API 操作，可选，如未配置将使用 API Token）"
           />
         </el-form-item>
         <el-form-item label="Account ID">
@@ -131,6 +139,14 @@
             placeholder="留空则不修改 API Token"
           />
         </el-form-item>
+        <el-form-item label="R2 API Token">
+          <el-input
+            v-model="editForm.r2_api_token"
+            type="textarea"
+            :rows="3"
+            placeholder="留空则不修改 R2 API Token"
+          />
+        </el-form-item>
         <el-form-item label="Account ID">
           <el-input
             v-model="editForm.account_id"
@@ -196,6 +212,10 @@ const createForm = ref({
   email: '',
   password: '',
   api_token: '',
+  r2_api_token: '',
+  account_id: '',
+  r2_access_key_id: '',
+  r2_secret_access_key: '',
   note: '',
 })
 const createFormRef = ref(null)
@@ -207,6 +227,7 @@ const editForm = ref({
   email: '',
   password: '',
   api_token: '',
+  r2_api_token: '',
   account_id: '',
   r2_access_key_id: '',
   r2_secret_access_key: '',
@@ -253,6 +274,7 @@ const resetCreateForm = () => {
     email: '',
     password: '',
     api_token: '',
+    r2_api_token: '',
     account_id: '',
     r2_access_key_id: '',
     r2_secret_access_key: '',
@@ -269,6 +291,7 @@ const resetEditForm = () => {
     email: '',
     password: '',
     api_token: '',
+    r2_api_token: '',
     account_id: '',
     r2_access_key_id: '',
     r2_secret_access_key: '',
@@ -305,6 +328,7 @@ const editAccount = (row) => {
     email: row.email,
     password: '',
     api_token: '',
+    r2_api_token: '',
     account_id: row.account_id || '',
     r2_access_key_id: '',
     r2_secret_access_key: '',
@@ -334,6 +358,11 @@ const handleUpdate = async () => {
       // 只有填写了 API Token 才更新
       if (editForm.value.api_token) {
         updateData.api_token = editForm.value.api_token
+      }
+
+      // 只有填写了 R2 API Token 才更新
+      if (editForm.value.r2_api_token) {
+        updateData.r2_api_token = editForm.value.r2_api_token
       }
 
       // 只有填写了 Account ID 才更新

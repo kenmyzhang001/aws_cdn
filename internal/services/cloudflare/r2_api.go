@@ -12,14 +12,14 @@ import (
 
 // R2APIService Cloudflare R2 API 服务（用于管理 R2 存储桶、自定义域名、缓存规则等）
 type R2APIService struct {
-	apiToken string
-	client   *http.Client
+	R2APIToken string
+	client     *http.Client
 }
 
 // NewR2APIService 创建 R2 API 服务
-func NewR2APIService(apiToken string) *R2APIService {
+func NewR2APIService(R2APIToken string) *R2APIService {
 	return &R2APIService{
-		apiToken: apiToken,
+		R2APIToken: R2APIToken,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -29,7 +29,7 @@ func NewR2APIService(apiToken string) *R2APIService {
 // getAuthHeaders 获取认证头
 func (s *R2APIService) getAuthHeaders() map[string]string {
 	return map[string]string{
-		"Authorization": "Bearer " + s.apiToken,
+		"Authorization": "Bearer " + s.R2APIToken,
 		"Content-Type":  "application/json",
 	}
 }

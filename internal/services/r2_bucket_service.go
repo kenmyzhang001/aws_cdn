@@ -47,14 +47,14 @@ func (s *R2BucketService) EnableR2(cfAccountID uint) error {
 		return err
 	}
 
-	// 获取 API Token
-	apiToken := s.cfAccountService.GetAPIToken(cfAccount)
-	if apiToken == "" {
-		return fmt.Errorf("Cloudflare账号未配置API Token")
+	// 获取 R2 API Token（优先使用 R2APIToken，如果没有则使用 APIToken）
+	r2APIToken := s.cfAccountService.GetR2APIToken(cfAccount)
+	if r2APIToken == "" {
+		return fmt.Errorf("Cloudflare账号未配置 R2 API Token 或 API Token")
 	}
 
 	// 创建 R2 API 服务
-	r2API := cloudflare.NewR2APIService(apiToken)
+	r2API := cloudflare.NewR2APIService(r2APIToken)
 
 	// 获取账户 ID
 	accountID, err := r2API.GetAccountID()
@@ -74,14 +74,14 @@ func (s *R2BucketService) CreateR2Bucket(cfAccountID uint, bucketName, location,
 		return nil, fmt.Errorf("获取 CF 账号失败: %w", err)
 	}
 
-	// 获取 API Token（从 CF 账号获取）
-	apiToken := s.cfAccountService.GetAPIToken(cfAccount)
-	if apiToken == "" {
-		return nil, fmt.Errorf("Cloudflare账号未配置API Token，请在 CF 账号管理中配置 API Token")
+	// 获取 R2 API Token（优先使用 R2APIToken，如果没有则使用 APIToken）
+	r2APIToken := s.cfAccountService.GetR2APIToken(cfAccount)
+	if r2APIToken == "" {
+		return nil, fmt.Errorf("Cloudflare账号未配置 R2 API Token 或 API Token，请在 CF 账号管理中配置")
 	}
 
 	// 创建 R2 API 服务
-	r2API := cloudflare.NewR2APIService(apiToken)
+	r2API := cloudflare.NewR2APIService(r2APIToken)
 
 	// 优先使用传入的 Account ID，其次使用 CF 账号的 Account ID，最后尝试通过 API Token 获取
 	if accountID == "" {
@@ -210,14 +210,14 @@ func (s *R2BucketService) ConfigureCORS(id uint, corsConfig []map[string]interfa
 		return err
 	}
 
-	// 获取 API Token
-	apiToken := s.cfAccountService.GetAPIToken(cfAccount)
-	if apiToken == "" {
-		return fmt.Errorf("Cloudflare账号未配置API Token")
+	// 获取 R2 API Token（优先使用 R2APIToken，如果没有则使用 APIToken）
+	r2APIToken := s.cfAccountService.GetR2APIToken(cfAccount)
+	if r2APIToken == "" {
+		return fmt.Errorf("Cloudflare账号未配置 R2 API Token 或 API Token")
 	}
 
 	// 创建 R2 API 服务
-	r2API := cloudflare.NewR2APIService(apiToken)
+	r2API := cloudflare.NewR2APIService(r2APIToken)
 
 	// 获取账户 ID
 	accountID, err := r2API.GetAccountID()

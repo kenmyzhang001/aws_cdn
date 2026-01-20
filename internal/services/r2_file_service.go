@@ -105,7 +105,12 @@ func (s *R2FileService) getR2S3Service(bucket *models.R2Bucket) (*cloudflare.R2S
 			"has_api_token": len(apiToken) > 0,
 		}).Info("通过 API Token 获取 Account ID")
 
-		r2API := cloudflare.NewR2APIService(apiToken)
+		// 优先使用 R2APIToken，如果没有则使用 APIToken
+		r2APIToken := s.cfAccountService.GetR2APIToken(cfAccount)
+		if r2APIToken == "" {
+			r2APIToken = apiToken
+		}
+		r2API := cloudflare.NewR2APIService(r2APIToken)
 		var err2 error
 		accountID, err2 = r2API.GetAccountID()
 		if err2 != nil {

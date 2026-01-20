@@ -67,14 +67,14 @@ func (s *R2CacheRuleService) CreateCacheRule(r2CustomDomainID uint, ruleName, ex
 		return nil, err
 	}
 
-	// 获取 API Token
-	apiToken := s.cfAccountService.GetAPIToken(cfAccount)
-	if apiToken == "" {
-		return nil, fmt.Errorf("Cloudflare账号未配置API Token")
+	// 获取 R2 API Token（优先使用 R2APIToken，如果没有则使用 APIToken）
+	r2APIToken := s.cfAccountService.GetR2APIToken(cfAccount)
+	if r2APIToken == "" {
+		return nil, fmt.Errorf("Cloudflare账号未配置 R2 API Token 或 API Token")
 	}
 
 	// 创建 R2 API 服务
-	r2API := cloudflare.NewR2APIService(apiToken)
+	r2API := cloudflare.NewR2APIService(r2APIToken)
 
 	// 创建缓存规则
 	cloudflareRuleID, err := r2API.CreateCacheRule(customDomain.ZoneID, ruleName, expression, cacheStatus, edgeTTL, browserTTL)
