@@ -968,7 +968,7 @@ func (s *CloudflareService) ConfigureCORS(accountID, bucketName string, corsConf
 	log := logger.GetLogger()
 
 	payload := map[string]interface{}{
-		"cors": corsConfig,
+		"rules": corsConfig,
 	}
 
 	jsonData, err := json.Marshal(payload)
