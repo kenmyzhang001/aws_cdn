@@ -13,8 +13,8 @@
 
       <el-table :data="bucketList" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="bucket_name" label="存储桶名称" />
-        <el-table-column prop="cf_account.email" label="CF 账号" />
+        <el-table-column prop="bucket_name" label="存储桶名称" width="200" />
+        <el-table-column prop="cf_account.email" label="CF 账号" width="200"  />
         <el-table-column prop="location" label="存储位置" width="120" />
         <el-table-column prop="note" label="备注" show-overflow-tooltip />
         <el-table-column prop="created_at" label="创建时间" width="180">

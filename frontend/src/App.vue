@@ -13,16 +13,18 @@
           class="sidebar-menu"
           :default-openeds="['aws-cdn', 'cf-cdn']"
         >
+          <!-- 分组管理（一级菜单，AWS 和 CF 共用） -->
+          <el-menu-item index="/groups">
+            <el-icon><Folder /></el-icon>
+            <span>分组管理</span>
+          </el-menu-item>
+
           <!-- AWS-CDN 一级菜单 -->
           <el-sub-menu index="aws-cdn">
             <template #title>
               <el-icon><Connection /></el-icon>
               <span>AWS-CDN</span>
             </template>
-            <el-menu-item index="/groups">
-              <el-icon><Folder /></el-icon>
-              <span>分组管理</span>
-            </el-menu-item>
             <el-menu-item index="/domains">
               <el-icon><Link /></el-icon>
               <span>域名管理</span>

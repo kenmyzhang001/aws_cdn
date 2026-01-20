@@ -121,6 +121,16 @@ func (s *CFAccountService) DeleteCFAccount(id uint) error {
 		return err
 	}
 
+	// 检查是否有关联的 R2 存储桶
+	var bucketCount int64
+	if err := s.db.Model(&models.R2Bucket{}).Where("cf_account_id = ?", id).Count(&bucketCount).Error; err != nil {
+		return fmt.Errorf("检查关联存储桶失败: %w", err)
+	}
+
+	if bucketCount > 0 {
+		return fmt.Errorf("该账号下存在 %d 个 R2 存储桶，请先删除所有存储桶后再删除账号", bucketCount)
+	}
+
 	if err := s.db.Delete(account).Error; err != nil {
 		return fmt.Errorf("删除Cloudflare账号失败: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/cloudflare"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -125,6 +126,41 @@ func (s *R2BucketService) DeleteR2Bucket(id uint) error {
 	bucket, err := s.GetR2Bucket(id)
 	if err != nil {
 		return err
+	}
+
+	// 检查存储桶中是否有文件或目录
+	// 如果配置了 Access Key，尝试列出文件检查
+	if bucket.R2AccessKeyID != "" && bucket.R2SecretAccessKey != "" {
+		// 创建 R2 文件服务来检查文件
+		fileService := NewR2FileService(s.db, s.cfAccountService)
+		files, err := fileService.ListFiles(id, "")
+		if err != nil {
+			// 如果无法列出文件（可能是凭证问题），不允许删除
+			return fmt.Errorf("无法检查存储桶中的文件，删除失败: %w。请确保存储桶凭证配置正确", err)
+		}
+
+		// 统计文件和目录
+		fileCount := 0
+		dirCount := 0
+		for _, file := range files {
+			if strings.HasSuffix(file, "/") {
+				dirCount++
+			} else {
+				fileCount++
+			}
+		}
+
+		if fileCount > 0 {
+			return fmt.Errorf("存储桶中存在 %d 个文件，请先删除所有文件后再删除存储桶", fileCount)
+		}
+
+		if dirCount > 0 {
+			return fmt.Errorf("存储桶中存在 %d 个目录，请先删除所有目录后再删除存储桶", dirCount)
+		}
+	} else {
+		// 如果没有配置凭证，无法检查文件，给出提示但不阻止删除
+		// 用户可能确定存储桶是空的，所以允许删除
+		// 但会在日志中记录警告
 	}
 
 	// 注意：Cloudflare R2 API 不提供删除存储桶的接口，只能通过 Dashboard 删除
