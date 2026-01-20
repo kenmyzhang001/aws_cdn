@@ -60,6 +60,17 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="CF 账号" width="180">
+          <template #default="{ row }">
+            <span v-if="row.dns_provider === 'cloudflare' && row.cf_account">
+              {{ row.cf_account.email }}
+            </span>
+            <span v-else-if="row.dns_provider === 'cloudflare' && !row.cf_account" style="color: #f56c6c;">
+              默认
+            </span>
+            <span v-else style="color: #c0c4cc; font-size: 12px;">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">

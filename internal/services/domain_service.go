@@ -503,7 +503,7 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 // GetDomain 获取域名信息
 func (s *DomainService) GetDomain(id uint) (*models.Domain, error) {
 	var domain models.Domain
-	if err := s.db.First(&domain, id).Error; err != nil {
+	if err := s.db.Preload("Group").Preload("CFAccount").First(&domain, id).Error; err != nil {
 		return nil, fmt.Errorf("域名不存在: %w", err)
 	}
 	return &domain, nil
@@ -511,7 +511,7 @@ func (s *DomainService) GetDomain(id uint) (*models.Domain, error) {
 
 func (s *DomainService) GetDomainByName(domainName string) (*models.Domain, error) {
 	var domain models.Domain
-	if err := s.db.Where("domain_name = ? AND deleted_at IS NULL", domainName).First(&domain).Error; err != nil {
+	if err := s.db.Preload("Group").Preload("CFAccount").Where("domain_name = ? AND deleted_at IS NULL", domainName).First(&domain).Error; err != nil {
 		return nil, fmt.Errorf("域名不存在: %w", err)
 	}
 	return &domain, nil
@@ -555,8 +555,8 @@ func (s *DomainService) ListDomains(page, pageSize int, groupID *uint, search *s
 
 	offset := (page - 1) * pageSize
 
-	// 构建基础查询
-	query := s.db.Model(&models.Domain{}).Where("domains.deleted_at IS NULL")
+	// 构建基础查询，预加载关联数据
+	query := s.db.Model(&models.Domain{}).Preload("Group").Preload("CFAccount").Where("domains.deleted_at IS NULL")
 
 	// 分组筛选
 	if groupID != nil {
