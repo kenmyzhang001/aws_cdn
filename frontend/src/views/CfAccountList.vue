@@ -70,6 +70,28 @@
             可在 Cloudflare Dashboard 右侧边栏找到 Account ID
           </div>
         </el-form-item>
+        <el-form-item label="R2 Access Key ID">
+          <el-input
+            v-model="createForm.r2_access_key_id"
+            type="password"
+            show-password
+            placeholder="请输入 R2 Access Key ID（可选）"
+          />
+          <div style="font-size: 12px; color: #909399; margin-top: 5px">
+            在 Cloudflare Dashboard → R2 → Manage R2 API Tokens 中创建
+          </div>
+        </el-form-item>
+        <el-form-item label="R2 Secret Access Key">
+          <el-input
+            v-model="createForm.r2_secret_access_key"
+            type="password"
+            show-password
+            placeholder="请输入 R2 Secret Access Key（可选）"
+          />
+          <div style="font-size: 12px; color: #909399; margin-top: 5px">
+            与 R2 Access Key ID 一起创建，只显示一次，请妥善保存
+          </div>
+        </el-form-item>
         <el-form-item label="备注">
           <el-input
             v-model="createForm.note"
@@ -118,6 +140,28 @@
             可在 Cloudflare Dashboard 右侧边栏找到 Account ID
           </div>
         </el-form-item>
+        <el-form-item label="R2 Access Key ID">
+          <el-input
+            v-model="editForm.r2_access_key_id"
+            type="password"
+            show-password
+            placeholder="留空则不修改 R2 Access Key ID"
+          />
+          <div style="font-size: 12px; color: #909399; margin-top: 5px">
+            在 Cloudflare Dashboard → R2 → Manage R2 API Tokens 中创建
+          </div>
+        </el-form-item>
+        <el-form-item label="R2 Secret Access Key">
+          <el-input
+            v-model="editForm.r2_secret_access_key"
+            type="password"
+            show-password
+            placeholder="留空则不修改 R2 Secret Access Key"
+          />
+          <div style="font-size: 12px; color: #909399; margin-top: 5px">
+            与 R2 Access Key ID 一起创建，只显示一次，请妥善保存
+          </div>
+        </el-form-item>
         <el-form-item label="备注">
           <el-input
             v-model="editForm.note"
@@ -164,6 +208,8 @@ const editForm = ref({
   password: '',
   api_token: '',
   account_id: '',
+  r2_access_key_id: '',
+  r2_secret_access_key: '',
   note: '',
 })
 const editFormRef = ref(null)
@@ -208,6 +254,8 @@ const resetCreateForm = () => {
     password: '',
     api_token: '',
     account_id: '',
+    r2_access_key_id: '',
+    r2_secret_access_key: '',
     note: '',
   }
   if (createFormRef.value) {
@@ -222,6 +270,8 @@ const resetEditForm = () => {
     password: '',
     api_token: '',
     account_id: '',
+    r2_access_key_id: '',
+    r2_secret_access_key: '',
     note: '',
   }
   if (editFormRef.value) {
@@ -256,6 +306,8 @@ const editAccount = (row) => {
     password: '',
     api_token: '',
     account_id: row.account_id || '',
+    r2_access_key_id: '',
+    r2_secret_access_key: '',
     note: row.note || '',
   }
   showEditDialog.value = true
@@ -287,6 +339,16 @@ const handleUpdate = async () => {
       // 只有填写了 Account ID 才更新
       if (editForm.value.account_id !== undefined) {
         updateData.account_id = editForm.value.account_id
+      }
+
+      // 只有填写了 R2 Access Key ID 才更新
+      if (editForm.value.r2_access_key_id) {
+        updateData.r2_access_key_id = editForm.value.r2_access_key_id
+      }
+
+      // 只有填写了 R2 Secret Access Key 才更新
+      if (editForm.value.r2_secret_access_key) {
+        updateData.r2_secret_access_key = editForm.value.r2_secret_access_key
       }
 
       await cfAccountApi.updateCFAccount(editForm.value.id, updateData)

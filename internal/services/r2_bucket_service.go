@@ -71,13 +71,13 @@ func (s *R2BucketService) CreateR2Bucket(cfAccountID uint, bucketName, location,
 	// 获取 CF 账号信息
 	cfAccount, err := s.cfAccountService.GetCFAccount(cfAccountID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("获取 CF 账号失败: %w", err)
 	}
 
-	// 获取 API Token
+	// 获取 API Token（从 CF 账号获取）
 	apiToken := s.cfAccountService.GetAPIToken(cfAccount)
 	if apiToken == "" {
-		return nil, fmt.Errorf("Cloudflare账号未配置API Token")
+		return nil, fmt.Errorf("Cloudflare账号未配置API Token，请在 CF 账号管理中配置 API Token")
 	}
 
 	// 创建 R2 API 服务
@@ -95,12 +95,7 @@ func (s *R2BucketService) CreateR2Bucket(cfAccountID uint, bucketName, location,
 		}
 	}
 
-	// 检查 R2 是否已启用
-	if err := r2API.EnableR2(accountID); err != nil {
-		return nil, fmt.Errorf("R2未启用: %w", err)
-	}
-
-	// 创建存储桶
+	// 创建存储桶（使用从 CF 账号获取的 API Token）
 	if err := r2API.CreateBucket(accountID, bucketName, location); err != nil {
 		return nil, fmt.Errorf("创建存储桶失败: %w", err)
 	}

@@ -33,9 +33,6 @@
             <el-button size="small" @click="configureCORS(row)">
               配置 CORS
             </el-button>
-            <el-button size="small" @click="configureCredentials(row)">
-              配置凭证
-            </el-button>
             <el-button size="small" @click="editBucket(row)">
               编辑备注
             </el-button>
@@ -59,12 +56,6 @@
               :value="account.id"
             />
           </el-select>
-        </el-form-item>
-        <el-form-item label="Account ID">
-          <el-input v-model="createForm.account_id" placeholder="请输入 Cloudflare Account ID（可选，会自动尝试获取）" />
-          <div style="font-size: 12px; color: #909399; margin-top: 5px">
-            可在 Cloudflare Dashboard 右侧边栏找到 Account ID。如果 API Token 无效，建议手动输入
-          </div>
         </el-form-item>
         <el-form-item label="存储桶名称" prop="bucket_name">
           <el-input v-model="createForm.bucket_name" placeholder="请输入存储桶名称（小写字母、数字、连字符）" />
@@ -161,55 +152,6 @@
       <R2FileManager v-if="selectedBucket" :bucket="selectedBucket" />
     </el-dialog>
 
-    <!-- 配置凭证对话框 -->
-    <el-dialog v-model="showCredentialsDialog" title="配置 R2 凭证" width="600px" @close="resetCredentialsForm">
-      <el-alert
-        title="配置说明"
-        type="info"
-        :closable="false"
-        style="margin-bottom: 20px"
-      >
-        <template #default>
-          <div style="font-size: 12px; line-height: 1.6">
-            <p>需要在 Cloudflare Dashboard 中创建 R2 API Token 来获取 Access Key ID 和 Secret Access Key。</p>
-            <p>步骤：R2 → Manage R2 API Tokens → Create API Token</p>
-          </div>
-        </template>
-      </el-alert>
-      <el-form :model="credentialsForm" :rules="credentialsFormRules" ref="credentialsFormRef" label-width="140px">
-        <el-form-item label="Account ID">
-          <el-input
-            v-model="credentialsForm.account_id"
-            placeholder="请输入 Cloudflare Account ID（可选，会自动尝试获取）"
-          />
-          <div style="font-size: 12px; color: #909399; margin-top: 5px">
-            可在 Cloudflare Dashboard 右侧边栏找到 Account ID
-          </div>
-        </el-form-item>
-        <el-form-item label="Access Key ID" prop="access_key_id">
-          <el-input
-            v-model="credentialsForm.access_key_id"
-            type="password"
-            show-password
-            placeholder="请输入 R2 Access Key ID"
-          />
-        </el-form-item>
-        <el-form-item label="Secret Access Key" prop="secret_access_key">
-          <el-input
-            v-model="credentialsForm.secret_access_key"
-            type="password"
-            show-password
-            placeholder="请输入 R2 Secret Access Key"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showCredentialsDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleUpdateCredentials" :loading="credentialsLoading">
-          保存
-        </el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -265,25 +207,6 @@ const showDomainDialog = ref(false)
 const selectedBucket = ref(null)
 
 const showFileDialog = ref(false)
-
-const showCredentialsDialog = ref(false)
-const credentialsLoading = ref(false)
-const credentialsForm = ref({
-  bucketId: null,
-  account_id: '',
-  access_key_id: '',
-  secret_access_key: '',
-})
-const credentialsFormRef = ref(null)
-
-const credentialsFormRules = {
-  access_key_id: [
-    { required: true, message: '请输入 Access Key ID', trigger: 'blur' },
-  ],
-  secret_access_key: [
-    { required: true, message: '请输入 Secret Access Key', trigger: 'blur' },
-  ],
-}
 
 const formRules = {
   cf_account_id: [
@@ -426,52 +349,6 @@ const closeFileDialog = () => {
   selectedBucket.value = null
 }
 
-const configureCredentials = (row) => {
-  credentialsForm.value = {
-    bucketId: row.id,
-    account_id: row.account_id || '',
-    access_key_id: '',
-    secret_access_key: '',
-  }
-  showCredentialsDialog.value = true
-}
-
-const resetCredentialsForm = () => {
-  credentialsForm.value = {
-    bucketId: null,
-    account_id: '',
-    access_key_id: '',
-    secret_access_key: '',
-  }
-  if (credentialsFormRef.value) {
-    credentialsFormRef.value.clearValidate()
-  }
-}
-
-const handleUpdateCredentials = async () => {
-  if (!credentialsFormRef.value) return
-
-  await credentialsFormRef.value.validate(async (valid) => {
-    if (!valid) return
-
-    credentialsLoading.value = true
-    try {
-      await r2Api.updateR2BucketCredentials(
-        credentialsForm.value.bucketId,
-        credentialsForm.value.access_key_id,
-        credentialsForm.value.secret_access_key,
-        credentialsForm.value.account_id
-      )
-      ElMessage.success('凭证配置成功')
-      showCredentialsDialog.value = false
-      loadBuckets()
-    } catch (error) {
-      // 错误已在拦截器中处理
-    } finally {
-      credentialsLoading.value = false
-    }
-  })
-}
 
 const handleDelete = (row) => {
   ElMessageBox.confirm(

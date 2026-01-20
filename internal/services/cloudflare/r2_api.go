@@ -70,8 +70,20 @@ func (s *R2APIService) EnableR2(accountID string) error {
 			} `json:"errors"`
 		}
 		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
-			return fmt.Errorf("R2 未启用或权限不足: %s", errorResp.Errors[0].Message)
+			errorMsg := errorResp.Errors[0].Message
+			log.WithFields(map[string]interface{}{
+				"account_id": accountID,
+				"status_code": resp.StatusCode,
+				"error_code": errorResp.Errors[0].Code,
+				"error_message": errorMsg,
+			}).Error("R2 启用检查失败")
+			return fmt.Errorf("R2 未启用或权限不足: %s (错误代码: %d)", errorMsg, errorResp.Errors[0].Code)
 		}
+		log.WithFields(map[string]interface{}{
+			"account_id": accountID,
+			"status_code": resp.StatusCode,
+			"response_body": string(body),
+		}).Error("R2 启用检查失败")
 		return fmt.Errorf("检查 R2 状态失败 (状态码: %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -117,7 +129,7 @@ func (s *R2APIService) CreateBucket(accountID, bucketName, location string) erro
 		return fmt.Errorf("读取响应失败: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		var errorResp struct {
 			Success bool `json:"success"`
 			Errors  []struct {
@@ -127,11 +139,27 @@ func (s *R2APIService) CreateBucket(accountID, bucketName, location string) erro
 		}
 		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
 			errorMsg := errorResp.Errors[0].Message
+			log.WithFields(map[string]interface{}{
+				"account_id": accountID,
+				"bucket_name": bucketName,
+				"status_code": resp.StatusCode,
+				"error_code": errorResp.Errors[0].Code,
+				"error_message": errorMsg,
+			}).Error("创建存储桶失败")
 			if resp.StatusCode == http.StatusConflict {
 				return fmt.Errorf("存储桶已存在: %s", errorMsg)
 			}
-			return fmt.Errorf("创建存储桶失败: %s", errorMsg)
+			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+				return fmt.Errorf("认证失败或权限不足: %s (错误代码: %d)。请检查 API Token 是否有效且具有 R2 相关权限", errorMsg, errorResp.Errors[0].Code)
+			}
+			return fmt.Errorf("创建存储桶失败: %s (错误代码: %d)", errorMsg, errorResp.Errors[0].Code)
 		}
+		log.WithFields(map[string]interface{}{
+			"account_id": accountID,
+			"bucket_name": bucketName,
+			"status_code": resp.StatusCode,
+			"response_body": string(body),
+		}).Error("创建存储桶失败")
 		return fmt.Errorf("创建存储桶失败 (状态码: %d): %s", resp.StatusCode, string(body))
 	}
 
