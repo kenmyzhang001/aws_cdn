@@ -49,6 +49,10 @@
               <el-icon><Box /></el-icon>
               <span>R2 存储桶管理</span>
             </el-menu-item>
+            <el-menu-item index="/r2-apk-links">
+              <el-icon><Link /></el-icon>
+              <span>APK 链接管理</span>
+            </el-menu-item>
           </el-sub-menu>
 
           <!-- 审计日志 -->

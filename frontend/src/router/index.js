@@ -7,6 +7,7 @@ import AuditLogList from '@/views/AuditLogList.vue'
 import GroupList from '@/views/GroupList.vue'
 import CfAccountList from '@/views/CfAccountList.vue'
 import R2BucketList from '@/views/R2BucketList.vue'
+import R2ApkLinkManager from '@/views/R2ApkLinkManager.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -58,6 +59,11 @@ const routes = [
     path: '/r2-buckets',
     name: 'R2BucketList',
     component: R2BucketList,
+  },
+  {
+    path: '/r2-apk-links',
+    name: 'R2ApkLinkManager',
+    component: R2ApkLinkManager,
   },
 ]
 
