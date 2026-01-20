@@ -29,12 +29,33 @@ type R2S3Config struct {
 
 // NewR2S3Service 创建 R2 S3 服务
 func NewR2S3Service(cfg *R2S3Config) (*R2S3Service, error) {
+	log := logger.GetLogger()
+
 	if cfg.AccountID == "" || cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
 		return nil, fmt.Errorf("R2配置不完整：需要AccountID、AccessKeyID和SecretAccessKey")
 	}
 
+	// 验证 Account ID 格式（应该是32位字符）
+	if len(cfg.AccountID) != 32 {
+		return nil, fmt.Errorf("Account ID 格式不正确：应该是32位字符，当前长度: %d", len(cfg.AccountID))
+	}
+
+	// 验证 Access Key ID 格式（通常以特定前缀开头）
+	if len(cfg.AccessKeyID) < 20 {
+		return nil, fmt.Errorf("Access Key ID 格式可能不正确：长度过短 (%d 字符)", len(cfg.AccessKeyID))
+	}
+
 	// 构建 R2 端点 URL
 	endpoint := fmt.Sprintf("https://%s.r2.cloudflarestorage.com", cfg.AccountID)
+
+	log.WithFields(map[string]interface{}{
+		"account_id":     cfg.AccountID,
+		"bucket_name":    cfg.BucketName,
+		"endpoint":       endpoint,
+		"access_key_id":  cfg.AccessKeyID[:min(8, len(cfg.AccessKeyID))] + "...", // 只记录前8位，保护隐私
+		"has_secret_key": cfg.SecretAccessKey != "",
+		"secret_key_len": len(cfg.SecretAccessKey),
+	}).Debug("创建 R2 S3 服务")
 
 	// 创建 AWS session（使用 R2 的 S3 兼容端点）
 	sess, err := session.NewSession(&aws.Config{
@@ -46,8 +67,10 @@ func NewR2S3Service(cfg *R2S3Config) (*R2S3Service, error) {
 		),
 		Endpoint:         aws.String(endpoint),
 		S3ForcePathStyle: aws.Bool(true), // R2 需要路径样式
+		DisableSSL:       aws.Bool(false),
 	})
 	if err != nil {
+		log.WithError(err).Error("创建 R2 session 失败")
 		return nil, fmt.Errorf("创建 R2 session 失败: %w", err)
 	}
 
@@ -56,6 +79,14 @@ func NewR2S3Service(cfg *R2S3Config) (*R2S3Service, error) {
 		accountID:  cfg.AccountID,
 		bucketName: cfg.BucketName,
 	}, nil
+}
+
+// min 辅助函数
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // UploadFile 上传文件到 R2
@@ -150,12 +181,13 @@ func (s *R2S3Service) ListFiles(prefix string) ([]string, error) {
 			"bucket_name": s.bucketName,
 			"prefix":      prefix,
 			"account_id":  s.accountID,
+			"endpoint":    fmt.Sprintf("https://%s.r2.cloudflarestorage.com", s.accountID),
 		}).Error("列出 R2 文件失败")
 
 		// 提供更详细的错误信息
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "Unauthorized") || strings.Contains(errMsg, "401") {
-			return nil, fmt.Errorf("认证失败: R2 Access Key ID 或 Secret Access Key 无效。请检查：1) Access Key ID 和 Secret Access Key 是否正确 2) 是否在 Cloudflare Dashboard → R2 → Manage R2 API Tokens 中创建了正确的 Token 3) Token 权限是否包含该存储桶的读写权限。原始错误: %w", err)
+			return nil, fmt.Errorf("认证失败 (401 Unauthorized): R2 Access Key ID 或 Secret Access Key 无效或权限不足。请检查：1) 在 Cloudflare Dashboard → R2 → Manage R2 API Tokens 中确认 Token 存在且未过期 2) 确认 Token 权限为 'Read and Write' 3) 确认 Token 允许访问存储桶 '%s'（或选择 'All buckets'）4) 确认 CF 账号设置中的 Access Key ID 和 Secret Access Key 与 Token 完全一致（注意不要有多余空格）5) 确认 Account ID '%s' 与 Token 属于同一个账户。原始错误: %w", s.bucketName, s.accountID, err)
 		}
 		return nil, fmt.Errorf("列出文件失败: %w", err)
 	}

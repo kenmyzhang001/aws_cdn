@@ -54,6 +54,11 @@ func (s *R2FileService) getR2S3Service(bucket *models.R2Bucket) (*cloudflare.R2S
 		}
 	}
 
+	// 验证 Account ID 格式（应该是32位十六进制字符串）
+	if len(accountID) != 32 {
+		return nil, fmt.Errorf("Account ID 格式不正确（应该是32位字符），当前值: %s (长度: %d)。请检查 CF 账号设置中的 Account ID", accountID, len(accountID))
+	}
+
 	// 创建 R2 S3 服务
 	cfg := &cloudflare.R2S3Config{
 		AccountID:       accountID,
