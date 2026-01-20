@@ -16,6 +16,10 @@
             <el-icon><Folder /></el-icon>
             <span>分组管理</span>
           </el-menu-item>
+          <el-menu-item index="/cf-accounts">
+            <el-icon><User /></el-icon>
+            <span>CF 账号管理</span>
+          </el-menu-item>
           <el-menu-item index="/domains">
             <el-icon><Link /></el-icon>
             <span>域名管理</span>
@@ -29,10 +33,7 @@
             <span>下载包管理</span>
           </el-menu-item>
 
-          <el-menu-item index="/cf-accounts">
-            <el-icon><User /></el-icon>
-            <span>CF 账号管理</span>
-          </el-menu-item>
+
           <el-menu-item index="/r2-buckets">
             <el-icon><Box /></el-icon>
             <span>R2 存储桶管理</span>

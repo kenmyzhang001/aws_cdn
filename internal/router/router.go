@@ -190,6 +190,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 			r2Buckets.DELETE("/:id", r2Handler.DeleteR2Bucket)
 			r2Buckets.PUT("/:id/note", r2Handler.UpdateR2BucketNote)
 			r2Buckets.PUT("/:id/cors", r2Handler.ConfigureCORS)
+			r2Buckets.PUT("/:id/credentials", r2Handler.UpdateR2BucketCredentials)
 		}
 
 		// R2 自定义域名管理
@@ -214,6 +215,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 			r2Files.POST("/buckets/:r2_bucket_id/upload", r2Handler.UploadFile)
 			r2Files.POST("/buckets/:r2_bucket_id/directories", r2Handler.CreateDirectory)
 			r2Files.GET("/buckets/:r2_bucket_id", r2Handler.ListFiles)
+			r2Files.DELETE("/buckets/:r2_bucket_id", r2Handler.DeleteFile)
 		}
 	}
 

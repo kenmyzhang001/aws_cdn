@@ -2,6 +2,7 @@ package services
 
 import (
 	"aws_cdn/internal/models"
+	"aws_cdn/internal/services/cloudflare"
 	"fmt"
 	"io"
 
@@ -20,6 +21,41 @@ func NewR2FileService(db *gorm.DB, cfAccountService *CFAccountService) *R2FileSe
 	}
 }
 
+// getR2S3Service 获取 R2 S3 服务
+func (s *R2FileService) getR2S3Service(bucket *models.R2Bucket) (*cloudflare.R2S3Service, error) {
+	// 检查是否配置了 Access Key
+	if bucket.R2AccessKeyID == "" || bucket.R2SecretAccessKey == "" {
+		return nil, fmt.Errorf("存储桶未配置 R2 Access Key 和 Secret Key，请在存储桶设置中配置")
+	}
+
+	// 获取账户 ID
+	cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
+	if err != nil {
+		return nil, err
+	}
+
+	apiToken := s.cfAccountService.GetAPIToken(cfAccount)
+	if apiToken == "" {
+		return nil, fmt.Errorf("Cloudflare账号未配置API Token")
+	}
+
+	r2API := cloudflare.NewR2APIService(apiToken)
+	accountID, err := r2API.GetAccountID()
+	if err != nil {
+		return nil, fmt.Errorf("获取账户ID失败: %w", err)
+	}
+
+	// 创建 R2 S3 服务
+	cfg := &cloudflare.R2S3Config{
+		AccountID:       accountID,
+		AccessKeyID:     bucket.R2AccessKeyID,
+		SecretAccessKey: bucket.R2SecretAccessKey,
+		BucketName:      bucket.BucketName,
+	}
+
+	return cloudflare.NewR2S3Service(cfg)
+}
+
 // UploadFile 上传文件到 R2 存储桶
 func (s *R2FileService) UploadFile(r2BucketID uint, key string, body io.ReadSeeker, contentType string) error {
 	// 获取存储桶信息
@@ -28,25 +64,14 @@ func (s *R2FileService) UploadFile(r2BucketID uint, key string, body io.ReadSeek
 		return fmt.Errorf("R2存储桶不存在: %w", err)
 	}
 
-	// 获取 CF 账号信息
-	cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
+	// 获取 R2 S3 服务
+	r2S3, err := s.getR2S3Service(&bucket)
 	if err != nil {
 		return err
 	}
 
-	// 获取 API Token
-	apiToken := s.cfAccountService.GetAPIToken(cfAccount)
-	if apiToken == "" {
-		return fmt.Errorf("Cloudflare账号未配置API Token")
-	}
-
-	// 注意：这里需要 R2 的 Access Key 和 Secret Key
-	// 这些信息需要从 CF 账号中获取或单独配置
-	// 暂时返回错误，提示需要配置 Access Key
-	_ = bucket
-	_ = cfAccount
-	_ = apiToken
-	return fmt.Errorf("需要配置 R2 Access Key 和 Secret Key 才能上传文件")
+	// 上传文件
+	return r2S3.UploadFile(key, body, contentType)
 }
 
 // CreateDirectory 创建目录
@@ -57,24 +82,14 @@ func (s *R2FileService) CreateDirectory(r2BucketID uint, prefix string) error {
 		return fmt.Errorf("R2存储桶不存在: %w", err)
 	}
 
-	// 获取 CF 账号信息
-	cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
+	// 获取 R2 S3 服务
+	r2S3, err := s.getR2S3Service(&bucket)
 	if err != nil {
 		return err
 	}
 
-	// 获取 API Token
-	apiToken := s.cfAccountService.GetAPIToken(cfAccount)
-	if apiToken == "" {
-		return fmt.Errorf("Cloudflare账号未配置API Token")
-	}
-
-	// 注意：这里需要 R2 的 Access Key 和 Secret Key
-	// 暂时返回错误
-	_ = bucket
-	_ = cfAccount
-	_ = apiToken
-	return fmt.Errorf("需要配置 R2 Access Key 和 Secret Key 才能创建目录")
+	// 创建目录
+	return r2S3.CreateDirectory(prefix)
 }
 
 // ListFiles 列出文件
@@ -85,22 +100,48 @@ func (s *R2FileService) ListFiles(r2BucketID uint, prefix string) ([]string, err
 		return nil, fmt.Errorf("R2存储桶不存在: %w", err)
 	}
 
-	// 获取 CF 账号信息
-	cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
+	// 获取 R2 S3 服务
+	r2S3, err := s.getR2S3Service(&bucket)
 	if err != nil {
 		return nil, err
 	}
 
-	// 获取 API Token
-	apiToken := s.cfAccountService.GetAPIToken(cfAccount)
-	if apiToken == "" {
-		return nil, fmt.Errorf("Cloudflare账号未配置API Token")
+	// 列出文件
+	return r2S3.ListFiles(prefix)
+}
+
+// DeleteFile 删除文件
+func (s *R2FileService) DeleteFile(r2BucketID uint, key string) error {
+	// 获取存储桶信息
+	var bucket models.R2Bucket
+	if err := s.db.Preload("CFAccount").First(&bucket, r2BucketID).Error; err != nil {
+		return fmt.Errorf("R2存储桶不存在: %w", err)
 	}
 
-	// 注意：这里需要 R2 的 Access Key 和 Secret Key
-	// 暂时返回错误
-	_ = bucket
-	_ = cfAccount
-	_ = apiToken
-	return nil, fmt.Errorf("需要配置 R2 Access Key 和 Secret Key 才能列出文件")
+	// 获取 R2 S3 服务
+	r2S3, err := s.getR2S3Service(&bucket)
+	if err != nil {
+		return err
+	}
+
+	// 删除文件
+	return r2S3.DeleteFile(key)
+}
+
+// FileExists 检查文件是否存在
+func (s *R2FileService) FileExists(r2BucketID uint, key string) (bool, error) {
+	// 获取存储桶信息
+	var bucket models.R2Bucket
+	if err := s.db.Preload("CFAccount").First(&bucket, r2BucketID).Error; err != nil {
+		return false, fmt.Errorf("R2存储桶不存在: %w", err)
+	}
+
+	// 获取 R2 S3 服务
+	r2S3, err := s.getR2S3Service(&bucket)
+	if err != nil {
+		return false, err
+	}
+
+	// 检查文件是否存在
+	return r2S3.FileExists(key)
 }

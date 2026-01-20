@@ -160,6 +160,37 @@ func (h *R2Handler) UpdateR2BucketNote(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "备注更新成功"})
 }
 
+// UpdateR2BucketCredentials 更新存储桶的 R2 Access Key 和 Secret Key
+func (h *R2Handler) UpdateR2BucketCredentials(c *gin.Context) {
+	log := logger.GetLogger()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		log.WithError(err).Error("更新R2存储桶凭证失败：无效的ID")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 ID"})
+		return
+	}
+
+	var req struct {
+		AccessKeyID     string `json:"access_key_id" binding:"required"`
+		SecretAccessKey string `json:"secret_access_key" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.WithError(err).Error("更新R2存储桶凭证失败：请求参数验证失败")
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.bucketService.UpdateR2BucketCredentials(uint(id), req.AccessKeyID, req.SecretAccessKey); err != nil {
+		log.WithError(err).Error("更新R2存储桶凭证操作失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.WithField("bucket_id", id).Info("R2存储桶凭证更新成功")
+	c.JSON(http.StatusOK, gin.H{"message": "凭证更新成功"})
+}
+
 // ConfigureCORS 配置 CORS
 func (h *R2Handler) ConfigureCORS(c *gin.Context) {
 	log := logger.GetLogger()
@@ -462,4 +493,37 @@ func (h *R2Handler) ListFiles(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"files": files})
+}
+
+// DeleteFile 删除文件
+func (h *R2Handler) DeleteFile(c *gin.Context) {
+	log := logger.GetLogger()
+	r2BucketID, err := strconv.ParseUint(c.Param("r2_bucket_id"), 10, 32)
+	if err != nil {
+		log.WithError(err).Error("删除文件失败：无效的存储桶ID")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的存储桶 ID"})
+		return
+	}
+
+	var req struct {
+		Key string `json:"key" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.WithError(err).Error("删除文件失败：请求参数验证失败")
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.fileService.DeleteFile(uint(r2BucketID), req.Key); err != nil {
+		log.WithError(err).Error("删除文件操作失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.WithFields(map[string]interface{}{
+		"bucket_id": r2BucketID,
+		"key":       req.Key,
+	}).Info("文件删除成功")
+	c.JSON(http.StatusOK, gin.H{"message": "文件删除成功"})
 }

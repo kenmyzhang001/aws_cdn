@@ -27,6 +27,13 @@ export const r2Api = {
     return request.put(`/r2-buckets/${id}/note`, { note })
   },
 
+  updateR2BucketCredentials(id, accessKeyID, secretAccessKey) {
+    return request.put(`/r2-buckets/${id}/credentials`, {
+      access_key_id: accessKeyID,
+      secret_access_key: secretAccessKey,
+    })
+  },
+
   configureCORS(id, corsConfig) {
     return request.put(`/r2-buckets/${id}/cors`, { cors_config: corsConfig })
   },
@@ -72,5 +79,11 @@ export const r2Api = {
 
   listFiles(r2BucketId, prefix = '') {
     return request.get(`/r2-files/buckets/${r2BucketId}`, { params: { prefix } })
+  },
+
+  deleteFile(r2BucketId, key) {
+    return request.delete(`/r2-files/buckets/${r2BucketId}`, {
+      data: { key },
+    })
   },
 }

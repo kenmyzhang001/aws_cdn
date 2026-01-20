@@ -144,6 +144,22 @@ func (s *R2BucketService) UpdateR2BucketNote(id uint, note string) error {
 	return nil
 }
 
+// UpdateR2BucketCredentials 更新存储桶的 R2 Access Key 和 Secret Key
+func (s *R2BucketService) UpdateR2BucketCredentials(id uint, accessKeyID, secretAccessKey string) error {
+	bucket, err := s.GetR2Bucket(id)
+	if err != nil {
+		return err
+	}
+
+	bucket.R2AccessKeyID = accessKeyID
+	bucket.R2SecretAccessKey = secretAccessKey
+	if err := s.db.Save(bucket).Error; err != nil {
+		return fmt.Errorf("更新存储桶凭证失败: %w", err)
+	}
+
+	return nil
+}
+
 // ConfigureCORS 配置 CORS
 func (s *R2BucketService) ConfigureCORS(id uint, corsConfig []map[string]interface{}) error {
 	// 获取存储桶信息
