@@ -1,6 +1,7 @@
 package services
 
 import (
+	"aws_cdn/internal/logger"
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/cloudflare"
 	"fmt"
@@ -66,17 +67,40 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 
 	accountID := cfAccount.AccountID
 
-	// 添加自定义域名
-	domainID, err := r2API.AddCustomDomain(accountID, bucket.BucketName, domain)
-	if err != nil {
-		return nil, fmt.Errorf("添加自定义域名失败: %w", err)
+	// 获取 Zone ID（用于添加自定义域名）
+	// 注意：如果 domain 是子域名（如 assets.example.com），需要先提取根域名（example.com）
+	// 因为 Cloudflare Zone 是基于根域名创建的
+	rootDomain := s.ExtractRootDomain(domain)
+	log := logger.GetLogger()
+
+	// 如果子域名和根域名不同，记录日志
+	if rootDomain != domain {
+		log.WithFields(map[string]interface{}{
+			"domain":      domain,
+			"root_domain": rootDomain,
+		}).Info("检测到子域名，使用根域名获取 Zone ID")
 	}
 
-	// 获取 Zone ID（用于后续创建缓存规则）
-	zoneID, err := s.cloudflareService.GetZoneID(domain)
+	zoneID, err := s.cloudflareService.GetZoneID(rootDomain)
 	if err != nil {
-		// Zone ID 获取失败不影响域名添加，后续可以手动设置
+		// Zone ID 获取失败不影响域名添加，Cloudflare 会自动查找
 		zoneID = ""
+		log.WithError(err).WithFields(map[string]interface{}{
+			"domain":      domain,
+			"root_domain": rootDomain,
+		}).Warn("无法获取 Zone ID，将尝试自动查找")
+	} else {
+		log.WithFields(map[string]interface{}{
+			"domain":      domain,
+			"root_domain": rootDomain,
+			"zone_id":     zoneID,
+		}).Info("成功获取 Zone ID")
+	}
+
+	// 添加自定义域名（enabled 默认为 true）
+	domainID, err := r2API.AddCustomDomain(accountID, bucket.BucketName, domain, zoneID, true)
+	if err != nil {
+		return nil, fmt.Errorf("添加自定义域名失败: %w", err)
 	}
 
 	// 保存到数据库

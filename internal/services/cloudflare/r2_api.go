@@ -227,11 +227,20 @@ func (s *R2APIService) ConfigureCORS(accountID, bucketName string, corsConfig []
 }
 
 // AddCustomDomain 添加自定义域名
-func (s *R2APIService) AddCustomDomain(accountID, bucketName, domain string) (string, error) {
+// domain: 要添加的自定义域名（例如：prefix.example-domain.com）
+// zoneID: 域名所在的 Zone ID（可选，如果为空则 Cloudflare 会自动查找）
+// enabled: 是否启用该自定义域名（默认为 true）
+func (s *R2APIService) AddCustomDomain(accountID, bucketName, domain, zoneID string, enabled bool) (string, error) {
 	log := logger.GetLogger()
 
 	payload := map[string]interface{}{
-		"domain": domain,
+		"domain":  domain,
+		"enabled": enabled,
+	}
+
+	// 如果提供了 zoneID，则添加到 payload 中
+	if zoneID != "" {
+		payload["zoneId"] = zoneID
 	}
 
 	jsonData, err := json.Marshal(payload)
@@ -239,7 +248,7 @@ func (s *R2APIService) AddCustomDomain(accountID, bucketName, domain string) (st
 		return "", fmt.Errorf("序列化请求失败: %w", err)
 	}
 
-	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/r2/buckets/%s/custom_domains", accountID, bucketName)
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/r2/buckets/%s/domains/custom", accountID, bucketName)
 
 	log.WithFields(map[string]interface{}{
 		"account_id":  accountID,
