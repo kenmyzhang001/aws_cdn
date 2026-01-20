@@ -15,6 +15,8 @@ request.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    // 保留 onUploadProgress 和 cancelToken（如果存在）
+    // 这些配置会直接传递给 axios
     return config
   },
   (error) => {
@@ -28,6 +30,11 @@ request.interceptors.response.use(
     return response.data
   },
   (error) => {
+    // 如果是取消请求，直接返回，不显示错误消息
+    if (axios.isCancel(error)) {
+      return Promise.reject(error)
+    }
+    
     // 处理401未授权错误
     if (error.response?.status === 401) {
       // 清除本地存储的token

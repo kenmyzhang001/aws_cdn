@@ -74,6 +74,17 @@ export const r2Api = {
     })
   },
 
+  // 带进度的文件上传
+  uploadFileWithProgress(r2BucketId, formData, onProgress, cancelToken) {
+    return request.post(`/r2-files/buckets/${r2BucketId}/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      onUploadProgress: onProgress,
+      cancelToken: cancelToken,
+    })
+  },
+
   createDirectory(r2BucketId, prefix) {
     return request.post(`/r2-files/buckets/${r2BucketId}/directories`, { prefix })
   },

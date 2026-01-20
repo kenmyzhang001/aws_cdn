@@ -91,38 +91,86 @@
     </el-card>
 
     <!-- 上传文件对话框 -->
-    <el-dialog v-model="showUploadDialog" title="上传文件" width="600px" @close="resetUploadForm">
+    <el-dialog v-model="showUploadDialog" title="上传文件" width="800px" @close="resetUploadForm">
       <el-form :model="uploadForm" ref="uploadFormRef" label-width="100px">
-        <el-form-item label="选择文件" prop="file">
+        <el-form-item label="选择文件">
           <el-upload
             ref="uploadRef"
             :auto-upload="false"
             :on-change="handleFileChange"
-            :limit="1"
+            :on-remove="handleFileRemove"
+            :multiple="true"
             drag
           >
             <el-icon class="el-icon--upload"><upload-filled /></el-icon>
             <div class="el-upload__text">
               将文件拖到此处，或<em>点击上传</em>
             </div>
+            <template #tip>
+              <div class="el-upload__tip">
+                支持多文件上传，可同时选择多个文件
+              </div>
+            </template>
           </el-upload>
         </el-form-item>
-        <el-form-item label="文件路径">
+        <el-form-item label="上传路径">
           <el-input
-            v-model="uploadForm.key"
+            v-model="uploadForm.path"
             :placeholder="`当前路径：${currentPrefix || '/'}`"
           >
             <template #prepend>{{ currentPrefix || '/' }}</template>
           </el-input>
           <div style="font-size: 12px; color: #909399; margin-top: 5px">
-            留空则使用文件名，可指定完整路径
+            留空则使用文件名，可指定子目录路径（如：images/）
           </div>
         </el-form-item>
       </el-form>
+
+      <!-- 上传进度列表 -->
+      <div v-if="uploadFiles.length > 0" style="margin-top: 20px">
+        <el-divider>上传进度</el-divider>
+        <div v-for="(file, index) in uploadFiles" :key="index" style="margin-bottom: 15px">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px">
+            <div style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
+              <el-icon style="margin-right: 5px"><Document /></el-icon>
+              <span>{{ file.name }}</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; min-width: 150px">
+              <el-tag v-if="file.status === 'uploading'" type="info">上传中</el-tag>
+              <el-tag v-else-if="file.status === 'success'" type="success">成功</el-tag>
+              <el-tag v-else-if="file.status === 'error'" type="danger">失败</el-tag>
+              <el-tag v-else type="warning">等待</el-tag>
+              <el-button
+                v-if="file.status === 'uploading'"
+                size="small"
+                type="danger"
+                text
+                @click="cancelUpload(file)"
+              >
+                取消
+              </el-button>
+            </div>
+          </div>
+          <el-progress
+            :percentage="file.progress"
+            :status="file.status === 'error' ? 'exception' : file.status === 'success' ? 'success' : null"
+            :stroke-width="8"
+          />
+          <div v-if="file.error" style="font-size: 12px; color: #f56c6c; margin-top: 5px">
+            {{ file.error }}
+          </div>
+        </div>
+      </div>
+
       <template #footer>
-        <el-button @click="showUploadDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleUpload" :loading="uploadLoading">
-          上传
+        <el-button @click="showUploadDialog = false" :disabled="isUploading">取消</el-button>
+        <el-button
+          type="primary"
+          @click="handleUpload"
+          :loading="isUploading"
+          :disabled="uploadFiles.length === 0"
+        >
+          {{ isUploading ? '上传中...' : '开始上传' }}
         </el-button>
       </template>
     </el-dialog>
@@ -151,9 +199,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { r2Api } from '@/api/r2'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import axios from 'axios'
 import {
   Upload,
   FolderAdd,
@@ -176,13 +225,12 @@ const fileList = ref([])
 const currentPrefix = ref('')
 
 const showUploadDialog = ref(false)
-const uploadLoading = ref(false)
 const uploadForm = ref({
-  file: null,
-  key: '',
+  path: '',
 })
 const uploadFormRef = ref(null)
 const uploadRef = ref(null)
+const uploadFiles = ref([]) // 上传文件列表，包含进度信息
 
 const showCreateDirDialog = ref(false)
 const createDirLoading = ref(false)
@@ -263,46 +311,154 @@ const getFileName = (key) => {
   return key
 }
 
-const handleFileChange = (file) => {
-  uploadForm.value.file = file.raw
-  if (!uploadForm.value.key) {
-    uploadForm.value.key = file.name
+const handleFileChange = (file, fileList) => {
+  // 更新上传文件列表
+  uploadFiles.value = fileList.map((f) => ({
+    name: f.name,
+    raw: f.raw,
+    status: 'waiting', // waiting, uploading, success, error
+    progress: 0,
+    error: null,
+    cancelToken: null,
+  }))
+}
+
+const handleFileRemove = (file, fileList) => {
+  // 如果文件正在上传，取消上传
+  const uploadFile = uploadFiles.value.find((f) => f.name === file.name)
+  if (uploadFile && uploadFile.status === 'uploading' && uploadFile.cancelToken) {
+    uploadFile.cancelToken.cancel('用户取消上传')
   }
+  
+  // 更新文件列表
+  uploadFiles.value = fileList.map((f) => ({
+    name: f.name,
+    raw: f.raw,
+    status: 'waiting',
+    progress: 0,
+    error: null,
+    cancelToken: null,
+  }))
 }
 
 const resetUploadForm = () => {
+  // 取消所有正在上传的文件
+  uploadFiles.value.forEach((file) => {
+    if (file.status === 'uploading' && file.cancelToken) {
+      file.cancelToken.cancel('对话框关闭')
+    }
+  })
+  
   uploadForm.value = {
-    file: null,
-    key: '',
+    path: '',
   }
+  uploadFiles.value = []
   if (uploadRef.value) {
     uploadRef.value.clearFiles()
   }
 }
 
+const cancelUpload = (file) => {
+  if (file.cancelToken) {
+    file.cancelToken.cancel('用户取消上传')
+    file.status = 'error'
+    file.error = '已取消'
+  }
+}
+
+const isUploading = computed(() => {
+  return uploadFiles.value.some((f) => f.status === 'uploading')
+})
+
 const handleUpload = async () => {
-  if (!uploadForm.value.file) {
+  if (uploadFiles.value.length === 0) {
     ElMessage.warning('请选择要上传的文件')
     return
   }
 
-  uploadLoading.value = true
-  try {
-    const formData = new FormData()
-    formData.append('file', uploadForm.value.file)
-    const key = currentPrefix.value
-      ? `${currentPrefix.value}${uploadForm.value.key}`
-      : uploadForm.value.key
-    formData.append('key', key)
+  // 重置所有文件状态
+  uploadFiles.value.forEach((file) => {
+    file.status = 'waiting'
+    file.progress = 0
+    file.error = null
+  })
 
-    await r2Api.uploadFile(props.bucket.id, formData)
-    ElMessage.success('文件上传成功')
-    showUploadDialog.value = false
-    loadFiles()
-  } catch (error) {
-    // 错误已在拦截器中处理
-  } finally {
-    uploadLoading.value = false
+  // 并发上传所有文件
+  const uploadPromises = uploadFiles.value.map(async (file) => {
+    try {
+      file.status = 'uploading'
+      file.progress = 0
+
+      const formData = new FormData()
+      formData.append('file', file.raw)
+      
+      // 构建文件路径
+      let key = file.name
+      if (uploadForm.value.path) {
+        // 如果指定了路径，使用路径 + 文件名
+        const path = uploadForm.value.path.endsWith('/')
+          ? uploadForm.value.path
+          : uploadForm.value.path + '/'
+        key = path + file.name
+      }
+      
+      // 添加当前前缀
+      if (currentPrefix.value) {
+        key = currentPrefix.value + key
+      }
+      
+      formData.append('key', key)
+
+      // 创建 CancelToken
+      const CancelToken = axios.CancelToken
+      const source = CancelToken.source()
+      file.cancelToken = source
+
+      // 上传文件，带进度回调
+      await r2Api.uploadFileWithProgress(
+        props.bucket.id,
+        formData,
+        (progressEvent) => {
+          if (progressEvent.total) {
+            file.progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          }
+        },
+        source.token
+      )
+
+      file.status = 'success'
+      file.progress = 100
+    } catch (error) {
+      if (axios.isCancel(error)) {
+        file.status = 'error'
+        file.error = '已取消'
+      } else {
+        file.status = 'error'
+        file.error = error.response?.data?.error || error.message || '上传失败'
+      }
+    } finally {
+      file.cancelToken = null
+    }
+  })
+
+  // 等待所有文件上传完成
+  await Promise.allSettled(uploadPromises)
+
+  // 检查是否有成功上传的文件
+  const successCount = uploadFiles.value.filter((f) => f.status === 'success').length
+  const errorCount = uploadFiles.value.filter((f) => f.status === 'error').length
+
+  if (successCount > 0) {
+    ElMessage.success(`成功上传 ${successCount} 个文件${errorCount > 0 ? `，${errorCount} 个失败` : ''}`)
+    // 如果所有文件都上传完成（成功或失败），关闭对话框并刷新列表
+    if (uploadFiles.value.every((f) => f.status === 'success' || f.status === 'error')) {
+      setTimeout(() => {
+        showUploadDialog.value = false
+        loadFiles()
+      }, 1000)
+    }
+  } else if (errorCount > 0) {
+    ElMessage.error(`上传失败：${errorCount} 个文件`)
   }
 }
 
