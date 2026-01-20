@@ -161,36 +161,9 @@ func (h *R2Handler) UpdateR2BucketNote(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "备注更新成功"})
 }
 
-// UpdateR2BucketCredentials 更新存储桶的 R2 Access Key 和 Secret Key
+// UpdateR2BucketCredentials 已废弃：R2 凭证现在是账号维度的
 func (h *R2Handler) UpdateR2BucketCredentials(c *gin.Context) {
-	log := logger.GetLogger()
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		log.WithError(err).Error("更新R2存储桶凭证失败：无效的ID")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 ID"})
-		return
-	}
-
-	var req struct {
-		AccessKeyID     string `json:"access_key_id" binding:"required"`
-		SecretAccessKey string `json:"secret_access_key" binding:"required"`
-		AccountID       string `json:"account_id"` // 可选，如果不提供会尝试自动获取
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		log.WithError(err).Error("更新R2存储桶凭证失败：请求参数验证失败")
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := h.bucketService.UpdateR2BucketCredentials(uint(id), req.AccessKeyID, req.SecretAccessKey, req.AccountID); err != nil {
-		log.WithError(err).Error("更新R2存储桶凭证操作失败")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	log.WithField("bucket_id", id).Info("R2存储桶凭证更新成功")
-	c.JSON(http.StatusOK, gin.H{"message": "凭证更新成功"})
+	c.JSON(http.StatusBadRequest, gin.H{"error": "R2 Access Key 和 Secret Key 现在是账号维度的，请在 CF 账号管理中配置"})
 }
 
 // ConfigureCORS 配置 CORS

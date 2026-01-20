@@ -23,38 +23,42 @@ func NewR2FileService(db *gorm.DB, cfAccountService *CFAccountService) *R2FileSe
 
 // getR2S3Service 获取 R2 S3 服务
 func (s *R2FileService) getR2S3Service(bucket *models.R2Bucket) (*cloudflare.R2S3Service, error) {
-	// 检查是否配置了 Access Key
-	if bucket.R2AccessKeyID == "" || bucket.R2SecretAccessKey == "" {
-		return nil, fmt.Errorf("存储桶未配置 R2 Access Key 和 Secret Key，请在存储桶设置中配置")
+	// 从 CF 账号获取 R2 凭证（账号维度）
+	cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
+	if err != nil {
+		return nil, fmt.Errorf("获取 Cloudflare 账号失败: %w", err)
 	}
 
-	// 检查是否配置了 Account ID
-	accountID := bucket.AccountID
-	if accountID == "" {
-		// 如果存储桶没有保存 Account ID，尝试通过 API Token 获取（向后兼容）
-		cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
-		if err != nil {
-			return nil, fmt.Errorf("获取 Cloudflare 账号失败: %w", err)
-		}
+	// 检查是否配置了 R2 Access Key
+	r2AccessKeyID := s.cfAccountService.GetR2AccessKeyID(cfAccount)
+	r2SecretAccessKey := s.cfAccountService.GetR2SecretAccessKey(cfAccount)
 
+	if r2AccessKeyID == "" || r2SecretAccessKey == "" {
+		return nil, fmt.Errorf("CF 账号未配置 R2 Access Key 和 Secret Key，请在 CF 账号设置中配置")
+	}
+
+	// 获取 Account ID（优先使用账号中的 Account ID）
+	accountID := cfAccount.AccountID
+	if accountID == "" {
+		// 如果账号没有 Account ID，尝试通过 API Token 获取
 		apiToken := s.cfAccountService.GetAPIToken(cfAccount)
 		if apiToken == "" {
-			return nil, fmt.Errorf("存储桶未配置 Account ID，且 Cloudflare 账号未配置 API Token。请在存储桶设置中配置 Account ID")
+			return nil, fmt.Errorf("CF 账号未配置 Account ID 和 API Token。请至少配置其中一个")
 		}
 
 		r2API := cloudflare.NewR2APIService(apiToken)
 		var err2 error
 		accountID, err2 = r2API.GetAccountID()
 		if err2 != nil {
-			return nil, fmt.Errorf("获取账户ID失败: %w。建议在存储桶设置中直接配置 Account ID", err2)
+			return nil, fmt.Errorf("获取账户ID失败: %w。建议在 CF 账号设置中直接配置 Account ID", err2)
 		}
 	}
 
 	// 创建 R2 S3 服务
 	cfg := &cloudflare.R2S3Config{
 		AccountID:       accountID,
-		AccessKeyID:     bucket.R2AccessKeyID,
-		SecretAccessKey: bucket.R2SecretAccessKey,
+		AccessKeyID:     r2AccessKeyID,
+		SecretAccessKey: r2SecretAccessKey,
 		BucketName:      bucket.BucketName,
 	}
 

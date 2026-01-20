@@ -110,7 +110,6 @@ func (s *R2BucketService) CreateR2Bucket(cfAccountID uint, bucketName, location,
 		CFAccountID: cfAccountID,
 		BucketName:  bucketName,
 		Location:    location,
-		AccountID:   accountID, // 保存账户 ID，避免后续需要通过 API Token 获取
 		Note:        note,
 	}
 
@@ -129,8 +128,17 @@ func (s *R2BucketService) DeleteR2Bucket(id uint) error {
 	}
 
 	// 检查存储桶中是否有文件或目录
+	// 从 CF 账号获取 R2 凭证
+	cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
+	if err != nil {
+		return fmt.Errorf("获取 Cloudflare 账号失败: %w", err)
+	}
+
+	r2AccessKeyID := s.cfAccountService.GetR2AccessKeyID(cfAccount)
+	r2SecretAccessKey := s.cfAccountService.GetR2SecretAccessKey(cfAccount)
+
 	// 如果配置了 Access Key，尝试列出文件检查
-	if bucket.R2AccessKeyID != "" && bucket.R2SecretAccessKey != "" {
+	if r2AccessKeyID != "" && r2SecretAccessKey != "" {
 		// 创建 R2 文件服务来检查文件
 		fileService := NewR2FileService(s.db, s.cfAccountService)
 		files, err := fileService.ListFiles(id, "")
@@ -187,37 +195,10 @@ func (s *R2BucketService) UpdateR2BucketNote(id uint, note string) error {
 	return nil
 }
 
-// UpdateR2BucketCredentials 更新存储桶的 R2 Access Key 和 Secret Key
+// UpdateR2BucketCredentials 已废弃：R2 凭证现在是账号维度的，请在 CF 账号管理中配置
+// 保留此方法以保持向后兼容，但实际不做任何操作
 func (s *R2BucketService) UpdateR2BucketCredentials(id uint, accessKeyID, secretAccessKey, accountID string) error {
-	bucket, err := s.GetR2Bucket(id)
-	if err != nil {
-		return err
-	}
-
-	bucket.R2AccessKeyID = accessKeyID
-	bucket.R2SecretAccessKey = secretAccessKey
-	// 如果提供了 Account ID，也更新它
-	if accountID != "" {
-		bucket.AccountID = accountID
-	} else if bucket.AccountID == "" {
-		// 如果没有提供 Account ID 且存储桶也没有，尝试通过 API Token 获取
-		cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
-		if err == nil {
-			apiToken := s.cfAccountService.GetAPIToken(cfAccount)
-			if apiToken != "" {
-				r2API := cloudflare.NewR2APIService(apiToken)
-				if accountID, err := r2API.GetAccountID(); err == nil {
-					bucket.AccountID = accountID
-				}
-			}
-		}
-	}
-
-	if err := s.db.Save(bucket).Error; err != nil {
-		return fmt.Errorf("更新存储桶凭证失败: %w", err)
-	}
-
-	return nil
+	return fmt.Errorf("R2 Access Key 和 Secret Key 现在是账号维度的，请在 CF 账号管理中配置，而不是在存储桶中配置")
 }
 
 // ConfigureCORS 配置 CORS

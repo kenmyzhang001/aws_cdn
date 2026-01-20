@@ -35,7 +35,7 @@ func (s *CFAccountService) GetCFAccount(id uint) (*models.CFAccount, error) {
 }
 
 // CreateCFAccount 创建 Cloudflare 账号
-func (s *CFAccountService) CreateCFAccount(email, password, apiToken, accountID, note string) (*models.CFAccount, error) {
+func (s *CFAccountService) CreateCFAccount(email, password, apiToken, accountID, r2AccessKeyID, r2SecretAccessKey, note string) (*models.CFAccount, error) {
 	// 检查邮箱是否已存在
 	var existingAccount models.CFAccount
 	if err := s.db.Where("email = ?", email).First(&existingAccount).Error; err == nil {
@@ -51,11 +51,13 @@ func (s *CFAccountService) CreateCFAccount(email, password, apiToken, accountID,
 	}
 
 	account := &models.CFAccount{
-		Email:     email,
-		Password:  string(hashedPassword),
-		APIToken:  apiToken, // 暂时明文存储，后续可以改进为加密存储
-		AccountID: accountID,
-		Note:      note,
+		Email:             email,
+		Password:          string(hashedPassword),
+		APIToken:          apiToken, // 暂时明文存储，后续可以改进为加密存储
+		AccountID:         accountID,
+		R2AccessKeyID:     r2AccessKeyID,     // R2 Access Key ID（账号维度）
+		R2SecretAccessKey: r2SecretAccessKey, // R2 Secret Access Key（账号维度）
+		Note:              note,
 	}
 
 	if err := s.db.Create(account).Error; err != nil {
@@ -66,7 +68,7 @@ func (s *CFAccountService) CreateCFAccount(email, password, apiToken, accountID,
 }
 
 // UpdateCFAccount 更新 Cloudflare 账号
-func (s *CFAccountService) UpdateCFAccount(id uint, email, password, apiToken, accountID, note *string) (*models.CFAccount, error) {
+func (s *CFAccountService) UpdateCFAccount(id uint, email, password, apiToken, accountID, r2AccessKeyID, r2SecretAccessKey, note *string) (*models.CFAccount, error) {
 	account, err := s.GetCFAccount(id)
 	if err != nil {
 		return nil, err
@@ -100,6 +102,16 @@ func (s *CFAccountService) UpdateCFAccount(id uint, email, password, apiToken, a
 	// 如果更新 Account ID
 	if accountID != nil {
 		account.AccountID = *accountID
+	}
+
+	// 如果更新 R2 Access Key ID（只有非空字符串才更新）
+	if r2AccessKeyID != nil && *r2AccessKeyID != "" {
+		account.R2AccessKeyID = *r2AccessKeyID
+	}
+
+	// 如果更新 R2 Secret Access Key（只有非空字符串才更新）
+	if r2SecretAccessKey != nil && *r2SecretAccessKey != "" {
+		account.R2SecretAccessKey = *r2SecretAccessKey
 	}
 
 	// 如果更新备注
@@ -148,4 +160,14 @@ func (s *CFAccountService) VerifyPassword(account *models.CFAccount, password st
 func (s *CFAccountService) GetAPIToken(account *models.CFAccount) string {
 	// 暂时直接返回，后续可以改进为解密
 	return account.APIToken
+}
+
+// GetR2AccessKeyID 获取 R2 Access Key ID
+func (s *CFAccountService) GetR2AccessKeyID(account *models.CFAccount) string {
+	return account.R2AccessKeyID
+}
+
+// GetR2SecretAccessKey 获取 R2 Secret Access Key
+func (s *CFAccountService) GetR2SecretAccessKey(account *models.CFAccount) string {
+	return account.R2SecretAccessKey
 }
