@@ -10,10 +10,10 @@ import (
 )
 
 type R2Handler struct {
-	bucketService      *services.R2BucketService
-	domainService      *services.R2CustomDomainService
-	cacheRuleService   *services.R2CacheRuleService
-	fileService        *services.R2FileService
+	bucketService    *services.R2BucketService
+	domainService    *services.R2CustomDomainService
+	cacheRuleService *services.R2CacheRuleService
+	fileService      *services.R2FileService
 }
 
 func NewR2Handler(
@@ -173,6 +173,7 @@ func (h *R2Handler) UpdateR2BucketCredentials(c *gin.Context) {
 	var req struct {
 		AccessKeyID     string `json:"access_key_id" binding:"required"`
 		SecretAccessKey string `json:"secret_access_key" binding:"required"`
+		AccountID       string `json:"account_id"` // 可选，如果不提供会尝试自动获取
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -181,7 +182,7 @@ func (h *R2Handler) UpdateR2BucketCredentials(c *gin.Context) {
 		return
 	}
 
-	if err := h.bucketService.UpdateR2BucketCredentials(uint(id), req.AccessKeyID, req.SecretAccessKey); err != nil {
+	if err := h.bucketService.UpdateR2BucketCredentials(uint(id), req.AccessKeyID, req.SecretAccessKey, req.AccountID); err != nil {
 		log.WithError(err).Error("更新R2存储桶凭证操作失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -227,7 +228,7 @@ func (h *R2Handler) ConfigureCORS(c *gin.Context) {
 	}
 
 	log.WithFields(map[string]interface{}{
-		"bucket_id": bucket.ID,
+		"bucket_id":   bucket.ID,
 		"bucket_name": bucket.BucketName,
 	}).Info("CORS配置成功")
 	c.JSON(http.StatusOK, gin.H{"message": "CORS配置成功"})

@@ -9,13 +9,13 @@ import (
 )
 
 type R2BucketService struct {
-	db              *gorm.DB
+	db               *gorm.DB
 	cfAccountService *CFAccountService
 }
 
 func NewR2BucketService(db *gorm.DB, cfAccountService *CFAccountService) *R2BucketService {
 	return &R2BucketService{
-		db:              db,
+		db:               db,
 		cfAccountService: cfAccountService,
 	}
 }
@@ -103,6 +103,7 @@ func (s *R2BucketService) CreateR2Bucket(cfAccountID uint, bucketName, location,
 		CFAccountID: cfAccountID,
 		BucketName:  bucketName,
 		Location:    location,
+		AccountID:   accountID, // 保存账户 ID，避免后续需要通过 API Token 获取
 		Note:        note,
 	}
 
@@ -145,7 +146,7 @@ func (s *R2BucketService) UpdateR2BucketNote(id uint, note string) error {
 }
 
 // UpdateR2BucketCredentials 更新存储桶的 R2 Access Key 和 Secret Key
-func (s *R2BucketService) UpdateR2BucketCredentials(id uint, accessKeyID, secretAccessKey string) error {
+func (s *R2BucketService) UpdateR2BucketCredentials(id uint, accessKeyID, secretAccessKey, accountID string) error {
 	bucket, err := s.GetR2Bucket(id)
 	if err != nil {
 		return err
@@ -153,6 +154,23 @@ func (s *R2BucketService) UpdateR2BucketCredentials(id uint, accessKeyID, secret
 
 	bucket.R2AccessKeyID = accessKeyID
 	bucket.R2SecretAccessKey = secretAccessKey
+	// 如果提供了 Account ID，也更新它
+	if accountID != "" {
+		bucket.AccountID = accountID
+	} else if bucket.AccountID == "" {
+		// 如果没有提供 Account ID 且存储桶也没有，尝试通过 API Token 获取
+		cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
+		if err == nil {
+			apiToken := s.cfAccountService.GetAPIToken(cfAccount)
+			if apiToken != "" {
+				r2API := cloudflare.NewR2APIService(apiToken)
+				if accountID, err := r2API.GetAccountID(); err == nil {
+					bucket.AccountID = accountID
+				}
+			}
+		}
+	}
+
 	if err := s.db.Save(bucket).Error; err != nil {
 		return fmt.Errorf("更新存储桶凭证失败: %w", err)
 	}

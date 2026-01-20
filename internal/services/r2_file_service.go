@@ -28,21 +28,26 @@ func (s *R2FileService) getR2S3Service(bucket *models.R2Bucket) (*cloudflare.R2S
 		return nil, fmt.Errorf("存储桶未配置 R2 Access Key 和 Secret Key，请在存储桶设置中配置")
 	}
 
-	// 获取账户 ID
-	cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
-	if err != nil {
-		return nil, err
-	}
+	// 检查是否配置了 Account ID
+	accountID := bucket.AccountID
+	if accountID == "" {
+		// 如果存储桶没有保存 Account ID，尝试通过 API Token 获取（向后兼容）
+		cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
+		if err != nil {
+			return nil, fmt.Errorf("获取 Cloudflare 账号失败: %w", err)
+		}
 
-	apiToken := s.cfAccountService.GetAPIToken(cfAccount)
-	if apiToken == "" {
-		return nil, fmt.Errorf("Cloudflare账号未配置API Token")
-	}
+		apiToken := s.cfAccountService.GetAPIToken(cfAccount)
+		if apiToken == "" {
+			return nil, fmt.Errorf("存储桶未配置 Account ID，且 Cloudflare 账号未配置 API Token。请在存储桶设置中配置 Account ID")
+		}
 
-	r2API := cloudflare.NewR2APIService(apiToken)
-	accountID, err := r2API.GetAccountID()
-	if err != nil {
-		return nil, fmt.Errorf("获取账户ID失败: %w", err)
+		r2API := cloudflare.NewR2APIService(apiToken)
+		var err2 error
+		accountID, err2 = r2API.GetAccountID()
+		if err2 != nil {
+			return nil, fmt.Errorf("获取账户ID失败: %w。建议在存储桶设置中直接配置 Account ID", err2)
+		}
 	}
 
 	// 创建 R2 S3 服务
