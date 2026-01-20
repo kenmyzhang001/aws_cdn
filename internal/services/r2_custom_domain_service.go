@@ -1,6 +1,7 @@
 package services
 
 import (
+	"aws_cdn/internal/config"
 	"aws_cdn/internal/logger"
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/cloudflare"
@@ -11,17 +12,41 @@ import (
 )
 
 type R2CustomDomainService struct {
-	db                *gorm.DB
-	cfAccountService  *CFAccountService
-	cloudflareService *cloudflare.CloudflareService
+	db               *gorm.DB
+	cfAccountService *CFAccountService
 }
 
-func NewR2CustomDomainService(db *gorm.DB, cfAccountService *CFAccountService, cloudflareService *cloudflare.CloudflareService) *R2CustomDomainService {
+func NewR2CustomDomainService(db *gorm.DB, cfAccountService *CFAccountService) *R2CustomDomainService {
 	return &R2CustomDomainService{
-		db:                db,
-		cfAccountService:  cfAccountService,
-		cloudflareService: cloudflareService,
+		db:               db,
+		cfAccountService: cfAccountService,
 	}
+}
+
+// createCloudflareService 根据 CF 账号信息创建 CloudflareService
+func (s *R2CustomDomainService) createCloudflareService(cfAccount *models.CFAccount) (*cloudflare.CloudflareService, error) {
+	// 获取 API Token（优先使用 APIToken，如果没有则使用 R2APIToken）
+	apiToken := s.cfAccountService.GetAPIToken(cfAccount)
+	if apiToken == "" {
+		apiToken = s.cfAccountService.GetR2APIToken(cfAccount)
+	}
+
+	if apiToken == "" {
+		return nil, fmt.Errorf("Cloudflare账号未配置 API Token")
+	}
+
+	// 创建临时配置
+	cfg := &config.CloudflareConfig{
+		APIToken: apiToken,
+	}
+
+	// 创建 CloudflareService
+	cloudflareSvc, err := cloudflare.NewCloudflareService(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("创建 CloudflareService 失败: %w", err)
+	}
+
+	return cloudflareSvc, nil
 }
 
 // ListR2CustomDomains 列出所有自定义域名
@@ -67,6 +92,12 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 
 	accountID := cfAccount.AccountID
 
+	// 根据 CF 账号信息创建 CloudflareService
+	cloudflareSvc, err := s.createCloudflareService(cfAccount)
+	if err != nil {
+		return nil, fmt.Errorf("创建 CloudflareService 失败: %w", err)
+	}
+
 	// 获取 Zone ID（用于添加自定义域名）
 	// 注意：如果 domain 是子域名（如 assets.example.com），需要先提取根域名（example.com）
 	// 因为 Cloudflare Zone 是基于根域名创建的
@@ -81,7 +112,7 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 		}).Info("检测到子域名，使用根域名获取 Zone ID")
 	}
 
-	zoneID, err := s.cloudflareService.GetZoneID(rootDomain)
+	zoneID, err := cloudflareSvc.GetZoneID(rootDomain)
 	if err != nil {
 		// Zone ID 获取失败不影响域名添加，Cloudflare 会自动查找
 		zoneID = ""
