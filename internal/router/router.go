@@ -62,12 +62,12 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 	// 初始化服务
 	auditService := services.NewAuditService(db)
 	groupService := services.NewGroupService(db)
-	domainService := services.NewDomainService(db, route53Svc, acmSvc, cloudFrontSvc, s3Svc, cloudflareSvc)
+	cfAccountService := services.NewCFAccountService(db)
+	domainService := services.NewDomainService(db, route53Svc, acmSvc, cloudFrontSvc, s3Svc, cloudflareSvc, cfAccountService)
 	redirectService := services.NewRedirectService(db, cloudFrontSvc, s3Svc, domainService, &cfg.AWS)
 	authService := services.NewAuthService(db, &cfg.JWT)
 	cloudFrontService := services.NewCloudFrontService(cloudFrontSvc, s3Origin)
 	downloadPackageService := services.NewDownloadPackageService(db, domainService, cloudFrontSvc, s3Svc, route53Svc, &cfg.AWS)
-	cfAccountService := services.NewCFAccountService(db)
 
 	// 初始化 R2 服务
 	r2BucketService := services.NewR2BucketService(db, cfAccountService)

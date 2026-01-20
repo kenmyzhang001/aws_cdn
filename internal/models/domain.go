@@ -31,6 +31,7 @@ type Domain struct {
 	Registrar         string         `json:"registrar"`                                          // 原注册商
 	GroupID           *uint          `json:"group_id" gorm:"index"`                              // 所属分组ID
 	Group             *Group         `json:"group,omitempty" gorm:"foreignKey:GroupID"`          // 分组关联
+	CFAccountID       *uint          `json:"cf_account_id" gorm:"index"`                         // 关联的 Cloudflare 账号 ID（可选）
 	DNSProvider       DNSProvider    `json:"dns_provider" gorm:"type:varchar(20);default:'aws'"` // DNS提供商: aws, cloudflare
 	Status            DomainStatus   `json:"status" gorm:"default:'pending'"`
 	NServers          string         `json:"n_servers" gorm:"type:text"`                  // NS 服务器配置，JSON 格式

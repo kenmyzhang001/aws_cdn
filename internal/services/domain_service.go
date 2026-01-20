@@ -1,6 +1,7 @@
 package services
 
 import (
+	"aws_cdn/internal/config"
 	"aws_cdn/internal/logger"
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/aws"
@@ -14,27 +15,69 @@ import (
 )
 
 type DomainService struct {
-	db            *gorm.DB
-	route53Svc    *aws.Route53Service
-	acmSvc        *aws.ACMService
-	cloudFrontSvc *aws.CloudFrontService
-	s3Svc         *aws.S3Service
-	cloudflareSvc *cloudflare.CloudflareService
+	db               *gorm.DB
+	route53Svc       *aws.Route53Service
+	acmSvc           *aws.ACMService
+	cloudFrontSvc    *aws.CloudFrontService
+	s3Svc            *aws.S3Service
+	cloudflareSvc    *cloudflare.CloudflareService
+	cfAccountService *CFAccountService
 }
 
-func NewDomainService(db *gorm.DB, route53Svc *aws.Route53Service, acmSvc *aws.ACMService, cloudFrontSvc *aws.CloudFrontService, s3Svc *aws.S3Service, cloudflareSvc *cloudflare.CloudflareService) *DomainService {
+func NewDomainService(db *gorm.DB, route53Svc *aws.Route53Service, acmSvc *aws.ACMService, cloudFrontSvc *aws.CloudFrontService, s3Svc *aws.S3Service, cloudflareSvc *cloudflare.CloudflareService, cfAccountService *CFAccountService) *DomainService {
 	return &DomainService{
-		db:            db,
-		route53Svc:    route53Svc,
-		acmSvc:        acmSvc,
-		cloudFrontSvc: cloudFrontSvc,
-		s3Svc:         s3Svc,
-		cloudflareSvc: cloudflareSvc,
+		db:               db,
+		route53Svc:       route53Svc,
+		acmSvc:           acmSvc,
+		cloudFrontSvc:    cloudFrontSvc,
+		s3Svc:            s3Svc,
+		cloudflareSvc:    cloudflareSvc,
+		cfAccountService: cfAccountService,
 	}
 }
 
+// createCloudflareService 根据 CF 账号 ID 创建 CloudflareService
+func (s *DomainService) createCloudflareService(cfAccountID *uint) (*cloudflare.CloudflareService, error) {
+	// 如果没有提供 CF 账号 ID，使用全局的 cloudflareSvc（向后兼容）
+	if cfAccountID == nil || *cfAccountID == 0 {
+		if s.cloudflareSvc != nil {
+			return s.cloudflareSvc, nil
+		}
+		return nil, fmt.Errorf("未提供 CF 账号 ID 且全局 CloudflareService 未配置")
+	}
+
+	// 获取 CF 账号信息
+	cfAccount, err := s.cfAccountService.GetCFAccount(*cfAccountID)
+	if err != nil {
+		return nil, fmt.Errorf("获取 Cloudflare 账号失败: %w", err)
+	}
+
+	// 获取 API Token（优先使用 APIToken，如果没有则使用 R2APIToken）
+	apiToken := s.cfAccountService.GetAPIToken(cfAccount)
+	if apiToken == "" {
+		apiToken = s.cfAccountService.GetR2APIToken(cfAccount)
+	}
+
+	if apiToken == "" {
+		return nil, fmt.Errorf("Cloudflare账号未配置 API Token")
+	}
+
+	// 创建临时配置
+	cfg := &config.CloudflareConfig{
+		APIToken: apiToken,
+	}
+
+	// 创建 CloudflareService
+	cloudflareSvc, err := cloudflare.NewCloudflareService(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("创建 CloudflareService 失败: %w", err)
+	}
+
+	return cloudflareSvc, nil
+}
+
 // TransferDomain 转入域名到 AWS 或 Cloudflare
-func (s *DomainService) TransferDomain(domainName, registrar string, dnsProvider models.DNSProvider, groupID *uint) (*models.Domain, error) {
+func (s *DomainService) TransferDomain(domainName, registrar string, dnsProvider models.DNSProvider, cfAccountID *uint, groupID *uint) (*models.Domain, error) {
 	log := logger.GetLogger()
 	log.WithFields(map[string]interface{}{
 		"domain_name":  domainName,
@@ -59,7 +102,18 @@ func (s *DomainService) TransferDomain(domainName, registrar string, dnsProvider
 	if dnsProvider == models.DNSProviderCloudflare {
 		// Cloudflare: 获取Zone ID
 		log.WithField("domain_name", domainName).Info("开始获取Cloudflare Zone ID")
-		zoneID, err := s.cloudflareSvc.GetZoneID(domainName)
+
+		// 根据 cfAccountID 创建 CloudflareService
+		cloudflareSvc, err := s.createCloudflareService(cfAccountID)
+		if err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"domain_name":   domainName,
+				"cf_account_id": cfAccountID,
+			}).Error("创建 CloudflareService 失败")
+			return nil, fmt.Errorf("创建 CloudflareService 失败: %w", err)
+		}
+
+		zoneID, err := cloudflareSvc.GetZoneID(domainName)
 		if err != nil {
 			log.WithError(err).WithField("domain_name", domainName).Error("获取Cloudflare Zone ID失败")
 			return nil, fmt.Errorf("获取Cloudflare Zone ID失败: %w", err)
@@ -111,8 +165,9 @@ func (s *DomainService) TransferDomain(domainName, registrar string, dnsProvider
 	// 创建域名记录
 	domain := &models.Domain{
 		DomainName:   domainName,
-		Registrar:    registrar,
+		Registrar:    registrar, // 保留字段以保持向后兼容，但不再强制要求
 		GroupID:      finalGroupID,
+		CFAccountID:  cfAccountID, // 关联的 CF 账号 ID
 		DNSProvider:  dnsProvider,
 		Status:       models.DomainStatusCompleted,
 		NServers:     nsServersJSON,
@@ -278,6 +333,20 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 			skippedCount := 0
 
 			// 将验证记录添加到 DNS 提供商
+			// 如果是 Cloudflare，先创建 CloudflareService
+			var cloudflareSvc *cloudflare.CloudflareService
+			if domain.DNSProvider == models.DNSProviderCloudflare {
+				var err error
+				cloudflareSvc, err = s.createCloudflareService(domain.CFAccountID)
+				if err != nil {
+					log.WithError(err).WithFields(map[string]interface{}{
+						"domain_id":     domain.ID,
+						"cf_account_id": domain.CFAccountID,
+					}).Error("创建 CloudflareService 失败")
+					// 继续执行，但会在后续操作中失败
+				}
+			}
+
 			for _, record := range validationRecords {
 				if record.Type == "CNAME" {
 					var err error
@@ -292,7 +361,11 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 						recordName = extractRelativeDomainName(record.Name, domain.DomainName)
 
 						// 先检查记录是否已存在
-						exists, checkErr = s.cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, recordName, record.Value)
+						if cloudflareSvc != nil {
+							exists, checkErr = cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, recordName, record.Value)
+						} else {
+							checkErr = fmt.Errorf("CloudflareService 未创建")
+						}
 						if checkErr != nil {
 							log.WithError(checkErr).WithFields(map[string]interface{}{
 								"domain_id":    domain.ID,
@@ -322,7 +395,11 @@ func (s *DomainService) requestCertificateAsync(domain *models.Domain) {
 							"root_domain":   domain.DomainName,
 						}).Info("添加验证记录到Cloudflare")
 
-						err = s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, recordName, record.Value)
+						if cloudflareSvc != nil {
+							err = cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, recordName, record.Value)
+						} else {
+							err = fmt.Errorf("CloudflareService 未创建")
+						}
 					} else {
 						// 先检查记录是否已存在
 						exists, checkErr = s.route53Svc.CheckCertificateValidationCNAME(domain.HostedZoneID, record.Name, record.Value)
@@ -736,6 +813,20 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 			skippedCount := 0
 			successCount := 0
 
+			// 如果是 Cloudflare，先创建 CloudflareService
+			var cloudflareSvc *cloudflare.CloudflareService
+			if domain.DNSProvider == models.DNSProviderCloudflare {
+				var err error
+				cloudflareSvc, err = s.createCloudflareService(domain.CFAccountID)
+				if err != nil {
+					log.WithError(err).WithFields(map[string]interface{}{
+						"domain_id":     id,
+						"cf_account_id": domain.CFAccountID,
+					}).Error("创建 CloudflareService 失败")
+					return fmt.Errorf("创建 CloudflareService 失败: %w", err)
+				}
+			}
+
 			// 将验证记录添加到 DNS 提供商
 			for i, record := range validationRecords {
 				log.WithFields(map[string]interface{}{
@@ -759,7 +850,11 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 					if domain.DNSProvider == models.DNSProviderCloudflare {
 						// 对于 Cloudflare，提取相对域名部分
 						recordName = extractRelativeDomainName(record.Name, domain.DomainName)
-						exists, checkErr = s.cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, recordName, record.Value)
+						if cloudflareSvc != nil {
+							exists, checkErr = cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, recordName, record.Value)
+						} else {
+							checkErr = fmt.Errorf("CloudflareService 未创建")
+						}
 					} else {
 						exists, checkErr = s.route53Svc.CheckCertificateValidationCNAME(domain.HostedZoneID, record.Name, record.Value)
 					}
@@ -804,7 +899,11 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 							"record_value":  record.Value,
 							"zone_id":       domain.HostedZoneID,
 						}).Info("调用Cloudflare API创建CNAME记录")
-						err = s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, recordName, record.Value)
+						if cloudflareSvc != nil {
+							err = cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, recordName, record.Value)
+						} else {
+							err = fmt.Errorf("CloudflareService 未创建")
+						}
 					} else {
 						log.WithFields(map[string]interface{}{
 							"domain_id":      id,
@@ -922,12 +1021,30 @@ func (s *DomainService) GenerateCertificate(id uint) error {
 				"domain_id":    id,
 				"record_count": len(validationRecords),
 			}).Info("开始添加验证记录到DNS提供商")
+			// 如果是 Cloudflare，先创建 CloudflareService
+			var cloudflareSvc *cloudflare.CloudflareService
+			if domain.DNSProvider == models.DNSProviderCloudflare {
+				var err error
+				cloudflareSvc, err = s.createCloudflareService(domain.CFAccountID)
+				if err != nil {
+					log.WithError(err).WithFields(map[string]interface{}{
+						"domain_id":     id,
+						"cf_account_id": domain.CFAccountID,
+					}).Error("创建 CloudflareService 失败")
+					return fmt.Errorf("创建 CloudflareService 失败: %w", err)
+				}
+			}
+
 			// 将验证记录添加到 DNS 提供商
 			for _, record := range validationRecords {
 				if record.Type == "CNAME" {
 					var err error
 					if domain.DNSProvider == models.DNSProviderCloudflare {
-						err = s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
+						if cloudflareSvc != nil {
+							err = cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
+						} else {
+							err = fmt.Errorf("CloudflareService 未创建")
+						}
 					} else {
 						err = s.route53Svc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
 					}
@@ -1187,7 +1304,11 @@ func (s *DomainService) CreateCloudFrontCNAMERecord(domain *models.Domain, cloud
 	}
 
 	if domain.DNSProvider == models.DNSProviderCloudflare {
-		return s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, domain.DomainName, cloudFrontValue)
+		cloudflareSvc, err := s.createCloudflareService(domain.CFAccountID)
+		if err != nil {
+			return fmt.Errorf("创建 CloudflareService 失败: %w", err)
+		}
+		return cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, domain.DomainName, cloudFrontValue)
 	} else {
 		// AWS Route53: 使用Alias记录（A记录）
 		return s.route53Svc.CreateAliasRecord(domain.HostedZoneID, domain.DomainName, cloudFrontDomainName)
@@ -1213,7 +1334,11 @@ func (s *DomainService) CheckCloudFrontCNAMERecord(domain *models.Domain, cloudF
 	}
 
 	if domain.DNSProvider == models.DNSProviderCloudflare {
-		return s.cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, domain.DomainName, cloudFrontValue)
+		cloudflareSvc, err := s.createCloudflareService(domain.CFAccountID)
+		if err != nil {
+			return false, fmt.Errorf("创建 CloudflareService 失败: %w", err)
+		}
+		return cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, domain.DomainName, cloudFrontValue)
 	} else {
 		// AWS Route53: 检查Alias记录
 		return s.route53Svc.CheckCloudFrontAliasRecord(domain.HostedZoneID, domain.DomainName, cloudFrontDomainName)
@@ -1239,7 +1364,11 @@ func (s *DomainService) CreateWWWCNAMERecord(domain *models.Domain) error {
 
 	// 创建 CNAME 记录：www.example.com -> example.com
 	if domain.DNSProvider == models.DNSProviderCloudflare {
-		return s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, wwwDomain, rootDomainValue)
+		cloudflareSvc, err := s.createCloudflareService(domain.CFAccountID)
+		if err != nil {
+			return fmt.Errorf("创建 CloudflareService 失败: %w", err)
+		}
+		return cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, wwwDomain, rootDomainValue)
 	} else {
 		return s.route53Svc.CreateCNAMERecord(domain.HostedZoneID, wwwDomain, rootDomainValue)
 	}
@@ -1259,7 +1388,11 @@ func (s *DomainService) CheckWWWCNAMERecord(domain *models.Domain) (bool, error)
 	}
 
 	if domain.DNSProvider == models.DNSProviderCloudflare {
-		return s.cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, wwwDomain, rootDomainValue)
+		cloudflareSvc, err := s.createCloudflareService(domain.CFAccountID)
+		if err != nil {
+			return false, fmt.Errorf("创建 CloudflareService 失败: %w", err)
+		}
+		return cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, wwwDomain, rootDomainValue)
 	} else {
 		return s.route53Svc.CheckWWWCNAMERecord(domain.HostedZoneID, rootDomain)
 	}
@@ -1337,6 +1470,18 @@ func (s *DomainService) CheckCertificate(id uint) (*CertificateCheckResult, erro
 			return result, nil
 		}
 
+		// 如果是 Cloudflare，先创建 CloudflareService
+		var cloudflareSvc *cloudflare.CloudflareService
+		if domain.DNSProvider == models.DNSProviderCloudflare {
+			var err error
+			cloudflareSvc, err = s.createCloudflareService(domain.CFAccountID)
+			if err != nil {
+				result.HasIssues = true
+				result.Issues = append(result.Issues, fmt.Sprintf("创建 CloudflareService 失败: %v", err))
+				return result, nil
+			}
+		}
+
 		// 检查每个验证记录的CNAME是否存在于DNS提供商
 		for _, record := range validationRecords {
 			if record.Type == "CNAME" {
@@ -1347,7 +1492,11 @@ func (s *DomainService) CheckCertificate(id uint) (*CertificateCheckResult, erro
 				var exists bool
 				var err error
 				if domain.DNSProvider == models.DNSProviderCloudflare {
-					exists, err = s.cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
+					if cloudflareSvc != nil {
+						exists, err = cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
+					} else {
+						err = fmt.Errorf("CloudflareService 未创建")
+					}
 				} else {
 					exists, err = s.route53Svc.CheckCertificateValidationCNAME(domain.HostedZoneID, record.Name, record.Value)
 				}
@@ -1406,23 +1555,45 @@ func (s *DomainService) FixCertificate(id uint) error {
 			return fmt.Errorf("获取证书验证记录失败: %w", err)
 		}
 
+		// 如果是 Cloudflare，先创建 CloudflareService
+		var cloudflareSvc *cloudflare.CloudflareService
+		if domain.DNSProvider == models.DNSProviderCloudflare {
+			var err error
+			cloudflareSvc, err = s.createCloudflareService(domain.CFAccountID)
+			if err != nil {
+				return fmt.Errorf("创建 CloudflareService 失败: %w", err)
+			}
+		}
+
 		// 添加缺失的CNAME记录
 		for _, record := range validationRecords {
 			if record.Type == "CNAME" {
 				var exists bool
 				var err error
 				if domain.DNSProvider == models.DNSProviderCloudflare {
-					exists, err = s.cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
+					if cloudflareSvc != nil {
+						exists, err = cloudflareSvc.CheckCNAMERecord(domain.HostedZoneID, record.Name, record.Value)
+					} else {
+						err = fmt.Errorf("CloudflareService 未创建")
+					}
 					if err != nil {
 						// 如果检查失败，尝试直接创建（可能是记录不存在）
-						if err := s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value); err != nil {
-							return fmt.Errorf("创建CNAME记录失败 (%s): %w", record.Name, err)
+						if cloudflareSvc != nil {
+							if err := cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value); err != nil {
+								return fmt.Errorf("创建CNAME记录失败 (%s): %w", record.Name, err)
+							}
+						} else {
+							return fmt.Errorf("CloudflareService 未创建，无法创建CNAME记录 (%s)", record.Name)
 						}
 						continue
 					}
 					if !exists {
-						if err := s.cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value); err != nil {
-							return fmt.Errorf("创建CNAME记录失败 (%s): %w", record.Name, err)
+						if cloudflareSvc != nil {
+							if err := cloudflareSvc.CreateCNAMERecord(domain.HostedZoneID, record.Name, record.Value); err != nil {
+								return fmt.Errorf("创建CNAME记录失败 (%s): %w", record.Name, err)
+							}
+						} else {
+							return fmt.Errorf("CloudflareService 未创建，无法创建CNAME记录 (%s)", record.Name)
 						}
 					}
 				} else {

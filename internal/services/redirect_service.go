@@ -447,7 +447,7 @@ func (s *RedirectService) CreateRedirectRule(sourceDomain string, targetURLs []s
 					dnsProviderEnum = models.DNSProviderCloudflare
 				}
 				// 使用重定向规则的分组ID创建域名，确保它们在同一个分组
-				domain, domainErr = s.domainSvc.TransferDomain(sourceDomain, "系统自动创建", dnsProviderEnum, finalGroupID)
+				domain, domainErr = s.domainSvc.TransferDomain(sourceDomain, "系统自动创建", dnsProviderEnum, nil, finalGroupID)
 				if domainErr != nil {
 					log := logger.GetLogger()
 					log.WithError(domainErr).WithFields(map[string]interface{}{

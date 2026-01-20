@@ -23,9 +23,10 @@ func (h *DomainHandler) TransferDomain(c *gin.Context) {
 	log := logger.GetLogger()
 	var req struct {
 		DomainName  string `json:"domain_name" binding:"required"`
-		Registrar   string `json:"registrar" binding:"required"`
-		DNSProvider string `json:"dns_provider"` // aws 或 cloudflare，默认为 aws
-		GroupID     *uint  `json:"group_id"`     // 分组ID，可选
+		Registrar   string `json:"registrar"`     // 原注册商（可选，已废弃）
+		DNSProvider string `json:"dns_provider"`  // aws 或 cloudflare，默认为 aws
+		CFAccountID *uint  `json:"cf_account_id"` // CF 账号 ID（可选）
+		GroupID     *uint  `json:"group_id"`      // 分组ID，可选
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -52,7 +53,7 @@ func (h *DomainHandler) TransferDomain(c *gin.Context) {
 		return
 	}
 
-	domain, err := h.service.TransferDomain(req.DomainName, req.Registrar, dnsProvider, req.GroupID)
+	domain, err := h.service.TransferDomain(req.DomainName, req.Registrar, dnsProvider, req.CFAccountID, req.GroupID)
 	if err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
 			"domain_name":  req.DomainName,

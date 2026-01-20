@@ -178,13 +178,23 @@
         <el-form-item label="域名" required>
           <el-input v-model="transferForm.domain_name" placeholder="例如: example.com" />
         </el-form-item>
-        <el-form-item label="原注册商" required>
-          <el-input v-model="transferForm.registrar" placeholder="例如: GoDaddy aliyun" />
-        </el-form-item>
         <el-form-item label="DNS提供商" required>
           <el-select v-model="transferForm.dns_provider" disabled style="width: 100%">
             <el-option label="Cloudflare" value="cloudflare" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="CF 账号">
+          <el-select v-model="transferForm.cf_account_id" placeholder="请选择 CF 账号（可选）" clearable style="width: 100%">
+            <el-option
+              v-for="account in cfAccountList"
+              :key="account.id"
+              :label="account.email"
+              :value="account.id"
+            />
+          </el-select>
+          <div style="font-size: 12px; color: #909399; margin-top: 5px">
+            选择 CF 账号用于域名管理操作
+          </div>
         </el-form-item>
         <el-form-item label="分组">
           <el-select v-model="transferForm.group_id" placeholder="请选择分组（不选则使用默认分组）" clearable style="width: 100%">
@@ -343,6 +353,7 @@
 import { ref, onMounted } from 'vue'
 import { domainApi } from '@/api/domain'
 import { groupApi } from '@/api/group'
+import { cfAccountApi } from '@/api/cf_account'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Edit } from '@element-plus/icons-vue'
 
@@ -361,10 +372,11 @@ let searchTimer = null
 
 const showTransferDialog = ref(false)
 const transferLoading = ref(false)
+const cfAccountList = ref([])
 const transferForm = ref({
   domain_name: '',
-  registrar: '',
   dns_provider: 'cloudflare', // 默认选择 Cloudflare
+  cf_account_id: null,
   group_id: null,
 })
 
@@ -395,7 +407,18 @@ const moveGroupLoading = ref(false)
 onMounted(() => {
   loadGroups()
   loadDomains()
+  loadCFAccounts()
 })
+
+// 加载 CF 账号列表
+const loadCFAccounts = async () => {
+  try {
+    const res = await cfAccountApi.getCFAccountList()
+    cfAccountList.value = res || []
+  } catch (error) {
+    console.error('加载 CF 账号列表失败', error)
+  }
+}
 
 const loadGroups = async () => {
   try {
@@ -481,21 +504,25 @@ const handleUsageFilterChange = () => {
 }
 
 const handleTransfer = async () => {
-  if (!transferForm.value.domain_name || !transferForm.value.registrar) {
-    ElMessage.warning('请填写完整信息')
+  if (!transferForm.value.domain_name) {
+    ElMessage.warning('请填写域名')
     return
   }
 
   transferLoading.value = true
   try {
     const data = { ...transferForm.value }
+    // 移除空值字段
     if (!data.group_id) {
       delete data.group_id
+    }
+    if (!data.cf_account_id) {
+      delete data.cf_account_id
     }
     await domainApi.transferDomain(data)
     ElMessage.success('域名转入请求已提交')
     showTransferDialog.value = false
-    transferForm.value = { domain_name: '', registrar: '', dns_provider: 'cloudflare', group_id: null }
+    transferForm.value = { domain_name: '', dns_provider: 'cloudflare', cf_account_id: null, group_id: null }
     loadGroups()
     loadDomains()
   } catch (error) {
