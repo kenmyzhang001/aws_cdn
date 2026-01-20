@@ -6,6 +6,7 @@ import DownloadPackageList from '@/views/DownloadPackageList.vue'
 import AuditLogList from '@/views/AuditLogList.vue'
 import GroupList from '@/views/GroupList.vue'
 import CfAccountList from '@/views/CfAccountList.vue'
+import R2BucketList from '@/views/R2BucketList.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -52,6 +53,11 @@ const routes = [
     path: '/cf-accounts',
     name: 'CfAccountList',
     component: CfAccountList,
+  },
+  {
+    path: '/r2-buckets',
+    name: 'R2BucketList',
+    component: R2BucketList,
   },
 ]
 

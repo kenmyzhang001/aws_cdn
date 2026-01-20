@@ -28,13 +28,18 @@
             <el-icon><Download /></el-icon>
             <span>下载包管理</span>
           </el-menu-item>
-          <el-menu-item index="/audit-logs">
-            <el-icon><Document /></el-icon>
-            <span>审计日志</span>
-          </el-menu-item>
+
           <el-menu-item index="/cf-accounts">
             <el-icon><User /></el-icon>
             <span>CF 账号管理</span>
+          </el-menu-item>
+          <el-menu-item index="/r2-buckets">
+            <el-icon><Box /></el-icon>
+            <span>R2 存储桶管理</span>
+          </el-menu-item>
+          <el-menu-item index="/audit-logs">
+            <el-icon><Document /></el-icon>
+            <span>审计日志</span>
           </el-menu-item>
           <!--el-menu-item index="/cloudfront">
             <el-icon><Connection /></el-icon>
@@ -52,7 +57,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Link, RefreshRight, Connection, Download, Document, Folder, User } from '@element-plus/icons-vue'
+import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)
