@@ -82,6 +82,7 @@ export const r2Api = {
       },
       onUploadProgress: onProgress,
       cancelToken: cancelToken,
+      timeout: 600000, // 10分钟超时
     })
   },
 

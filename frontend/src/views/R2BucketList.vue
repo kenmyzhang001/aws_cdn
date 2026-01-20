@@ -130,7 +130,7 @@
             v-model="corsForm.corsConfig"
             type="textarea"
             :rows="12"
-            placeholder='请输入 JSON 格式的 CORS 配置，例如：[{"AllowedOrigins":["*"],"AllowedMethods":["GET","HEAD"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3600}]'
+            placeholder='请输入 JSON 格式的 CORS 配置，例如：[{"allowed":{"origins":["*"],"methods":["GET","HEAD","PUT","POST","DELETE"],"headers":["*"]},"exposeHeaders":["ETag","Content-Length","Content-Type"],"maxAgeSeconds":3600,"id":"rule-0"}]'
           />
         </el-form-item>
       </el-form>
@@ -193,11 +193,14 @@ const corsForm = ref({
   bucketId: null,
   corsConfig: JSON.stringify([
     {
-      AllowedOrigins: ['*'],
-      AllowedMethods: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
-      AllowedHeaders: ['*'],
-      ExposeHeaders: ['ETag', 'Content-Length'],
-      MaxAgeSeconds: 3600,
+      allowed: {
+        origins: ['*'],
+        methods: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
+        headers: ['*'],
+      },
+      exposeHeaders: ['ETag', 'Content-Length', 'Content-Type'],
+      maxAgeSeconds: 3600,
+      id: 'rule-0',
     },
   ], null, 2),
 })
