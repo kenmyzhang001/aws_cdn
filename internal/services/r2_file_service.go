@@ -1,6 +1,7 @@
 package services
 
 import (
+	"aws_cdn/internal/logger"
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/cloudflare"
 	"fmt"
@@ -23,41 +24,122 @@ func NewR2FileService(db *gorm.DB, cfAccountService *CFAccountService) *R2FileSe
 
 // getR2S3Service 获取 R2 S3 服务
 func (s *R2FileService) getR2S3Service(bucket *models.R2Bucket) (*cloudflare.R2S3Service, error) {
+	log := logger.GetLogger()
+
+	log.WithFields(map[string]interface{}{
+		"bucket_id":     bucket.ID,
+		"bucket_name":   bucket.BucketName,
+		"cf_account_id": bucket.CFAccountID,
+	}).Info("开始获取 R2 S3 服务")
+
 	// 从 CF 账号获取 R2 凭证（账号维度）
 	cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
 	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"bucket_id":     bucket.ID,
+			"cf_account_id": bucket.CFAccountID,
+		}).Error("获取 Cloudflare 账号失败")
 		return nil, fmt.Errorf("获取 Cloudflare 账号失败: %w", err)
 	}
+
+	log.WithFields(map[string]interface{}{
+		"bucket_id":   bucket.ID,
+		"bucket_name": bucket.BucketName,
+		"cf_account":  cfAccount.Email,
+	}).Info("成功获取 CF 账号信息")
 
 	// 检查是否配置了 R2 Access Key
 	r2AccessKeyID := s.cfAccountService.GetR2AccessKeyID(cfAccount)
 	r2SecretAccessKey := s.cfAccountService.GetR2SecretAccessKey(cfAccount)
 
+	log.WithFields(map[string]interface{}{
+		"bucket_id":      bucket.ID,
+		"has_access_key": r2AccessKeyID != "",
+		"has_secret_key": r2SecretAccessKey != "",
+		"access_key_len": len(r2AccessKeyID),
+		"secret_key_len": len(r2SecretAccessKey),
+		"access_key_prefix": func() string {
+			if len(r2AccessKeyID) > 8 {
+				return r2AccessKeyID[:8] + "..."
+			}
+			return "empty"
+		}(),
+	}).Info("检查 R2 Access Key 配置")
+
 	if r2AccessKeyID == "" || r2SecretAccessKey == "" {
+		log.WithFields(map[string]interface{}{
+			"bucket_id":      bucket.ID,
+			"cf_account_id":  bucket.CFAccountID,
+			"has_access_key": r2AccessKeyID != "",
+			"has_secret_key": r2SecretAccessKey != "",
+		}).Error("CF 账号未配置 R2 Access Key 和 Secret Key")
 		return nil, fmt.Errorf("CF 账号未配置 R2 Access Key 和 Secret Key。请在 CF 账号管理中配置：1) 进入 Cloudflare Dashboard → R2 → Manage R2 API Tokens 2) 创建 API Token（选择 Read and Write 权限）3) 将 Access Key ID 和 Secret Access Key 填入 CF 账号设置")
 	}
 
 	// 获取 Account ID（优先使用账号中的 Account ID）
 	accountID := cfAccount.AccountID
+	log.WithFields(map[string]interface{}{
+		"bucket_id":      bucket.ID,
+		"account_id":     accountID,
+		"account_id_len": len(accountID),
+	}).Info("获取 Account ID")
+
 	if accountID == "" {
+		log.WithFields(map[string]interface{}{
+			"bucket_id":     bucket.ID,
+			"cf_account_id": bucket.CFAccountID,
+		}).Info("Account ID 为空，尝试通过 API Token 获取")
+
 		// 如果账号没有 Account ID，尝试通过 API Token 获取
 		apiToken := s.cfAccountService.GetAPIToken(cfAccount)
 		if apiToken == "" {
+			log.WithFields(map[string]interface{}{
+				"bucket_id":     bucket.ID,
+				"cf_account_id": bucket.CFAccountID,
+			}).Error("CF 账号未配置 Account ID 和 API Token")
 			return nil, fmt.Errorf("CF 账号未配置 Account ID 和 API Token。请至少配置其中一个")
 		}
+
+		log.WithFields(map[string]interface{}{
+			"bucket_id":     bucket.ID,
+			"has_api_token": len(apiToken) > 0,
+		}).Info("通过 API Token 获取 Account ID")
 
 		r2API := cloudflare.NewR2APIService(apiToken)
 		var err2 error
 		accountID, err2 = r2API.GetAccountID()
 		if err2 != nil {
+			log.WithError(err2).WithFields(map[string]interface{}{
+				"bucket_id": bucket.ID,
+			}).Error("通过 API Token 获取 Account ID 失败")
 			return nil, fmt.Errorf("获取账户ID失败: %w。建议在 CF 账号设置中直接配置 Account ID", err2)
 		}
+
+		log.WithFields(map[string]interface{}{
+			"bucket_id":      bucket.ID,
+			"account_id":     accountID,
+			"account_id_len": len(accountID),
+		}).Info("成功通过 API Token 获取 Account ID")
 	}
 
 	// 验证 Account ID 格式（应该是32位十六进制字符串）
 	if len(accountID) != 32 {
+		log.WithFields(map[string]interface{}{
+			"bucket_id":      bucket.ID,
+			"account_id":     accountID,
+			"account_id_len": len(accountID),
+			"expected_len":   32,
+		}).Error("Account ID 格式不正确")
 		return nil, fmt.Errorf("Account ID 格式不正确（应该是32位字符），当前值: %s (长度: %d)。请检查 CF 账号设置中的 Account ID", accountID, len(accountID))
 	}
+
+	log.WithFields(map[string]interface{}{
+		"bucket_id":      bucket.ID,
+		"bucket_name":    bucket.BucketName,
+		"account_id":     accountID,
+		"access_key_id":  r2AccessKeyID[:min(8, len(r2AccessKeyID))] + "...",
+		"has_secret_key": r2SecretAccessKey != "",
+	}).Info("准备创建 R2 S3 服务")
 
 	// 创建 R2 S3 服务
 	cfg := &cloudflare.R2S3Config{
@@ -67,7 +149,31 @@ func (s *R2FileService) getR2S3Service(bucket *models.R2Bucket) (*cloudflare.R2S
 		BucketName:      bucket.BucketName,
 	}
 
-	return cloudflare.NewR2S3Service(cfg)
+	r2S3Service, err := cloudflare.NewR2S3Service(cfg)
+	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"bucket_id":   bucket.ID,
+			"bucket_name": bucket.BucketName,
+			"account_id":  accountID,
+		}).Error("创建 R2 S3 服务失败")
+		return nil, err
+	}
+
+	log.WithFields(map[string]interface{}{
+		"bucket_id":   bucket.ID,
+		"bucket_name": bucket.BucketName,
+		"account_id":  accountID,
+	}).Info("成功创建 R2 S3 服务")
+
+	return r2S3Service, nil
+}
+
+// min 辅助函数
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // UploadFile 上传文件到 R2 存储桶

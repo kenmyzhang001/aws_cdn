@@ -55,7 +55,7 @@ func NewR2S3Service(cfg *R2S3Config) (*R2S3Service, error) {
 		"access_key_id":  cfg.AccessKeyID[:min(8, len(cfg.AccessKeyID))] + "...", // 只记录前8位，保护隐私
 		"has_secret_key": cfg.SecretAccessKey != "",
 		"secret_key_len": len(cfg.SecretAccessKey),
-	}).Debug("创建 R2 S3 服务")
+	}).Info("创建 R2 S3 服务")
 
 	// 创建 AWS session（使用 R2 的 S3 兼容端点）
 	sess, err := session.NewSession(&aws.Config{
