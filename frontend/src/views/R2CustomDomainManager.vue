@@ -21,7 +21,7 @@
 
       <el-table :data="domainList" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="domain" label="域名" />
+        <el-table-column prop="domain" label="域名"width="200" />
         <el-table-column prop="zone_id" label="Zone ID" width="200" />
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
