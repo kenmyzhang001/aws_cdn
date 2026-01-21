@@ -132,6 +132,28 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 		return nil, fmt.Errorf("添加自定义域名失败: %w", err)
 	}
 
+	// 自动创建 CORS Transform Rule
+	if zoneID != "" {
+		// 尝试自动创建 CORS 规则（如果失败只记录警告，不阻止域名添加）
+		corsRuleID, corsErr := cloudflareSvc.CreateCORSTransformRule(zoneID, domain, "*")
+		if corsErr != nil {
+			log.WithError(corsErr).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("自动创建 CORS Transform Rule 失败，请手动在 Cloudflare Dashboard 配置")
+		} else if corsRuleID != "" {
+			log.WithFields(map[string]interface{}{
+				"domain":    domain,
+				"zone_id":   zoneID,
+				"rule_id":   corsRuleID,
+			}).Info("CORS Transform Rule 已自动创建")
+		}
+	} else {
+		log.WithFields(map[string]interface{}{
+			"domain": domain,
+		}).Warn("Zone ID 为空，跳过自动创建 CORS Transform Rule，请手动在 Cloudflare Dashboard 配置")
+	}
+
 	// 保存到数据库
 	customDomain := &models.R2CustomDomain{
 		R2BucketID: r2BucketID,

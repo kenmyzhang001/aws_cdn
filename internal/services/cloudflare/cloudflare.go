@@ -1018,3 +1018,190 @@ func (s *CloudflareService) ConfigureCORS(accountID, bucketName string, corsConf
 	}).Info("CORS 配置成功")
 	return nil
 }
+
+// CreateCORSTransformRule 创建 CORS Transform Rule（用于在域名级别添加 CORS 响应头）
+// zoneID: 域名所在的 Zone ID
+// domain: 要匹配的域名（例如：test111.wkljm.com）
+// allowOrigin: 允许的来源（例如："*" 或 "https://yourdomain.com"）
+func (s *CloudflareService) CreateCORSTransformRule(zoneID, domain, allowOrigin string) (string, error) {
+	log := logger.GetLogger()
+
+	// 构建匹配表达式
+	expression := fmt.Sprintf(`(http.host eq "%s")`, domain)
+
+	// 构建响应头设置
+	headers := []map[string]interface{}{
+		{
+			"name":  "Access-Control-Allow-Origin",
+			"value": allowOrigin,
+			"op":    "set",
+		},
+		{
+			"name":  "Access-Control-Allow-Methods",
+			"value": "GET, HEAD, OPTIONS",
+			"op":    "set",
+		},
+		{
+			"name":  "Access-Control-Allow-Headers",
+			"value": "*",
+			"op":    "set",
+		},
+		{
+			"name":  "Access-Control-Expose-Headers",
+			"value": "ETag, Content-Length, Content-Type, Content-Range, Content-Disposition",
+			"op":    "set",
+		},
+		{
+			"name":  "Access-Control-Max-Age",
+			"value": "3600",
+			"op":    "set",
+		},
+	}
+
+	// 构建规则
+	rule := map[string]interface{}{
+		"expression": expression,
+		"action": map[string]interface{}{
+			"response_headers": map[string]interface{}{
+				"headers": headers,
+			},
+		},
+		"description": fmt.Sprintf("Add CORS headers for R2 domain %s", domain),
+	}
+
+	// 先获取现有的 ruleset（如果存在）
+	// Transform Rules 使用 http_response_header_transformation ruleset
+	rulesetID := ""
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets", zoneID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err == nil && resp.StatusCode == http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		var rulesetsResp struct {
+			Success bool `json:"success"`
+			Result  []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+				Kind string `json:"kind"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(body, &rulesetsResp); err == nil {
+			// 查找 http_response_header_transformation ruleset
+			for _, rs := range rulesetsResp.Result {
+				if rs.Kind == "zone" && rs.Name == "http_response_header_transformation" {
+					rulesetID = rs.ID
+					break
+				}
+			}
+		}
+	}
+
+	// 构建 payload
+	payload := map[string]interface{}{
+		"rules": []map[string]interface{}{rule},
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	// 如果找到了现有的 ruleset，则更新它；否则创建新的
+	if rulesetID != "" {
+		// 更新现有的 ruleset
+		url = fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets/%s", zoneID, rulesetID)
+		req, err = http.NewRequest("PUT", url, bytes.NewBuffer(jsonData))
+	} else {
+		// 创建新的 ruleset
+		payload["name"] = "Add CORS Headers for R2 Domain"
+		payload["kind"] = "zone"
+		payload["phase"] = "http_response_headers_transform"
+		jsonData, _ = json.Marshal(payload)
+		url = fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets", zoneID)
+		req, err = http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err = s.client.Do(req)
+	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"zone_id": zoneID,
+			"domain":  domain,
+		}).Error("创建 CORS Transform Rule 失败")
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			log.WithFields(map[string]interface{}{
+				"zone_id":       zoneID,
+				"domain":        domain,
+				"status_code":   resp.StatusCode,
+				"error_code":    errorResp.Errors[0].Code,
+				"error_message": errorResp.Errors[0].Message,
+			}).Warn("创建 CORS Transform Rule 失败，可能需要手动在 Dashboard 配置")
+			// 不返回错误，只记录警告，因为 Transform Rules 可能需要特定权限
+			return "", nil
+		}
+		log.WithFields(map[string]interface{}{
+			"zone_id":       zoneID,
+			"domain":        domain,
+			"status_code":   resp.StatusCode,
+			"response_body": string(body),
+		}).Warn("创建 CORS Transform Rule 失败，可能需要手动在 Dashboard 配置")
+		// 不返回错误，只记录警告
+		return "", nil
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		return "", fmt.Errorf("创建 CORS Transform Rule 失败")
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+		"domain":  domain,
+		"rule_id": result.Result.ID,
+	}).Info("CORS Transform Rule 创建成功")
+	return result.Result.ID, nil
+}
