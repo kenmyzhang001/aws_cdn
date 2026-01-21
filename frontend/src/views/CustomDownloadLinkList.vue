@@ -285,7 +285,7 @@ import {
   batchDeleteCustomDownloadLinks,
   incrementClickCount
 } from '@/api/custom_download_link';
-import { getGroups } from '@/api/group';
+import { groupApi } from '@/api/group';
 
 // 数据
 const loading = ref(false);
@@ -343,7 +343,7 @@ const linkRules = {
 // 加载分组列表
 const loadGroups = async () => {
   try {
-    const response = await getGroups();
+    const response = await groupApi.getGroupList();
     groups.value = response.data.data || [];
     
     // 加载每个分组的计数
