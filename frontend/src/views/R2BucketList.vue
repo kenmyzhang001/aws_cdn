@@ -113,13 +113,30 @@
             <p>配置跨域资源共享规则，允许指定域名访问存储桶中的文件。</p>
             <p>示例配置：</p>
             <pre style="background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 11px; margin-top: 10px;">[
-  {
-    "AllowedOrigins": ["*"],
-    "AllowedMethods": ["GET", "HEAD", "PUT", "POST", "DELETE"],
-    "AllowedHeaders": ["*"],
-    "ExposeHeaders": ["ETag", "Content-Length"],
-    "MaxAgeSeconds": 3600
-  }
+{
+    "allowed": {
+        "origins": [
+            "*"
+        ],
+        "methods": [
+            "GET",
+            "HEAD",
+            "PUT",
+            "POST",
+            "DELETE"
+        ],
+        "headers": [
+            "*"
+        ]
+    },
+    "exposeHeaders": [
+        "ETag",
+        "Content-Length",
+        "Content-Type"
+    ],
+    "maxAgeSeconds": 3600,
+    "id": "rule-0"
+}
 ]</pre>
           </div>
         </template>
