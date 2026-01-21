@@ -143,9 +143,9 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 			}).Warn("自动创建 CORS Transform Rule 失败，请手动在 Cloudflare Dashboard 配置")
 		} else if corsRuleID != "" {
 			log.WithFields(map[string]interface{}{
-				"domain":    domain,
-				"zone_id":   zoneID,
-				"rule_id":   corsRuleID,
+				"domain":  domain,
+				"zone_id": zoneID,
+				"rule_id": corsRuleID,
 			}).Info("CORS Transform Rule 已自动创建")
 		}
 	} else {

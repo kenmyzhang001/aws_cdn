@@ -1028,6 +1028,7 @@ func (s *CloudflareService) CreateCORSTransformRule(zoneID, domain, allowOrigin 
 
 	// 构建匹配表达式
 	expression := fmt.Sprintf(`(http.host eq "%s")`, domain)
+	description := fmt.Sprintf("Add CORS headers for R2 domain %s", domain)
 
 	// 构建响应头设置
 	headers := []map[string]interface{}{
@@ -1066,12 +1067,77 @@ func (s *CloudflareService) CreateCORSTransformRule(zoneID, domain, allowOrigin 
 				"headers": headers,
 			},
 		},
-		"description": fmt.Sprintf("Add CORS headers for R2 domain %s", domain),
+		"description": description,
+		"enabled":     true,
 	}
 
-	// 先获取现有的 ruleset（如果存在）
-	// Transform Rules 使用 http_response_header_transformation ruleset
-	rulesetID := ""
+	// 步骤1: 获取或创建 http_response_header_transformation ruleset
+	rulesetID, err := s.getOrCreateTransformRuleset(zoneID)
+	if err != nil {
+		return "", fmt.Errorf("获取或创建 ruleset 失败: %w", err)
+	}
+
+	// 步骤2: 获取该 ruleset 的所有 rules，检查是否已存在相同 domain 的 rule
+	existingRuleID, err := s.findRuleByExpression(zoneID, rulesetID, expression)
+	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"zone_id":    zoneID,
+			"ruleset_id": rulesetID,
+			"domain":     domain,
+		}).Warn("查找现有 rule 失败，尝试创建新 rule")
+		existingRuleID = ""
+	}
+
+	// 步骤3: 如果存在，使用 PATCH 更新；否则使用 POST 添加
+	var ruleID string
+	if existingRuleID != "" {
+		// 更新已存在的 rule - 必须包含 id 字段
+		rule["id"] = existingRuleID
+		// 添加 ref 字段（如果不存在）
+		if _, exists := rule["ref"]; !exists {
+			rule["ref"] = fmt.Sprintf("cors_%s", domain)
+		}
+		ruleID, err = s.updateRule(zoneID, rulesetID, existingRuleID, rule)
+		if err != nil {
+			return "", fmt.Errorf("更新 rule 失败: %w", err)
+		}
+		log.WithFields(map[string]interface{}{
+			"zone_id":    zoneID,
+			"ruleset_id": rulesetID,
+			"rule_id":    ruleID,
+			"domain":     domain,
+		}).Info("CORS Transform Rule 更新成功")
+	} else {
+		// 添加新 rule - 创建不包含 id 的副本，并添加 ref 字段
+		newRule := make(map[string]interface{})
+		for k, v := range rule {
+			newRule[k] = v
+		}
+		// 添加 ref 字段（用户定义的引用，用于保持一致性）
+		newRule["ref"] = fmt.Sprintf("cors_%s", domain)
+		// 确保不包含 id 字段（由服务器生成）
+		delete(newRule, "id")
+
+		ruleID, err = s.addRule(zoneID, rulesetID, newRule)
+		if err != nil {
+			return "", fmt.Errorf("添加 rule 失败: %w", err)
+		}
+		log.WithFields(map[string]interface{}{
+			"zone_id":    zoneID,
+			"ruleset_id": rulesetID,
+			"rule_id":    ruleID,
+			"domain":     domain,
+		}).Info("CORS Transform Rule 创建成功")
+	}
+
+	return ruleID, nil
+}
+
+// getOrCreateTransformRuleset 获取或创建 http_response_header_transformation ruleset
+func (s *CloudflareService) getOrCreateTransformRuleset(zoneID string) (string, error) {
+	log := logger.GetLogger()
+
+	// 先尝试获取现有的 ruleset
 	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets", zoneID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -1083,32 +1149,43 @@ func (s *CloudflareService) CreateCORSTransformRule(zoneID, domain, allowOrigin 
 	}
 
 	resp, err := s.client.Do(req)
-	if err == nil && resp.StatusCode == http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
 
-		var rulesetsResp struct {
-			Success bool `json:"success"`
-			Result  []struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-				Kind string `json:"kind"`
-			} `json:"result"`
-		}
-		if err := json.Unmarshal(body, &rulesetsResp); err == nil {
-			// 查找 http_response_header_transformation ruleset
-			for _, rs := range rulesetsResp.Result {
-				if rs.Kind == "zone" && rs.Name == "http_response_header_transformation" {
-					rulesetID = rs.ID
-					break
+	if resp.StatusCode == http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		if err == nil {
+			var rulesetsResp struct {
+				Success bool `json:"success"`
+				Result  []struct {
+					ID   string `json:"id"`
+					Name string `json:"name"`
+					Kind string `json:"kind"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(body, &rulesetsResp); err == nil && rulesetsResp.Success {
+				// 查找 http_response_header_transformation ruleset
+				for _, rs := range rulesetsResp.Result {
+					if rs.Kind == "zone" && rs.Name == "http_response_header_transformation" {
+						return rs.ID, nil
+					}
 				}
 			}
 		}
 	}
 
-	// 构建 payload
+	// 如果不存在，创建新的 ruleset
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("未找到 http_response_header_transformation ruleset，尝试创建")
+
 	payload := map[string]interface{}{
-		"rules": []map[string]interface{}{rule},
+		"name":  "http_response_header_transformation",
+		"kind":  "zone",
+		"phase": "http_response_headers_transform",
+		"rules": []map[string]interface{}{},
 	}
 
 	jsonData, err := json.Marshal(payload)
@@ -1116,21 +1193,8 @@ func (s *CloudflareService) CreateCORSTransformRule(zoneID, domain, allowOrigin 
 		return "", fmt.Errorf("序列化请求失败: %w", err)
 	}
 
-	// 如果找到了现有的 ruleset，则更新它；否则创建新的
-	if rulesetID != "" {
-		// 更新现有的 ruleset
-		url = fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets/%s", zoneID, rulesetID)
-		req, err = http.NewRequest("PUT", url, bytes.NewBuffer(jsonData))
-	} else {
-		// 创建新的 ruleset
-		payload["name"] = "Add CORS Headers for R2 Domain"
-		payload["kind"] = "zone"
-		payload["phase"] = "http_response_headers_transform"
-		jsonData, _ = json.Marshal(payload)
-		url = fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets", zoneID)
-		req, err = http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-	}
-
+	url = fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets", zoneID)
+	req, err = http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("创建请求失败: %w", err)
 	}
@@ -1141,10 +1205,6 @@ func (s *CloudflareService) CreateCORSTransformRule(zoneID, domain, allowOrigin 
 
 	resp, err = s.client.Do(req)
 	if err != nil {
-		log.WithError(err).WithFields(map[string]interface{}{
-			"zone_id": zoneID,
-			"domain":  domain,
-		}).Error("创建 CORS Transform Rule 失败")
 		return "", fmt.Errorf("请求失败: %w", err)
 	}
 	defer resp.Body.Close()
@@ -1163,24 +1223,9 @@ func (s *CloudflareService) CreateCORSTransformRule(zoneID, domain, allowOrigin 
 			} `json:"errors"`
 		}
 		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
-			log.WithFields(map[string]interface{}{
-				"zone_id":       zoneID,
-				"domain":        domain,
-				"status_code":   resp.StatusCode,
-				"error_code":    errorResp.Errors[0].Code,
-				"error_message": errorResp.Errors[0].Message,
-			}).Warn("创建 CORS Transform Rule 失败，可能需要手动在 Dashboard 配置")
-			// 不返回错误，只记录警告，因为 Transform Rules 可能需要特定权限
-			return "", nil
+			return "", fmt.Errorf("创建 ruleset 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
 		}
-		log.WithFields(map[string]interface{}{
-			"zone_id":       zoneID,
-			"domain":        domain,
-			"status_code":   resp.StatusCode,
-			"response_body": string(body),
-		}).Warn("创建 CORS Transform Rule 失败，可能需要手动在 Dashboard 配置")
-		// 不返回错误，只记录警告
-		return "", nil
+		return "", fmt.Errorf("创建 ruleset 失败 (状态码: %d): %s", resp.StatusCode, string(body))
 	}
 
 	var result struct {
@@ -1195,13 +1240,183 @@ func (s *CloudflareService) CreateCORSTransformRule(zoneID, domain, allowOrigin 
 	}
 
 	if !result.Success {
-		return "", fmt.Errorf("创建 CORS Transform Rule 失败")
+		return "", fmt.Errorf("创建 ruleset 失败")
 	}
 
-	log.WithFields(map[string]interface{}{
-		"zone_id": zoneID,
-		"domain":  domain,
-		"rule_id": result.Result.ID,
-	}).Info("CORS Transform Rule 创建成功")
+	return result.Result.ID, nil
+}
+
+// findRuleByExpression 根据 expression 查找 rule ID
+func (s *CloudflareService) findRuleByExpression(zoneID, rulesetID, expression string) (string, error) {
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets/%s", zoneID, rulesetID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("获取 ruleset 失败 (状态码: %d)", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	var rulesetResp struct {
+		Success bool `json:"success"`
+		Result  struct {
+			Rules []struct {
+				ID         string `json:"id"`
+				Expression string `json:"expression"`
+			} `json:"rules"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &rulesetResp); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !rulesetResp.Success {
+		return "", fmt.Errorf("获取 ruleset 失败")
+	}
+
+	// 查找匹配的 rule
+	for _, rule := range rulesetResp.Result.Rules {
+		if rule.Expression == expression {
+			return rule.ID, nil
+		}
+	}
+
+	return "", nil // 未找到
+}
+
+// addRule 添加 rule 到 ruleset
+func (s *CloudflareService) addRule(zoneID, rulesetID string, rule map[string]interface{}) (string, error) {
+	jsonData, err := json.Marshal(rule)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets/%s/rules", zoneID, rulesetID)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return "", fmt.Errorf("添加 rule 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return "", fmt.Errorf("添加 rule 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		return "", fmt.Errorf("添加 rule 失败")
+	}
+
+	return result.Result.ID, nil
+}
+
+// updateRule 使用 PATCH 更新 rule
+func (s *CloudflareService) updateRule(zoneID, rulesetID, ruleID string, rule map[string]interface{}) (string, error) {
+	jsonData, err := json.Marshal(rule)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets/%s/rules/%s", zoneID, rulesetID, ruleID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return "", fmt.Errorf("更新 rule 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return "", fmt.Errorf("更新 rule 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		return "", fmt.Errorf("更新 rule 失败")
+	}
+
 	return result.Result.ID, nil
 }
