@@ -110,18 +110,7 @@
               <span v-else style="color: #c0c4cc; font-size: 12px;">未分组</span>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="100">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
-                {{ row.status === 'active' ? '启用' : '禁用' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="click_count" label="点击次数" width="100">
-            <template #default="{ row }">
-              <el-tag size="small" type="warning">{{ row.click_count || 0 }}</el-tag>
-            </template>
-          </el-table-column>
+
           <el-table-column prop="created_at" label="创建时间" width="160">
             <template #default="{ row }">
               {{ formatDate(row.created_at) }}
@@ -344,7 +333,8 @@ const linkRules = {
 const loadGroups = async () => {
   try {
     const response = await groupApi.getGroupList();
-    groups.value = response.data.data || [];
+    // API直接返回数组
+    groups.value = response || [];
     
     // 加载每个分组的计数
     await loadGroupCounts();
@@ -361,7 +351,7 @@ const loadGroupCounts = async () => {
       page: 1,
       page_size: 1
     });
-    totalAll.value = allResponse.data.total || 0;
+    totalAll.value = allResponse.total || 0;
 
     // 加载每个分组的计数
     for (const group of groups.value) {
@@ -370,7 +360,7 @@ const loadGroupCounts = async () => {
         page_size: 1,
         group_id: group.id
       });
-      group.count = response.data.total || 0;
+      group.count = response.total || 0;
     }
   } catch (error) {
     console.error('加载分组计数失败:', error);
@@ -399,8 +389,8 @@ const loadLinks = async () => {
     }
     
     const response = await getCustomDownloadLinks(params);
-    linkList.value = response.data.data || [];
-    total.value = response.data.total || 0;
+    linkList.value = response.data || [];
+    total.value = response.total || 0;
   } catch (error) {
     ElMessage.error('加载链接列表失败: ' + (error.response?.data?.error || error.message));
   } finally {
@@ -499,7 +489,7 @@ const handleBatchAdd = async () => {
   try {
     submitting.value = true;
     const response = await batchCreateCustomDownloadLinks(batchForm);
-    ElMessage.success(`批量添加成功，共添加 ${response.data.count} 个链接`);
+    ElMessage.success(`批量添加成功，共添加 ${response.count} 个链接`);
     showBatchAddDialog.value = false;
     await loadLinks();
     await loadGroupCounts();
