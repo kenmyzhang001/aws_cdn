@@ -74,6 +74,9 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 	r2CustomDomainService := services.NewR2CustomDomainService(db, cfAccountService)
 	r2CacheRuleService := services.NewR2CacheRuleService(db, cfAccountService, cloudflareSvc)
 	r2FileService := services.NewR2FileService(db, cfAccountService)
+	
+	// 初始化自定义下载链接服务
+	customDownloadLinkService := services.NewCustomDownloadLinkService(db)
 
 	// 初始化处理器
 	groupHandler := handlers.NewGroupHandler(groupService)
@@ -85,6 +88,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 	auditHandler := handlers.NewAuditHandler(auditService)
 	cfAccountHandler := handlers.NewCFAccountHandler(cfAccountService)
 	r2Handler := handlers.NewR2Handler(r2BucketService, r2CustomDomainService, r2CacheRuleService, r2FileService)
+	customDownloadLinkHandler := handlers.NewCustomDownloadLinkHandler(customDownloadLinkService)
 
 	// API 路由
 	api := r.Group("/api/v1")
@@ -216,6 +220,19 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 			r2Files.POST("/buckets/:r2_bucket_id/directories", r2Handler.CreateDirectory)
 			r2Files.GET("/buckets/:r2_bucket_id", r2Handler.ListFiles)
 			r2Files.DELETE("/buckets/:r2_bucket_id", r2Handler.DeleteFile)
+		}
+
+		// 自定义下载链接管理
+		customDownloadLinks := protected.Group("/custom-download-links")
+		{
+			customDownloadLinks.GET("", customDownloadLinkHandler.ListCustomDownloadLinks)
+			customDownloadLinks.GET("/:id", customDownloadLinkHandler.GetCustomDownloadLink)
+			customDownloadLinks.POST("", customDownloadLinkHandler.CreateCustomDownloadLink)
+			customDownloadLinks.POST("/batch", customDownloadLinkHandler.BatchCreateCustomDownloadLinks)
+			customDownloadLinks.PUT("/:id", customDownloadLinkHandler.UpdateCustomDownloadLink)
+			customDownloadLinks.DELETE("/:id", customDownloadLinkHandler.DeleteCustomDownloadLink)
+			customDownloadLinks.POST("/batch-delete", customDownloadLinkHandler.BatchDeleteCustomDownloadLinks)
+			customDownloadLinks.POST("/:id/click", customDownloadLinkHandler.IncrementClickCount)
 		}
 	}
 
