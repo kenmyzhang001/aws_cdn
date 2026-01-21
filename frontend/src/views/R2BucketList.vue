@@ -324,11 +324,14 @@ const configureCORS = (row) => {
   corsForm.value.bucketId = row.id
   corsForm.value.corsConfig = JSON.stringify([
     {
-      AllowedOrigins: ['*'],
-      AllowedMethods: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
-      AllowedHeaders: ['*'],
-      ExposeHeaders: ['ETag', 'Content-Length'],
-      MaxAgeSeconds: 3600,
+      allowed: {
+        origins: ['*'],
+        methods: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
+        headers: ['*'],
+      },
+      exposeHeaders: ['ETag', 'Content-Length', 'Content-Type'],
+      maxAgeSeconds: 3600,
+      id: 'rule-0',
     },
   ], null, 2)
   showCorsDialog.value = true
