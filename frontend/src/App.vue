@@ -24,6 +24,12 @@
               <span>CF 账号管理</span>
           </el-menu-item>
 
+          <!-- 自定义下载链接管理 -->
+          <el-menu-item index="/custom-download-links">
+            <el-icon><Link /></el-icon>
+            <span>自定义下载链接</span>
+          </el-menu-item>
+
           <!-- AWS-CDN 一级菜单 -->
           <el-sub-menu index="aws-cdn">
             <template #title>
