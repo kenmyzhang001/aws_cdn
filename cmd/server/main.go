@@ -4,6 +4,7 @@ import (
 	"aws_cdn/internal/config"
 	"aws_cdn/internal/database"
 	"aws_cdn/internal/logger"
+	"aws_cdn/internal/models"
 	"aws_cdn/internal/router"
 	"aws_cdn/internal/services"
 	"os"
@@ -52,7 +53,7 @@ func main() {
 	telegramService := services.NewTelegramService(botToken, chatID, cfg.Server.Sitename)
 
 	// 初始化速度探测告警服务（速度阈值100KB/s，失败率阈值50%）
-	speedProbeService := services.NewSpeedProbeService(db, telegramService, 100.0, 0.5)
+	speedProbeService := services.NewSpeedProbeService(db, telegramService, models.ThresholdSpeedKbps, 0.5)
 
 	// 初始化并启动定时任务服务
 	schedulerService := services.NewSchedulerService()

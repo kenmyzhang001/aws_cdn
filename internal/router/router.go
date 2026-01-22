@@ -5,6 +5,7 @@ import (
 	"aws_cdn/internal/handlers"
 	"aws_cdn/internal/logger"
 	"aws_cdn/internal/middleware"
+	"aws_cdn/internal/models"
 	"aws_cdn/internal/services"
 	"aws_cdn/internal/services/aws"
 	"aws_cdn/internal/services/cloudflare"
@@ -79,7 +80,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 	customDownloadLinkService := services.NewCustomDownloadLinkService(db)
 
 	// 初始化速度探测服务（速度阈值100KB/s，失败率阈值50%）
-	speedProbeService := services.NewSpeedProbeService(db, telegramService, 100.0, 0.5)
+	speedProbeService := services.NewSpeedProbeService(db, telegramService, models.ThresholdSpeedKbps, 0.5)
 
 	// 初始化处理器
 	groupHandler := handlers.NewGroupHandler(groupService)

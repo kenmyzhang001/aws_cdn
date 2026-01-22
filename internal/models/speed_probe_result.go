@@ -13,6 +13,8 @@ const (
 	SpeedProbeStatusTimeout SpeedProbeStatus = "timeout" // 超时
 )
 
+const ThresholdSpeedKbps = 10.0
+
 // SpeedProbeResult 速度探测结果模型
 type SpeedProbeResult struct {
 	ID             uint             `json:"id" gorm:"primaryKey"`
