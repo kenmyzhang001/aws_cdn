@@ -233,8 +233,40 @@ func fetchAllLinks(serverURL string) (*AllLinksResponse, error) {
 	return &result, nil
 }
 
-// probeURL 探测单个URL的下载速度
+// probeURL 探测单个URL的下载速度（支持重试）
 func probeURL(url string, config *Config) ProbeResult {
+	const maxRetries = 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		result := probeURLOnce(url, config)
+
+		// 如果成功或非超时错误，直接返回
+		if result.Status == "success" || result.Status != "timeout" {
+			return result
+		}
+
+		// 超时且还有重试机会
+		if attempt < maxRetries {
+			log.Printf("   ⚠️  超时，%d秒后重试 (%d/%d)", 2, attempt, maxRetries)
+			time.Sleep(2 * time.Second)
+		} else {
+			// 最后一次重试也失败了
+			result.ErrorMessage = fmt.Sprintf("请求超时(已重试%d次): %s", maxRetries, result.ErrorMessage)
+			return result
+		}
+	}
+
+	// 不应该到这里，但为了安全返回失败
+	return ProbeResult{
+		URL:          url,
+		UserAgent:    "SpeedProbeAgent/1.0",
+		Status:       "failed",
+		ErrorMessage: "未知错误",
+	}
+}
+
+// probeURLOnce 执行单次URL探测
+func probeURLOnce(url string, config *Config) ProbeResult {
 	result := ProbeResult{
 		URL:       url,
 		UserAgent: "SpeedProbeAgent/1.0",
@@ -296,7 +328,6 @@ func probeURL(url string, config *Config) ProbeResult {
 	downloadTime := time.Since(startTime)
 	downloadTimeMs := downloadTime.Milliseconds()
 	speedKbps := float64(totalSize) / 1024.0 / downloadTime.Seconds()
-	fmt.Println("totalSize:", totalSize)
 
 	result.FileSize = &totalSize
 	result.DownloadTimeMs = &downloadTimeMs
