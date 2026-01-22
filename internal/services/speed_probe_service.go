@@ -589,10 +589,10 @@ func (s *SpeedProbeService) GetAlertLogs(page, pageSize int) ([]models.SpeedAler
 }
 
 // CleanOldResults 清理旧的探测结果（保留指定天数）
-func (s *SpeedProbeService) CleanOldResults(keepDays int) error {
+func (s *SpeedProbeService) CleanOldResults(keepMinutes int) error {
 	log := logger.GetLogger()
 
-	cutoffTime := time.Now().AddDate(0, 0, -keepDays)
+	cutoffTime := time.Now().Add(-time.Duration(keepMinutes) * time.Minute)
 
 	result := s.db.Where("created_at < ?", cutoffTime).Delete(&models.SpeedProbeResult{})
 	if result.Error != nil {
@@ -602,7 +602,7 @@ func (s *SpeedProbeService) CleanOldResults(keepDays int) error {
 
 	log.WithFields(map[string]interface{}{
 		"deleted_count": result.RowsAffected,
-		"keep_days":     keepDays,
+		"keepMinutes":   keepMinutes,
 	}).Info("旧探测结果清理完成")
 
 	return nil
