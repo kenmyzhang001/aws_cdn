@@ -35,10 +35,8 @@ type LinkItem struct {
 
 // AllLinksResponse 所有链接的响应
 type AllLinksResponse struct {
-	DownloadPackages    []LinkItem `json:"download_packages"`
-	CustomDownloadLinks []LinkItem `json:"custom_download_links"`
-	R2CustomDomains     []LinkItem `json:"r2_custom_domains"`
-	Total               int        `json:"total"`
+	Links []LinkItem `json:"links"`
+	Total int        `json:"total"`
 }
 
 // ProbeResult 探测结果
@@ -115,19 +113,7 @@ func runProbe(config *Config) {
 	urlMap := make(map[string]bool)
 	var urls []string
 
-	for _, link := range links.DownloadPackages {
-		if link.URL != "" && !urlMap[link.URL] {
-			urlMap[link.URL] = true
-			urls = append(urls, link.URL)
-		}
-	}
-	for _, link := range links.CustomDownloadLinks {
-		if link.URL != "" && !urlMap[link.URL] {
-			urlMap[link.URL] = true
-			urls = append(urls, link.URL)
-		}
-	}
-	for _, link := range links.R2CustomDomains {
+	for _, link := range links.Links {
 		if link.URL != "" && !urlMap[link.URL] {
 			urlMap[link.URL] = true
 			urls = append(urls, link.URL)

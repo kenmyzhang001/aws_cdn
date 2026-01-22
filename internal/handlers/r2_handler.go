@@ -408,6 +408,14 @@ func (h *R2Handler) UploadFile(c *gin.Context) {
 		return
 	}
 
+	// 同步文件记录到数据库
+	fileSize := file.Size
+	contentType := file.Header.Get("Content-Type")
+	if err := h.fileService.SyncFileRecord(uint(r2BucketID), key, file.Filename, &fileSize, &contentType, nil); err != nil {
+		log.WithError(err).Warn("同步文件记录到数据库失败")
+		// 不影响上传成功的响应
+	}
+
 	log.WithFields(map[string]interface{}{
 		"bucket_id": r2BucketID,
 		"key":       key,
@@ -494,6 +502,12 @@ func (h *R2Handler) DeleteFile(c *gin.Context) {
 		log.WithError(err).Error("删除文件操作失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	// 更新数据库记录（标记为deleted）
+	if err := h.fileService.DeleteR2FileRecord(uint(r2BucketID), req.Key); err != nil {
+		log.WithError(err).Warn("更新数据库文件记录失败")
+		// 不影响删除成功的响应
 	}
 
 	log.WithFields(map[string]interface{}{

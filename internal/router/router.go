@@ -93,7 +93,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 	cfAccountHandler := handlers.NewCFAccountHandler(cfAccountService)
 	r2Handler := handlers.NewR2Handler(r2BucketService, r2CustomDomainService, r2CacheRuleService, r2FileService)
 	customDownloadLinkHandler := handlers.NewCustomDownloadLinkHandler(customDownloadLinkService)
-	allLinksHandler := handlers.NewAllLinksHandler(downloadPackageService, customDownloadLinkService, r2CustomDomainService)
+	allLinksHandler := handlers.NewAllLinksHandler(downloadPackageService, customDownloadLinkService, r2CustomDomainService, r2FileService)
 	speedProbeHandler := handlers.NewSpeedProbeHandler(speedProbeService)
 
 	// API 路由

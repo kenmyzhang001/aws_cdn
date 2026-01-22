@@ -263,3 +263,82 @@ func (s *R2FileService) FileExists(r2BucketID uint, key string) (bool, error) {
 	// 检查文件是否存在
 	return r2S3.FileExists(key)
 }
+
+// === 数据库操作方法 ===
+
+// CreateR2FileRecord 创建文件记录
+func (s *R2FileService) CreateR2FileRecord(file *models.R2File) error {
+	return s.db.Create(file).Error
+}
+
+// UpdateR2FileRecord 更新文件记录
+func (s *R2FileService) UpdateR2FileRecord(file *models.R2File) error {
+	return s.db.Save(file).Error
+}
+
+// DeleteR2FileRecord 删除文件记录（软删除：更新状态为deleted）
+func (s *R2FileService) DeleteR2FileRecord(r2BucketID uint, filePath string) error {
+	return s.db.Model(&models.R2File{}).
+		Where("r2_bucket_id = ? AND file_path = ?", r2BucketID, filePath).
+		Update("status", "deleted").Error
+}
+
+// GetR2FileRecord 根据桶ID和文件路径获取文件记录
+func (s *R2FileService) GetR2FileRecord(r2BucketID uint, filePath string) (*models.R2File, error) {
+	var file models.R2File
+	err := s.db.Where("r2_bucket_id = ? AND file_path = ? AND status = ?", r2BucketID, filePath, "active").
+		First(&file).Error
+	if err != nil {
+		return nil, err
+	}
+	return &file, nil
+}
+
+// ListR2FileRecords 列出指定桶的所有文件记录
+func (s *R2FileService) ListR2FileRecords(r2BucketID uint) ([]models.R2File, error) {
+	var files []models.R2File
+	err := s.db.Where("r2_bucket_id = ? AND status = ?", r2BucketID, "active").
+		Order("created_at DESC").
+		Find(&files).Error
+	return files, err
+}
+
+// ListAllAPKFileRecords 列出所有APK文件记录
+func (s *R2FileService) ListAllAPKFileRecords() ([]models.R2File, error) {
+	var files []models.R2File
+	err := s.db.Where("file_path LIKE ? AND status = ?", "%.apk", "active").
+		Order("created_at DESC").
+		Find(&files).Error
+	return files, err
+}
+
+// SyncFileRecord 同步文件记录（上传或更新时调用）
+func (s *R2FileService) SyncFileRecord(r2BucketID uint, filePath, fileName string, fileSize *int64, contentType *string, etag *string) error {
+	// 先查找是否已存在
+	var existing models.R2File
+	err := s.db.Where("r2_bucket_id = ? AND file_path = ?", r2BucketID, filePath).First(&existing).Error
+
+	if err == gorm.ErrRecordNotFound {
+		// 不存在，创建新记录
+		newFile := &models.R2File{
+			R2BucketID:  r2BucketID,
+			FilePath:    filePath,
+			FileName:    fileName,
+			FileSize:    fileSize,
+			ContentType: contentType,
+			ETag:        etag,
+			Status:      "active",
+		}
+		return s.db.Create(newFile).Error
+	} else if err != nil {
+		return err
+	}
+
+	// 已存在，更新记录
+	existing.FileName = fileName
+	existing.FileSize = fileSize
+	existing.ContentType = contentType
+	existing.ETag = etag
+	existing.Status = "active" // 恢复为active状态
+	return s.db.Save(&existing).Error
+}
