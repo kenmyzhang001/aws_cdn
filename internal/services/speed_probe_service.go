@@ -270,37 +270,6 @@ func (s *SpeedProbeService) CheckAndPrepareAlertForURL(url string, timeWindowMin
 	return nil, nil
 }
 
-// CheckAndAlertForURL 检查指定URL的探测结果并发送告警（如果需要）
-// 已废弃：现在使用 CheckAndPrepareAlertForURL 和批量发送
-func (s *SpeedProbeService) CheckAndAlertForURL(url string, timeWindowMinutes int) error {
-	alert, err := s.CheckAndPrepareAlertForURL(url, timeWindowMinutes)
-	if err != nil {
-		return err
-	}
-
-	if alert == nil {
-		return nil
-	}
-
-	// 单独发送告警
-	if s.telegram != nil {
-		if err := s.telegram.SendMessage(alert.AlertMessage); err != nil {
-			log := logger.GetLogger()
-			log.WithError(err).Error("发送Telegram告警失败")
-			// 继续保存记录，但标记未发送
-		} else {
-			alert.AlertSent = true
-		}
-	}
-
-	// 保存告警记录
-	if err := s.db.Create(alert).Error; err != nil {
-		return fmt.Errorf("保存告警记录失败: %w", err)
-	}
-
-	return nil
-}
-
 // CheckAndAlertForIP 检查指定IP的探测结果并发送告警（如果需要）
 // 已废弃：现在使用 CheckAndAlertForURL 按URL维度检查
 // 该方法保留仅为了向后兼容，但不再执行任何操作
