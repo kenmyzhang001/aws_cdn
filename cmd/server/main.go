@@ -57,15 +57,17 @@ func main() {
 	// 初始化并启动定时任务服务
 	schedulerService := services.NewSchedulerService()
 
+	go speedProbeService.CheckAndAlertAll(30)
 	// 添加速度探测告警检查任务（每30分钟检查一次，检查最近30分钟的数据）
 	schedulerService.AddTask("速度探测告警检查", func() error {
 		return speedProbeService.CheckAndAlertAll(30)
 	}, 30*time.Minute)
 
+	go speedProbeService.CleanOldResults(30)
 	// 添加清理旧探测结果任务（每天执行一次，保留30天数据）
 	schedulerService.AddTask("清理旧探测结果", func() error {
 		return speedProbeService.CleanOldResults(30)
-	}, 24*time.Hour)
+	}, 30*time.Hour)
 
 	// 启动所有定时任务
 	go schedulerService.Start()
