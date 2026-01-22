@@ -630,6 +630,20 @@ func (s *DownloadPackageService) GetCloudFrontOriginPathInfo(pkg *models.Downloa
 	return currentPath, expectedPath, nil
 }
 
+// ListAllDownloadPackages 列出所有下载包（不分页）
+func (s *DownloadPackageService) ListAllDownloadPackages() ([]models.DownloadPackage, error) {
+	var packages []models.DownloadPackage
+	
+	if err := s.db.Preload("Domain").
+		Where("deleted_at IS NULL").
+		Order("created_at DESC").
+		Find(&packages).Error; err != nil {
+		return nil, err
+	}
+
+	return packages, nil
+}
+
 // ListDownloadPackages 列出所有下载包，支持按分组筛选和搜索
 func (s *DownloadPackageService) ListDownloadPackages(page, pageSize int, groupID *uint, search *string) ([]models.DownloadPackage, int64, error) {
 	var packages []models.DownloadPackage

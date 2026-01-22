@@ -54,6 +54,9 @@ func main() {
 	// 初始化下载速度探测服务
 	downloadSpeedService := services.NewDownloadSpeedService(db, telegramService)
 
+	// 初始化速度探测告警服务（速度阈值100KB/s，失败率阈值50%）
+	speedProbeService := services.NewSpeedProbeService(db, telegramService, 100.0, 0.5)
+
 	// 设置 Telegram 命令回调
 	telegramService.SetSpeedCheckCallback(func() error {
 		return downloadSpeedService.CheckDownloadSpeed()
@@ -72,12 +75,24 @@ func main() {
 		return downloadSpeedService.CheckDownloadSpeed()
 	}, 20*time.Minute)
 
+	// 添加速度探测告警检查任务（每30分钟检查一次，检查最近30分钟的数据）
+	schedulerService.AddTask("速度探测告警检查", func() error {
+		return speedProbeService.CheckAndAlertAll(30)
+	}, 30*time.Minute)
+
+	// 添加清理旧探测结果任务（每天凌晨3点执行，保留30天数据）
+	schedulerService.AddTask("清理旧探测结果", func() error {
+		return speedProbeService.CleanOldResults(30)
+	}, 24*time.Hour)
+
 	// 启动所有定时任务
 	go schedulerService.Start()
 
 	log.Info("定时任务服务已启动")
 	log.Info("  - URL 检查任务：每10分钟执行一次")
 	log.Info("  - 下载速度探测任务：每20分钟执行一次")
+	log.Info("  - 速度探测告警检查：每30分钟执行一次")
+	log.Info("  - 清理旧探测结果：每24小时执行一次")
 
 	// 初始化路由（传入 Telegram 服务以支持 webhook）
 	r := router.SetupRouter(db, cfg, telegramService)

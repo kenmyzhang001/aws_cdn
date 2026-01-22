@@ -74,9 +74,12 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 	r2CustomDomainService := services.NewR2CustomDomainService(db, cfAccountService)
 	r2CacheRuleService := services.NewR2CacheRuleService(db, cfAccountService, cloudflareSvc)
 	r2FileService := services.NewR2FileService(db, cfAccountService)
-	
+
 	// 初始化自定义下载链接服务
 	customDownloadLinkService := services.NewCustomDownloadLinkService(db)
+
+	// 初始化速度探测服务（速度阈值100KB/s，失败率阈值50%）
+	speedProbeService := services.NewSpeedProbeService(db, telegramService, 100.0, 0.5)
 
 	// 初始化处理器
 	groupHandler := handlers.NewGroupHandler(groupService)
@@ -89,12 +92,18 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 	cfAccountHandler := handlers.NewCFAccountHandler(cfAccountService)
 	r2Handler := handlers.NewR2Handler(r2BucketService, r2CustomDomainService, r2CacheRuleService, r2FileService)
 	customDownloadLinkHandler := handlers.NewCustomDownloadLinkHandler(customDownloadLinkService)
+	allLinksHandler := handlers.NewAllLinksHandler(downloadPackageService, customDownloadLinkService, r2CustomDomainService)
+	speedProbeHandler := handlers.NewSpeedProbeHandler(speedProbeService)
 
 	// API 路由
 	api := r.Group("/api/v1")
 
 	// 公共路由（无需登录）
 	api.POST("/auth/login", authHandler.Login)
+
+	// 速度探测上报接口（公共接口，无需认证）
+	api.POST("/speed-probe/report", speedProbeHandler.ReportProbeResult)
+	api.POST("/speed-probe/report-batch", speedProbeHandler.BatchReportProbeResults)
 
 	// 需要登录的受保护路由
 	protected := api.Group("")
@@ -233,6 +242,17 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 			customDownloadLinks.DELETE("/:id", customDownloadLinkHandler.DeleteCustomDownloadLink)
 			customDownloadLinks.POST("/batch-delete", customDownloadLinkHandler.BatchDeleteCustomDownloadLinks)
 			customDownloadLinks.POST("/:id/click", customDownloadLinkHandler.IncrementClickCount)
+		}
+
+		// 所有链接管理（统一查询接口）
+		api.GET("/all-links", allLinksHandler.GetAllLinks)
+
+		// 速度探测结果管理
+		speedProbe := protected.Group("/speed-probe")
+		{
+			speedProbe.GET("/results/:ip", speedProbeHandler.GetProbeResultsByIP)
+			speedProbe.GET("/alerts", speedProbeHandler.GetAlertLogs)
+			speedProbe.POST("/check", speedProbeHandler.TriggerCheck) // 手动触发检查
 		}
 	}
 

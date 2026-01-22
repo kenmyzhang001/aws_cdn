@@ -85,6 +85,20 @@ func (s *CustomDownloadLinkService) GetCustomDownloadLink(id uint) (*models.Cust
 	return &link, nil
 }
 
+// ListAllCustomDownloadLinks 列出所有自定义下载链接（不分页）
+func (s *CustomDownloadLinkService) ListAllCustomDownloadLinks() ([]models.CustomDownloadLink, error) {
+	var links []models.CustomDownloadLink
+	
+	if err := s.db.Preload("Group").
+		Where("deleted_at IS NULL").
+		Order("created_at DESC").
+		Find(&links).Error; err != nil {
+		return nil, err
+	}
+
+	return links, nil
+}
+
 // ListCustomDownloadLinks 列出所有自定义下载链接，支持分页、分组筛选和搜索
 func (s *CustomDownloadLinkService) ListCustomDownloadLinks(page, pageSize int, groupID *uint, search *string, status *models.CustomDownloadLinkStatus) ([]models.CustomDownloadLink, int64, error) {
 	var links []models.CustomDownloadLink

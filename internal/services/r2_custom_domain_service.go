@@ -49,6 +49,18 @@ func (s *R2CustomDomainService) createCloudflareService(cfAccount *models.CFAcco
 	return cloudflareSvc, nil
 }
 
+// ListAllR2CustomDomains 列出所有R2自定义域名（不分页，不按存储桶筛选）
+func (s *R2CustomDomainService) ListAllR2CustomDomains() ([]models.R2CustomDomain, error) {
+	var domains []models.R2CustomDomain
+	if err := s.db.Preload("R2Bucket").
+		Where("deleted_at IS NULL").
+		Order("id DESC").
+		Find(&domains).Error; err != nil {
+		return nil, fmt.Errorf("获取所有自定义域名列表失败: %w", err)
+	}
+	return domains, nil
+}
+
 // ListR2CustomDomains 列出所有自定义域名
 func (s *R2CustomDomainService) ListR2CustomDomains(r2BucketID uint) ([]models.R2CustomDomain, error) {
 	var domains []models.R2CustomDomain
