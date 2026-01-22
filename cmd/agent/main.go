@@ -61,9 +61,9 @@ func main() {
 	// 解析命令行参数
 	serverURL := flag.String("server", "http://16.163.99.99:8080", "服务器地址")
 	interval := flag.Duration("interval", 20*time.Minute, "探测间隔")
-	timeout := flag.Duration("timeout", 30*time.Second, "单次探测超时时间")
+	timeout := flag.Duration("timeout", 60*time.Second, "单次探测超时时间")
 	maxSize := flag.Int64("max-size", 10*1024*1024, "最大下载文件大小（字节）")
-	speedThreshold := flag.Float64("speed-threshold", 100.0, "速度阈值（KB/s）")
+	speedThreshold := flag.Float64("speed-threshold", 10.0, "速度阈值（KB/s）")
 	concurrency := flag.Int("concurrency", 50, "并发探测数量")
 	flag.Parse()
 
