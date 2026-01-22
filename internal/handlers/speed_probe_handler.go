@@ -24,7 +24,7 @@ func (h *SpeedProbeHandler) ReportProbeResult(c *gin.Context) {
 
 	var req struct {
 		URL            string  `json:"url" binding:"required"`
-		SpeedKbps      float64 `json:"speed_kbps" binding:"required"`
+		SpeedKbps      float64 `json:"speed_kbps"`
 		FileSize       *int64  `json:"file_size"`
 		DownloadTimeMs *int64  `json:"download_time_ms"`
 		Status         string  `json:"status"`
