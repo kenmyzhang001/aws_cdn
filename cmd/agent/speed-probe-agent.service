@@ -1,0 +1,40 @@
+[Unit]
+Description=Speed Probe Agent - 下载速度探测代理
+Documentation=https://github.com/your-repo/aws_cdn
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+
+# 工作目录
+WorkingDirectory=/opt/speed-probe-agent
+
+# 启动命令（根据实际情况修改）
+ExecStart=/opt/speed-probe-agent/agent \
+  -server http://your-server.com:8080 \
+  -interval 20m \
+  -timeout 30s \
+  -max-size 10485760 \
+  -speed-threshold 100.0
+
+# 重启策略
+Restart=always
+RestartSec=10
+
+# 日志配置
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=speed-probe-agent
+
+# 资源限制
+LimitNOFILE=65536
+
+# 安全配置
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -101,6 +101,8 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 	// 公共路由（无需登录）
 	api.POST("/auth/login", authHandler.Login)
 
+	// 所有链接管理（统一查询接口）
+	api.GET("/all-links", allLinksHandler.GetAllLinks)
 	// 速度探测上报接口（公共接口，无需认证）
 	api.POST("/speed-probe/report", speedProbeHandler.ReportProbeResult)
 	api.POST("/speed-probe/report-batch", speedProbeHandler.BatchReportProbeResults)
@@ -243,9 +245,6 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 			customDownloadLinks.POST("/batch-delete", customDownloadLinkHandler.BatchDeleteCustomDownloadLinks)
 			customDownloadLinks.POST("/:id/click", customDownloadLinkHandler.IncrementClickCount)
 		}
-
-		// 所有链接管理（统一查询接口）
-		api.GET("/all-links", allLinksHandler.GetAllLinks)
 
 		// 速度探测结果管理
 		speedProbe := protected.Group("/speed-probe")
