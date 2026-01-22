@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type Config struct {
 	TimeoutDuration time.Duration // 单次探测超时时间
 	MaxFileSize     int64         // 最大下载文件大小（字节）
 	SpeedThreshold  float64       // 速度阈值（KB/s），用于判断是否成功
+	Concurrency     int           // 并发探测数量
 }
 
 // LinkItem 链接项
@@ -57,11 +59,12 @@ type BatchReportRequest struct {
 
 func main() {
 	// 解析命令行参数
-	serverURL := flag.String("server", "http://localhost:8080", "服务器地址")
+	serverURL := flag.String("server", "http://16.163.99.99:8080", "服务器地址")
 	interval := flag.Duration("interval", 20*time.Minute, "探测间隔")
 	timeout := flag.Duration("timeout", 30*time.Second, "单次探测超时时间")
 	maxSize := flag.Int64("max-size", 10*1024*1024, "最大下载文件大小（字节）")
 	speedThreshold := flag.Float64("speed-threshold", 100.0, "速度阈值（KB/s）")
+	concurrency := flag.Int("concurrency", 50, "并发探测数量")
 	flag.Parse()
 
 	config := Config{
@@ -70,6 +73,7 @@ func main() {
 		TimeoutDuration: *timeout,
 		MaxFileSize:     *maxSize,
 		SpeedThreshold:  *speedThreshold,
+		Concurrency:     *concurrency,
 	}
 
 	log.Printf("🚀 Agent 启动")
@@ -78,6 +82,7 @@ func main() {
 	log.Printf("   探测超时: %v", config.TimeoutDuration)
 	log.Printf("   最大文件大小: %d MB", config.MaxFileSize/(1024*1024))
 	log.Printf("   速度阈值: %.2f KB/s", config.SpeedThreshold)
+	log.Printf("   并发数量: %d", config.Concurrency)
 
 	// 立即执行一次
 	log.Println("⏰ 开始首次探测...")
@@ -131,26 +136,61 @@ func runProbe(config *Config) {
 
 	log.Printf("🔍 去重后需要探测 %d 个URL", len(urls))
 
-	// 3. 探测所有URL
+	// 3. 并发探测所有URL
 	results := make([]ProbeResult, 0, len(urls))
+	var resultsMutex sync.Mutex
+	var wg sync.WaitGroup
+
+	// 创建并发控制的 semaphore channel
+	semaphore := make(chan struct{}, config.Concurrency)
+
 	successCount := 0
 	failedCount := 0
+	var statsMutex sync.Mutex
 
-	for i, url := range urls {
-		log.Printf("   [%d/%d] 探测: %s", i+1, len(urls), url)
+	completed := 0
+	var completedMutex sync.Mutex
 
-		result := probeURL(url, config)
-		results = append(results, result)
+	for _, url := range urls {
+		wg.Add(1)
+		go func(targetURL string) {
+			defer wg.Done()
 
-		if result.Status == "success" {
-			successCount++
-			log.Printf("   ✓ 成功 | 速度: %.2f KB/s | 耗时: %d ms",
-				result.SpeedKbps, *result.DownloadTimeMs)
-		} else {
-			failedCount++
-			log.Printf("   ✗ 失败 | 原因: %s", result.ErrorMessage)
-		}
+			// 获取信号量
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			// 获取当前进度
+			completedMutex.Lock()
+			completed++
+			currentIndex := completed
+			completedMutex.Unlock()
+
+			log.Printf("   [%d/%d] 探测: %s", currentIndex, len(urls), targetURL)
+
+			result := probeURL(targetURL, config)
+
+			// 保存结果
+			resultsMutex.Lock()
+			results = append(results, result)
+			resultsMutex.Unlock()
+
+			// 更新统计
+			statsMutex.Lock()
+			if result.Status == "success" {
+				successCount++
+				log.Printf("   ✓ 成功 | 速度: %.2f KB/s | 耗时: %d ms",
+					result.SpeedKbps, *result.DownloadTimeMs)
+			} else {
+				failedCount++
+				log.Printf("   ✗ 失败 | 原因: %s", result.ErrorMessage)
+			}
+			statsMutex.Unlock()
+		}(url)
 	}
+
+	// 等待所有探测完成
+	wg.Wait()
 
 	// 4. 批量上报结果
 	log.Printf("📤 上报探测结果...")
