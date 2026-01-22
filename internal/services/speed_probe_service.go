@@ -5,6 +5,7 @@ import (
 	"aws_cdn/internal/models"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -395,28 +396,54 @@ func (s *SpeedProbeService) sendAlertsBatch(alerts []*models.SpeedAlertLog) erro
 			"batch_size":    len(batch),
 		}).Info("发送告警批次")
 
-		// 发送当前批次的所有告警
-		for _, alert := range batch {
-			if s.telegram != nil {
-				if err := s.telegram.SendMessage(alert.AlertMessage); err != nil {
-					log.WithError(err).WithField("url", alert.URL).Error("发送Telegram告警失败")
-					failedCount++
-					// 继续发送其他告警
-				} else {
-					alert.AlertSent = true
-					sentCount++
-					log.WithField("url", alert.URL).Info("Telegram告警发送成功")
+		// 合并批次中的所有告警为一条消息
+		if s.telegram != nil && len(batch) > 0 {
+			var mergedMessage strings.Builder
+			mergedMessage.WriteString(fmt.Sprintf("🚨 速度告警批次 %d/%d (共%d条)\n\n", batchNum, totalBatches, len(batch)))
+
+			for idx, alert := range batch {
+				// 提取URL的域名部分
+				urlStr := alert.URL
+				if len(urlStr) > 60 {
+					urlStr = urlStr[:60] + "..."
 				}
+
+				// 简化告警信息，只保留关键信息
+				mergedMessage.WriteString(fmt.Sprintf("%d. %s\n", idx+1, urlStr))
+				if alert.AvgSpeedKbps != nil {
+					mergedMessage.WriteString(fmt.Sprintf("   速度: %.1f KB/s", *alert.AvgSpeedKbps))
+				} else {
+					mergedMessage.WriteString("   状态: 失败")
+				}
+				mergedMessage.WriteString(fmt.Sprintf(" | 失败率: %.1f%%\n", alert.FailedRate))
 			}
 
-			// 保存告警记录
-			if err := s.db.Create(alert).Error; err != nil {
-				log.WithError(err).WithField("url", alert.URL).Error("保存告警记录失败")
-				// 继续处理其他告警
+			// 发送合并后的消息
+			if err := s.telegram.SendMessage(mergedMessage.String()); err != nil {
+				log.WithError(err).WithField("batch_num", batchNum).Error("发送批次告警失败")
+				failedCount += len(batch)
+			} else {
+				sentCount += len(batch)
+				log.WithFields(map[string]interface{}{
+					"batch_num":   batchNum,
+					"alert_count": len(batch),
+				}).Info("批次告警发送成功")
+
+				// 标记批次中的所有告警为已发送
+				for _, alert := range batch {
+					alert.AlertSent = true
+				}
 			}
 		}
 
-		// 如果不是最后一批，且后面还有告警，则sleep 2秒
+		// 保存所有告警记录到数据库
+		for _, alert := range batch {
+			if err := s.db.Create(alert).Error; err != nil {
+				log.WithError(err).WithField("url", alert.URL).Error("保存告警记录失败")
+			}
+		}
+
+		// 如果不是最后一批，等待2秒再发送下一批
 		if end < totalAlerts {
 			log.WithField("sleep_seconds", 2).Debug("批次发送完成，等待后再发送下一批")
 			time.Sleep(2 * time.Second)

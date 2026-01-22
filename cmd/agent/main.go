@@ -249,13 +249,15 @@ func probeURL(url string, config *Config) ProbeResult {
 	// 记录开始时间
 	startTime := time.Now()
 
-	// 发起请求
+	// 发起请求（使用 Range 头只请求前100KB）
+	const maxDownloadSize = 100 * 1024 // 100KB
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("创建请求失败: %v", err)
 		return result
 	}
 	req.Header.Set("User-Agent", result.UserAgent)
+	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", maxDownloadSize-1)) // 请求前100KB
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -265,8 +267,8 @@ func probeURL(url string, config *Config) ProbeResult {
 	}
 	defer resp.Body.Close()
 
-	// 检查HTTP状态码
-	if resp.StatusCode != http.StatusOK {
+	// 检查HTTP状态码（206 Partial Content 或 200 OK 都可以）
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		result.ErrorMessage = fmt.Sprintf("HTTP %d", resp.StatusCode)
 		return result
 	}
@@ -279,11 +281,6 @@ func probeURL(url string, config *Config) ProbeResult {
 		n, err := resp.Body.Read(buffer)
 		if n > 0 {
 			totalSize += int64(n)
-
-			// 检查是否超过最大文件大小
-			if totalSize > config.MaxFileSize {
-				break
-			}
 		}
 
 		if err == io.EOF {
@@ -299,6 +296,7 @@ func probeURL(url string, config *Config) ProbeResult {
 	downloadTime := time.Since(startTime)
 	downloadTimeMs := downloadTime.Milliseconds()
 	speedKbps := float64(totalSize) / 1024.0 / downloadTime.Seconds()
+	fmt.Println("totalSize:", totalSize)
 
 	result.FileSize = &totalSize
 	result.DownloadTimeMs = &downloadTimeMs
