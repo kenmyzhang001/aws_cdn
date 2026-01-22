@@ -600,6 +600,13 @@ func (s *SpeedProbeService) CleanOldResults(keepMinutes int) error {
 		return fmt.Errorf("清理旧探测结果失败: %w", result.Error)
 	}
 
+	cutoffTime = time.Now().Add(-time.Duration(keepMinutes-10) * time.Minute)
+	result = s.db.Where("created_at < ?", cutoffTime).Delete(&models.SpeedAlertLog{})
+	if result.Error != nil {
+		log.WithError(result.Error).Error("清理旧告警记录失败")
+		return fmt.Errorf("清理旧告警记录失败: %w", result.Error)
+	}
+
 	log.WithFields(map[string]interface{}{
 		"deleted_count": result.RowsAffected,
 		"keepMinutes":   keepMinutes,
