@@ -45,11 +45,11 @@ func main() {
 	//}
 
 	// 初始化 Telegram 服务
-	//botToken := "7366631415:AAGQm8flfcjfrYDv5ZawwebczZqNSg_nbqo"
-	//chatID := int64(-1003333638037)
+	botToken := "7366631415:AAGQm8flfcjfrYDv5ZawwebczZqNSg_nbqo"
+	chatID := int64(-1003333638037)
 
-	botToken := "7651821486:AAE9pJTRYr_jR5ulvp5ms6jCXhozS7RejAY"
-	chatID := int64(1408352847)
+	//botToken := "7651821486:AAE9pJTRYr_jR5ulvp5ms6jCXhozS7RejAY"
+	//chatID := int64(1408352847)
 	telegramService := services.NewTelegramService(botToken, chatID, cfg.Server.Sitename)
 
 	// 初始化速度探测告警服务（速度阈值100KB/s，失败率阈值50%）
