@@ -14,12 +14,14 @@ import (
 type R2CustomDomainService struct {
 	db               *gorm.DB
 	cfAccountService *CFAccountService
+	cacheRuleService *R2CacheRuleService
 }
 
-func NewR2CustomDomainService(db *gorm.DB, cfAccountService *CFAccountService) *R2CustomDomainService {
+func NewR2CustomDomainService(db *gorm.DB, cfAccountService *CFAccountService, cacheRuleService *R2CacheRuleService) *R2CustomDomainService {
 	return &R2CustomDomainService{
 		db:               db,
 		cfAccountService: cfAccountService,
+		cacheRuleService: cacheRuleService,
 	}
 }
 
@@ -183,6 +185,55 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 	if domainID != "" {
 		// 注意：这里 domainID 可能不是我们需要的字段，先保留
 		_ = domainID
+	}
+
+	// 自动创建缓存规则（只在有 Zone ID 时创建）
+	if zoneID != "" && s.cacheRuleService != nil {
+		// 构建缓存规则的 expression
+		// 默认策略：缓存该域名下的所有 APK 文件
+		// 用户可以根据需要选择：
+		// 1. 只缓存 APK 文件（推荐用于混合内容的存储桶）
+		// 2. 缓存所有文件（推荐用于只存放静态文件的存储桶）
+
+		// 这里默认使用"缓存所有文件"策略，因为 R2 通常用于静态资源托管
+		// 如果需要只缓存 APK，可以改为：
+		// expression := fmt.Sprintf(`(http.host eq "%s" and http.request.uri.path.extension eq "apk")`, domain)
+		expression := fmt.Sprintf(`(http.host eq "%s")`, domain)
+
+		ruleName := fmt.Sprintf("Cache all files for %s", domain)
+		cacheStatus := "eligible" // 允许缓存
+		edgeTTL := "2678400"      // 1 个月 (31 天 = 31 * 24 * 60 * 60 = 2678400 秒)
+		browserTTL := "2678400"   // 1 个月
+		cacheNote := "自动创建：缓存所有文件，Edge TTL 和 Browser TTL 均为 1 个月"
+
+		_, cacheErr := s.cacheRuleService.CreateCacheRule(
+			customDomain.ID,
+			ruleName,
+			expression,
+			cacheStatus,
+			edgeTTL,
+			browserTTL,
+			cacheNote,
+		)
+
+		if cacheErr != nil {
+			log.WithError(cacheErr).WithFields(map[string]interface{}{
+				"domain":           domain,
+				"zone_id":          zoneID,
+				"custom_domain_id": customDomain.ID,
+			}).Warn("自动创建缓存规则失败，请手动在管理页面创建")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain":           domain,
+				"zone_id":          zoneID,
+				"custom_domain_id": customDomain.ID,
+				"expression":       expression,
+			}).Info("缓存规则已自动创建：缓存所有文件，Edge TTL 1个月")
+		}
+	} else if s.cacheRuleService == nil {
+		log.WithFields(map[string]interface{}{
+			"domain": domain,
+		}).Warn("缓存规则服务未初始化，跳过自动创建缓存规则")
 	}
 
 	return customDomain, nil

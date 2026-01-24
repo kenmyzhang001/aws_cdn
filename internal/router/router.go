@@ -72,8 +72,8 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 
 	// 初始化 R2 服务
 	r2BucketService := services.NewR2BucketService(db, cfAccountService)
-	r2CustomDomainService := services.NewR2CustomDomainService(db, cfAccountService)
 	r2CacheRuleService := services.NewR2CacheRuleService(db, cfAccountService, cloudflareSvc)
+	r2CustomDomainService := services.NewR2CustomDomainService(db, cfAccountService, r2CacheRuleService)
 	r2FileService := services.NewR2FileService(db, cfAccountService)
 
 	// 初始化自定义下载链接服务
