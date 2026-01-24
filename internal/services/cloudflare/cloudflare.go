@@ -1030,42 +1030,36 @@ func (s *CloudflareService) CreateCORSTransformRule(zoneID, domain, allowOrigin 
 	expression := fmt.Sprintf(`(http.host eq "%s")`, domain)
 	description := fmt.Sprintf("Add CORS headers for R2 domain %s", domain)
 
-	// 构建响应头设置
-	headers := []map[string]interface{}{
-		{
-			"name":  "Access-Control-Allow-Origin",
-			"value": allowOrigin,
-			"op":    "set",
+	// 构建响应头设置 - 按照 Cloudflare API 规范
+	headers := map[string]interface{}{
+		"Access-Control-Allow-Origin": map[string]interface{}{
+			"operation": "set",
+			"value":     allowOrigin,
 		},
-		{
-			"name":  "Access-Control-Allow-Methods",
-			"value": "GET, HEAD, OPTIONS",
-			"op":    "set",
+		"Access-Control-Allow-Methods": map[string]interface{}{
+			"operation": "set",
+			"value":     "GET, HEAD, OPTIONS",
 		},
-		{
-			"name":  "Access-Control-Allow-Headers",
-			"value": "*",
-			"op":    "set",
+		"Access-Control-Allow-Headers": map[string]interface{}{
+			"operation": "set",
+			"value":     "*",
 		},
-		{
-			"name":  "Access-Control-Expose-Headers",
-			"value": "ETag, Content-Length, Content-Type, Content-Range, Content-Disposition",
-			"op":    "set",
+		"Access-Control-Expose-Headers": map[string]interface{}{
+			"operation": "set",
+			"value":     "ETag, Content-Length, Content-Type, Content-Range, Content-Disposition",
 		},
-		{
-			"name":  "Access-Control-Max-Age",
-			"value": "3600",
-			"op":    "set",
+		"Access-Control-Max-Age": map[string]interface{}{
+			"operation": "set",
+			"value":     "3600",
 		},
 	}
 
-	// 构建规则
+	// 构建规则 - action 必须是字符串 "rewrite"
 	rule := map[string]interface{}{
 		"expression": expression,
-		"action": map[string]interface{}{
-			"response_headers": map[string]interface{}{
-				"headers": headers,
-			},
+		"action":     "rewrite",
+		"action_parameters": map[string]interface{}{
+			"headers": headers,
 		},
 		"description": description,
 		"enabled":     true,
@@ -1165,6 +1159,9 @@ func (s *CloudflareService) getOrCreateTransformRuleset(zoneID string) (string, 
 					Kind string `json:"kind"`
 				} `json:"result"`
 			}
+			log.WithFields(map[string]interface{}{
+				"body": string(body),
+			}).Info("获取 ruleset 响应")
 			if err := json.Unmarshal(body, &rulesetsResp); err == nil && rulesetsResp.Success {
 				// 查找 http_response_header_transformation ruleset
 				for _, rs := range rulesetsResp.Result {
@@ -1215,6 +1212,12 @@ func (s *CloudflareService) getOrCreateTransformRuleset(zoneID string) (string, 
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		log.WithFields(map[string]interface{}{
+			"body":    string(body),
+			"zoneID":  zoneID,
+			"payload": payload,
+			"headers": s.getAuthHeaders(),
+		}).Error("创建 ruleset 失败")
 		var errorResp struct {
 			Success bool `json:"success"`
 			Errors  []struct {
@@ -1234,6 +1237,11 @@ func (s *CloudflareService) getOrCreateTransformRuleset(zoneID string) (string, 
 			ID string `json:"id"`
 		} `json:"result"`
 	}
+	log.WithFields(map[string]interface{}{
+		"body":    string(body),
+		"zoneID":  zoneID,
+		"payload": payload,
+	}).Info("创建 ruleset 响应")
 
 	if err := json.Unmarshal(body, &result); err != nil {
 		return "", fmt.Errorf("解析响应失败: %w", err)
