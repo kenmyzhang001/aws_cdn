@@ -42,6 +42,11 @@
     - VPN 白名单（跳过验证码）
     - IDM 高频下载豁免（支持多线程下载）
     - 智能威胁分过滤（威胁分 ≤ 50）
+  - **自动创建 Page Rule（缓存优化）** 🔥
+    - Cache Everything（强制缓存所有内容）
+    - Edge Cache TTL: 30 天（节点缓存）
+    - Browser Cache TTL: 1 年（浏览器缓存）
+    - **节省 95-99% 源站流量费用** 💰
   
 - ✅ **缓存规则管理**
   - 配置自定义缓存规则
@@ -449,6 +454,10 @@ kubectl get pods -n aws-cdn
 - [CLOUDFLARE_WAF_CONFIGURATION.md](./CLOUDFLARE_WAF_CONFIGURATION.md) - Cloudflare WAF 手动配置指南
 - [CLOUDFLARE_PERMISSIONS.md](./CLOUDFLARE_PERMISSIONS.md) - Cloudflare API 权限配置
 
+### 缓存优化 💰
+- [CLOUDFLARE_PAGE_RULES.md](./CLOUDFLARE_PAGE_RULES.md) - Page Rules 缓存优化（新）
+- [AUTO_CACHE_RULE_CONFIGURATION.md](./AUTO_CACHE_RULE_CONFIGURATION.md) - 自动缓存规则配置
+
 ### 监控和运维
 - [MONITOR_QUICKSTART.md](./MONITOR_QUICKSTART.md) - 监控快速入门
 - [MONITOR_CONFIGURATION.md](./MONITOR_CONFIGURATION.md) - 监控配置详解
@@ -461,7 +470,7 @@ kubectl get pods -n aws-cdn
 
 ## 亮点功能 🌟
 
-### 自动 WAF 安全规则
+### 1. 自动 WAF 安全规则
 
 当你添加 R2 自定义域名时，系统会**自动创建 WAF 安全规则**，无需手动配置！
 
@@ -479,6 +488,26 @@ kubectl get pods -n aws-cdn
 ```
 
 详见 [AUTO_WAF_RULE_CONFIGURATION.md](./AUTO_WAF_RULE_CONFIGURATION.md)
+
+### 2. 自动 Page Rule（缓存优化）🔥
+
+当你添加 R2 自定义域名时，系统会**自动创建 Page Rule**，强制缓存文件，大幅节省流量费用！
+
+**自动配置内容:**
+- ✅ **Cache Everything** - 强制缓存所有内容
+- ✅ **Edge Cache TTL: 30 天** - 文件在 Cloudflare 节点存 30 天
+- ✅ **Browser Cache TTL: 1 年** - 用户浏览器缓存 1 年
+- ✅ **Rocket Loader: Off** - 防止文件损坏
+- ✅ **节省 95-99% 流量费用** 💰
+
+**效果示例:**
+
+| 场景 | 无缓存 | 有 Page Rule | 节省 |
+|-----|--------|-------------|------|
+| 100MB APK, 1000 次下载/天 | 100GB/天 | ~100MB/天 | 99.9% |
+| 月流量费用（¥0.5/GB） | ¥1,500 | ¥1.5 | **¥1,498.5** 💰 |
+
+详见 [CLOUDFLARE_PAGE_RULES.md](./CLOUDFLARE_PAGE_RULES.md)
 
 
 ## 许可证

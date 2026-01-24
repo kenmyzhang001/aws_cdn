@@ -1837,3 +1837,152 @@ func (s *CloudflareService) updateWAFRule(zoneID, rulesetID, ruleID string, rule
 
 	return result.Result.ID, nil
 }
+
+// CreatePageRule 创建 Page Rule（页面规则）用于缓存优化
+// zoneID: 域名所在的 Zone ID
+// domain: 要配置的域名（例如：dl1.lddss.com）
+// enableCaching: 是否启用强制缓存（Cache Everything）
+func (s *CloudflareService) CreatePageRule(zoneID, domain string, enableCaching bool) (string, error) {
+	log := logger.GetLogger()
+
+	if !enableCaching {
+		return "", fmt.Errorf("enableCaching 必须为 true 才能创建缓存优化规则")
+	}
+
+	// 构建 Page Rule 目标 URL（匹配所有路径）
+	targetURL := fmt.Sprintf("*%s/*", domain)
+
+	// 构建 Page Rule 动作
+	actions := []map[string]interface{}{
+		{
+			"id":    "cache_level",
+			"value": "cache_everything", // 万物缓存
+		},
+		{
+			"id":    "edge_cache_ttl",
+			"value": 2592000, // 30 天 = 30 * 24 * 60 * 60 秒
+		},
+		{
+			"id":    "browser_cache_ttl",
+			"value": 31536000, // 1 年 = 365 * 24 * 60 * 60 秒
+		},
+		{
+			"id":    "rocket_loader",
+			"value": "off", // 关闭 Rocket Loader
+		},
+		{
+			"id":    "ssl",
+			"value": "flexible", // SSL 兼容模式
+		},
+	}
+
+	// 构建请求 payload
+	payload := map[string]interface{}{
+		"targets": []map[string]interface{}{
+			{
+				"target":     "url",
+				"constraint": map[string]string{"operator": "matches", "value": targetURL},
+			},
+		},
+		"actions":  actions,
+		"priority": 1, // 优先级（1 = 最高）
+		"status":   "active",
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id":    zoneID,
+		"domain":     domain,
+		"target_url": targetURL,
+		"payload":    string(jsonData),
+	}).Info("准备创建 Page Rule（缓存优化）")
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/pagerules", zoneID)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id":     zoneID,
+		"domain":      domain,
+		"status_code": resp.StatusCode,
+		"response":    string(body),
+	}).Info("收到 Page Rule 创建响应")
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			// 检查是否是因为已存在
+			errorMsg := errorResp.Errors[0].Message
+			if strings.Contains(errorMsg, "already exists") || strings.Contains(errorMsg, "duplicate") {
+				log.WithFields(map[string]interface{}{
+					"zone_id": zoneID,
+					"domain":  domain,
+				}).Warn("Page Rule 可能已存在，尝试查找并更新")
+				// 返回空字符串表示已存在，不是错误
+				return "", nil
+			}
+			return "", fmt.Errorf("创建 Page Rule 失败: %s (Code: %d)", errorMsg, errorResp.Errors[0].Code)
+		}
+		return "", fmt.Errorf("创建 Page Rule 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			ID string `json:"id"`
+		} `json:"result"`
+		Errors []struct {
+			Message string `json:"message"`
+			Code    int    `json:"code"`
+		} `json:"errors"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		var errorMsg string
+		if len(result.Errors) > 0 {
+			errorMsg = result.Errors[0].Message
+		} else {
+			errorMsg = "未知错误"
+		}
+		return "", fmt.Errorf("创建 Page Rule 失败: %s", errorMsg)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+		"domain":  domain,
+		"rule_id": result.Result.ID,
+	}).Info("Page Rule（缓存优化）创建成功")
+
+	return result.Result.ID, nil
+}

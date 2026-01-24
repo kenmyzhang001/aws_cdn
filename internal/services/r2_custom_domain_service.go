@@ -178,10 +178,33 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 				"rule_id": wafRuleID,
 			}).Info("WAF 安全规则已自动创建（VPN白名单+IDM高频下载豁免）")
 		}
+
+		// 自动创建 Page Rule（缓存优化规则）
+		// Cache Everything + Edge TTL 30天 + Browser TTL 1年
+		pageRuleID, pageErr := cloudflareSvc.CreatePageRule(zoneID, domain, true)
+		if pageErr != nil {
+			log.WithError(pageErr).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("自动创建 Page Rule（缓存优化）失败，请手动在 Cloudflare Dashboard 配置")
+		} else if pageRuleID != "" {
+			log.WithFields(map[string]interface{}{
+				"domain":     domain,
+				"zone_id":    zoneID,
+				"rule_id":    pageRuleID,
+				"cache_ttl":  "Edge: 30天, Browser: 1年",
+				"cache_mode": "Cache Everything",
+			}).Info("Page Rule（缓存优化）已自动创建，节省源站流量费用")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Info("Page Rule 可能已存在，跳过创建")
+		}
 	} else {
 		log.WithFields(map[string]interface{}{
 			"domain": domain,
-		}).Warn("Zone ID 为空，跳过自动创建 CORS Transform Rule 和 WAF 安全规则，请手动在 Cloudflare Dashboard 配置")
+		}).Warn("Zone ID 为空，跳过自动创建 CORS Transform Rule、WAF 安全规则和 Page Rule，请手动在 Cloudflare Dashboard 配置")
 	}
 
 	// 保存到数据库
