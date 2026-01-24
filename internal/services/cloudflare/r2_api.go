@@ -170,6 +170,76 @@ func (s *R2APIService) CreateBucket(accountID, bucketName, location string) erro
 	return nil
 }
 
+// DeleteBucket 删除 R2 存储桶
+func (s *R2APIService) DeleteBucket(accountID, bucketName string) error {
+	log := logger.GetLogger()
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/r2/buckets/%s", accountID, bucketName)
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		log.WithError(err).WithField("bucket_name", bucketName).Error("删除 R2 存储桶失败")
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			errorMsg := errorResp.Errors[0].Message
+			log.WithFields(map[string]interface{}{
+				"account_id":    accountID,
+				"bucket_name":   bucketName,
+				"status_code":   resp.StatusCode,
+				"error_code":    errorResp.Errors[0].Code,
+				"error_message": errorMsg,
+			}).Error("删除存储桶失败")
+			if resp.StatusCode == http.StatusConflict {
+				return fmt.Errorf("存储桶不为空或正在使用中: %s", errorMsg)
+			}
+			if resp.StatusCode == http.StatusNotFound {
+				return fmt.Errorf("存储桶不存在: %s", errorMsg)
+			}
+			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+				return fmt.Errorf("认证失败或权限不足: %s (错误代码: %d)。请检查 API Token 是否有效且具有 R2 删除权限", errorMsg, errorResp.Errors[0].Code)
+			}
+			return fmt.Errorf("删除存储桶失败: %s (错误代码: %d)", errorMsg, errorResp.Errors[0].Code)
+		}
+		log.WithFields(map[string]interface{}{
+			"account_id":    accountID,
+			"bucket_name":   bucketName,
+			"status_code":   resp.StatusCode,
+			"response_body": string(body),
+		}).Error("删除存储桶失败")
+		return fmt.Errorf("删除存储桶失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.WithFields(map[string]interface{}{
+		"account_id":  accountID,
+		"bucket_name": bucketName,
+	}).Info("R2 存储桶删除成功")
+	return nil
+}
+
 // CreateCacheRule 创建缓存规则
 func (s *R2APIService) CreateCacheRule(zoneID, ruleName, expression, cacheStatus, edgeTTL, browserTTL string) (string, error) {
 	log := logger.GetLogger()

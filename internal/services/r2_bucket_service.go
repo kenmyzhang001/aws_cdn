@@ -135,13 +135,13 @@ func (s *R2BucketService) CreateR2Bucket(cfAccountID uint, bucketName, location,
 
 // DeleteR2Bucket 删除 R2 存储桶
 func (s *R2BucketService) DeleteR2Bucket(id uint) error {
+	log := logger.GetLogger()
 	bucket, err := s.GetR2Bucket(id)
 	if err != nil {
 		return err
 	}
 
-	// 检查存储桶中是否有文件或目录
-	// 从 CF 账号获取 R2 凭证
+	// 获取 CF 账号信息
 	cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
 	if err != nil {
 		return fmt.Errorf("获取 Cloudflare 账号失败: %w", err)
@@ -156,40 +156,72 @@ func (s *R2BucketService) DeleteR2Bucket(id uint) error {
 		fileService := NewR2FileService(s.db, s.cfAccountService)
 		files, err := fileService.ListFiles(id, "")
 		if err != nil {
-			// 如果无法列出文件（可能是凭证问题），不允许删除
-			return fmt.Errorf("无法检查存储桶中的文件，删除失败: %w。请确保存储桶凭证配置正确", err)
-		}
+			// 如果无法列出文件（可能是凭证问题），记录警告但不阻止删除
+			log.WithError(err).WithFields(map[string]interface{}{
+				"bucket_id":   bucket.ID,
+				"bucket_name": bucket.BucketName,
+			}).Warn("无法检查存储桶中的文件，将继续尝试删除")
+		} else {
+			// 统计文件和目录
+			fileCount := 0
+			dirCount := 0
+			for _, file := range files {
+				if strings.HasSuffix(file, "/") {
+					dirCount++
+				} else {
+					fileCount++
+				}
+			}
 
-		// 统计文件和目录
-		fileCount := 0
-		dirCount := 0
-		for _, file := range files {
-			if strings.HasSuffix(file, "/") {
-				dirCount++
-			} else {
-				fileCount++
+			if fileCount > 0 {
+				return fmt.Errorf("存储桶中存在 %d 个文件，请先删除所有文件后再删除存储桶", fileCount)
+			}
+
+			if dirCount > 0 {
+				return fmt.Errorf("存储桶中存在 %d 个目录，请先删除所有目录后再删除存储桶", dirCount)
 			}
 		}
-
-		if fileCount > 0 {
-			return fmt.Errorf("存储桶中存在 %d 个文件，请先删除所有文件后再删除存储桶", fileCount)
-		}
-
-		if dirCount > 0 {
-			return fmt.Errorf("存储桶中存在 %d 个目录，请先删除所有目录后再删除存储桶", dirCount)
-		}
 	} else {
-		// 如果没有配置凭证，无法检查文件，给出提示但不阻止删除
-		// 用户可能确定存储桶是空的，所以允许删除
-		// 但会在日志中记录警告
+		// 如果没有配置凭证，记录警告
+		log.WithFields(map[string]interface{}{
+			"bucket_id":   bucket.ID,
+			"bucket_name": bucket.BucketName,
+		}).Warn("未配置 R2 Access Key，无法检查存储桶是否为空，将继续尝试删除")
 	}
 
-	// 注意：Cloudflare R2 API 不提供删除存储桶的接口，只能通过 Dashboard 删除
-	// 这里只删除数据库记录
+	// 获取 R2 API Token（优先使用 R2APIToken，如果没有则使用 APIToken）
+	r2APIToken := s.cfAccountService.GetR2APIToken(cfAccount)
+	if r2APIToken == "" {
+		return fmt.Errorf("Cloudflare账号未配置 R2 API Token 或 API Token，无法删除存储桶")
+	}
+
+	// 创建 R2 API 服务
+	r2API := cloudflare.NewR2APIService(r2APIToken)
+	accountID := cfAccount.AccountID
+
+	// 调用 Cloudflare API 删除存储桶
+	if err := r2API.DeleteBucket(accountID, bucket.BucketName); err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"bucket_id":   bucket.ID,
+			"bucket_name": bucket.BucketName,
+			"account_id":  accountID,
+		}).Error("调用 Cloudflare API 删除存储桶失败")
+		return fmt.Errorf("删除存储桶失败: %w", err)
+	}
+
+	// 删除数据库记录
 	if err := s.db.Delete(bucket).Error; err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"bucket_id":   bucket.ID,
+			"bucket_name": bucket.BucketName,
+		}).Error("删除存储桶数据库记录失败")
 		return fmt.Errorf("删除存储桶记录失败: %w", err)
 	}
 
+	log.WithFields(map[string]interface{}{
+		"bucket_id":   bucket.ID,
+		"bucket_name": bucket.BucketName,
+	}).Info("存储桶删除成功（包括 Cloudflare 和数据库记录）")
 	return nil
 }
 
