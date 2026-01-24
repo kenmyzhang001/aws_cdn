@@ -73,6 +73,7 @@ func main() {
 		return speedProbeService.CleanOldResults(30)
 	}, 30*time.Hour)
 
+	go customDownloadLinkService.UpdateActualURLsForAllLinks()
 	// 添加更新自定义下载链接 actual_url 任务（每30分钟执行一次）
 	schedulerService.AddTask("更新自定义下载链接实际URL", func() error {
 		return customDownloadLinkService.UpdateActualURLsForAllLinks()
