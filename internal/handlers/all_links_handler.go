@@ -88,7 +88,20 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 		for _, link := range customLinks {
 			// 过滤掉没有 .apk 结尾的链接
 			if !strings.HasSuffix(strings.ToLower(link.URL), ".apk") {
-				continue
+				if !strings.HasSuffix(strings.ToLower(link.ActualURL), ".apk") {
+					continue
+				} else {
+					item := LinkItem{
+						ID:          link.ID,
+						URL:         link.ActualURL,
+						Name:        link.Name,
+						Description: link.Description,
+						Type:        "custom_download_link",
+						Status:      string(link.Status),
+						CreatedAt:   link.CreatedAt.Format("2006-01-02 15:04:05"),
+					}
+					response.Links = append(response.Links, item)
+				}
 			}
 			item := LinkItem{
 				ID:          link.ID,

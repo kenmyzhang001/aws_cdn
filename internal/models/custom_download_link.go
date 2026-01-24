@@ -18,6 +18,7 @@ const (
 type CustomDownloadLink struct {
 	ID          uint                     `json:"id" gorm:"primaryKey"`
 	URL         string                   `json:"url" gorm:"type:varchar(1000);not null"`         // 下载链接URL
+	ActualURL   string                   `json:"actual_url" gorm:"type:varchar(1000);default:'"` // 真实下载链接URL（处理301/302重定向后）
 	Name        string                   `json:"name" gorm:"type:varchar(255);default:''"`       // 链接名称
 	Description string                   `json:"description" gorm:"type:text"`                   // 链接描述
 	GroupID     *uint                    `json:"group_id" gorm:"index"`                          // 所属分组ID

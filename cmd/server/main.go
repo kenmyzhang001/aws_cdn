@@ -55,6 +55,9 @@ func main() {
 	// 初始化速度探测告警服务（速度阈值100KB/s，失败率阈值50%）
 	speedProbeService := services.NewSpeedProbeService(db, telegramService, models.ThresholdSpeedKbps, 0.5)
 
+	// 初始化自定义下载链接服务
+	customDownloadLinkService := services.NewCustomDownloadLinkService(db)
+
 	// 初始化并启动定时任务服务
 	schedulerService := services.NewSchedulerService()
 
@@ -70,12 +73,18 @@ func main() {
 		return speedProbeService.CleanOldResults(30)
 	}, 30*time.Hour)
 
+	// 添加更新自定义下载链接 actual_url 任务（每30分钟执行一次）
+	schedulerService.AddTask("更新自定义下载链接实际URL", func() error {
+		return customDownloadLinkService.UpdateActualURLsForAllLinks()
+	}, 30*time.Minute)
+
 	// 启动所有定时任务
 	go schedulerService.Start()
 
 	log.Info("定时任务服务已启动")
 	log.Info("  - 速度探测告警检查：每30分钟执行一次")
 	log.Info("  - 清理旧探测结果：每24小时执行一次")
+	log.Info("  - 更新自定义下载链接实际URL：每30分钟执行一次")
 	log.Info("  - 注意：链接探测由独立的 agent 进程执行")
 
 	// 初始化路由（传入 Telegram 服务以支持 webhook）

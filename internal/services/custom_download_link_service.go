@@ -1,9 +1,13 @@
 package services
 
 import (
+	"aws_cdn/internal/logger"
 	"aws_cdn/internal/models"
 	"fmt"
+	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -54,7 +58,7 @@ func (s *CustomDownloadLinkService) BatchCreateCustomDownloadLinks(urlsText stri
 // parseURLs 解析URL字符串（支持换行符和逗号分隔）
 func parseURLs(text string) []string {
 	var urls []string
-	
+
 	// 先按换行符分割
 	lines := strings.Split(text, "\n")
 	for _, line := range lines {
@@ -62,7 +66,7 @@ func parseURLs(text string) []string {
 		if line == "" {
 			continue
 		}
-		
+
 		// 每行再按逗号分割
 		parts := strings.Split(line, ",")
 		for _, part := range parts {
@@ -72,7 +76,7 @@ func parseURLs(text string) []string {
 			}
 		}
 	}
-	
+
 	return urls
 }
 
@@ -88,7 +92,7 @@ func (s *CustomDownloadLinkService) GetCustomDownloadLink(id uint) (*models.Cust
 // ListAllCustomDownloadLinks 列出所有自定义下载链接（不分页）
 func (s *CustomDownloadLinkService) ListAllCustomDownloadLinks() ([]models.CustomDownloadLink, error) {
 	var links []models.CustomDownloadLink
-	
+
 	if err := s.db.Preload("Group").
 		Where("deleted_at IS NULL").
 		Order("created_at DESC").
@@ -107,16 +111,16 @@ func (s *CustomDownloadLinkService) ListCustomDownloadLinks(page, pageSize int, 
 	offset := (page - 1) * pageSize
 
 	query := s.db.Model(&models.CustomDownloadLink{}).Where("deleted_at IS NULL")
-	
+
 	if groupID != nil {
 		query = query.Where("group_id = ?", *groupID)
 	}
-	
+
 	if search != nil && *search != "" {
 		searchPattern := "%" + *search + "%"
 		query = query.Where("url LIKE ? OR name LIKE ? OR description LIKE ?", searchPattern, searchPattern, searchPattern)
 	}
-	
+
 	if status != nil {
 		query = query.Where("status = ?", *status)
 	}
@@ -150,4 +154,127 @@ func (s *CustomDownloadLinkService) BatchDeleteCustomDownloadLinks(ids []uint) e
 // IncrementClickCount 增加点击次数
 func (s *CustomDownloadLinkService) IncrementClickCount(id uint) error {
 	return s.db.Model(&models.CustomDownloadLink{}).Where("id = ?", id).UpdateColumn("click_count", gorm.Expr("click_count + ?", 1)).Error
+}
+
+// UpdateActualURLsForAllLinks 更新所有链接的 actual_url（检查301/302重定向）
+func (s *CustomDownloadLinkService) UpdateActualURLsForAllLinks() error {
+	log := logger.GetLogger()
+	log.Info("开始更新所有自定义下载链接的 actual_url")
+
+	// 查询所有启用的链接
+	var links []models.CustomDownloadLink
+	if err := s.db.Where("status = ? AND deleted_at IS NULL", models.CustomDownloadLinkStatusActive).
+		Find(&links).Error; err != nil {
+		log.WithError(err).Error("查询自定义下载链接失败")
+		return fmt.Errorf("查询自定义下载链接失败: %w", err)
+	}
+
+	if len(links) == 0 {
+		log.Info("没有需要更新的链接")
+		return nil
+	}
+
+	log.WithField("count", len(links)).Info("找到需要更新的链接")
+
+	var wg sync.WaitGroup
+	// 限制并发数为 20
+	semaphore := make(chan struct{}, 20)
+
+	for _, link := range links {
+		wg.Add(1)
+		go func(l models.CustomDownloadLink) {
+			defer wg.Done()
+
+			// 获取信号量，控制并发数
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			actualURL, err := s.getActualURL(l.URL)
+			if err != nil {
+				log.WithError(err).WithField("url", l.URL).Warn("获取实际URL失败")
+				return
+			}
+
+			// 只有当 actual_url 发生变化时才更新
+			if actualURL != l.ActualURL {
+				if err := s.db.Model(&models.CustomDownloadLink{}).
+					Where("id = ?", l.ID).
+					Update("actual_url", actualURL).Error; err != nil {
+					log.WithError(err).WithFields(map[string]interface{}{
+						"link_id": l.ID,
+						"url":     l.URL,
+					}).Error("更新 actual_url 失败")
+					return
+				}
+
+				log.WithFields(map[string]interface{}{
+					"link_id":    l.ID,
+					"url":        l.URL,
+					"actual_url": actualURL,
+				}).Info("更新 actual_url 成功")
+			}
+		}(link)
+	}
+
+	// 等待所有 goroutine 完成
+	wg.Wait()
+
+	log.Info("所有链接的 actual_url 更新完成")
+	return nil
+}
+
+// getActualURL 获取URL的实际地址（跟踪301/302重定向）
+func (s *CustomDownloadLinkService) getActualURL(url string) (string, error) {
+	if !strings.Contains(url, ".") {
+		return url, nil
+	}
+	log := logger.GetLogger()
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// 最多跟踪10次重定向
+			if len(via) >= 10 {
+				return fmt.Errorf("重定向次数过多")
+			}
+			return nil
+		},
+	}
+
+	req, err := http.NewRequest("HEAD", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; URL-Checker/1.0)")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		// 如果HEAD请求失败，尝试GET请求
+		req, err = http.NewRequest("GET", url, nil)
+		if err != nil {
+			return "", fmt.Errorf("创建GET请求失败: %w", err)
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; URL-Checker/1.0)")
+
+		resp, err = client.Do(req)
+		if err != nil {
+			log.WithError(err).WithField("url", url).Debug("URL 请求失败")
+			return "", fmt.Errorf("请求失败: %w", err)
+		}
+	}
+	defer resp.Body.Close()
+
+	// 返回最终的URL（如果有重定向）
+	finalURL := resp.Request.URL.String()
+
+	if finalURL != url {
+		log.WithFields(map[string]interface{}{
+			"original_url": url,
+			"final_url":    finalURL,
+			"status_code":  resp.StatusCode,
+		}).Info("检测到URL重定向")
+	}
+
+	return finalURL, nil
 }
