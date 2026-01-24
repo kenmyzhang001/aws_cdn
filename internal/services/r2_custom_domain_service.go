@@ -162,10 +162,26 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 				"rule_id": corsRuleID,
 			}).Info("CORS Transform Rule 已自动创建")
 		}
+
+		// 自动创建 WAF 安全规则（VPN 白名单 + IDM 高频下载豁免）
+		// 默认对 apk 文件生效，可根据需要添加更多扩展名
+		wafRuleID, wafErr := cloudflareSvc.CreateWAFSecurityRule(zoneID, domain, []string{"apk"})
+		if wafErr != nil {
+			log.WithError(wafErr).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("自动创建 WAF 安全规则失败，请手动在 Cloudflare Dashboard 配置")
+		} else if wafRuleID != "" {
+			log.WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+				"rule_id": wafRuleID,
+			}).Info("WAF 安全规则已自动创建（VPN白名单+IDM高频下载豁免）")
+		}
 	} else {
 		log.WithFields(map[string]interface{}{
 			"domain": domain,
-		}).Warn("Zone ID 为空，跳过自动创建 CORS Transform Rule，请手动在 Cloudflare Dashboard 配置")
+		}).Warn("Zone ID 为空，跳过自动创建 CORS Transform Rule 和 WAF 安全规则，请手动在 Cloudflare Dashboard 配置")
 	}
 
 	// 保存到数据库

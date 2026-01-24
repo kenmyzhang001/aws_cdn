@@ -22,6 +22,32 @@
 - ✅ 部署在 AWS S3 + CloudFront 上
 - ✅ 支持将域名绑定到 CloudFront 分发
 
+### 3. Cloudflare R2 存储管理 ⭐ 新功能
+
+- ✅ **R2 存储桶管理**
+  - 创建和管理 Cloudflare R2 存储桶
+  - 支持多 Cloudflare 账号管理
+  - 自动生成 R2 访问凭证
+  
+- ✅ **R2 文件管理**
+  - 上传/下载/删除文件
+  - 文件列表查看和搜索
+  - 支持大文件上传（分片上传）
+  
+- ✅ **自定义域名配置**
+  - 为 R2 存储桶添加自定义域名
+  - 自动创建 DNS CNAME 记录
+  - 自动配置 CORS Transform Rule（跨域支持）
+  - **自动创建 WAF 安全规则** 🔥
+    - VPN 白名单（跳过验证码）
+    - IDM 高频下载豁免（支持多线程下载）
+    - 智能威胁分过滤（威胁分 ≤ 50）
+  
+- ✅ **缓存规则管理**
+  - 配置自定义缓存规则
+  - 按文件扩展名设置缓存时间
+  - 支持 Browser TTL 和 Edge TTL
+
 ## 技术栈
 
 ### 后端
@@ -47,6 +73,11 @@
   - ACM - SSL 证书管理
   - CloudFront - CDN 分发
   - S3 - 静态资源存储
+- **Cloudflare Services**:
+  - R2 - 对象存储
+  - DNS - 域名解析
+  - WAF - Web 应用防火墙
+  - Transform Rules - 请求/响应转换
 
 ## 项目结构
 
@@ -131,6 +162,11 @@ CLOUDFRONT_DISTRIBUTION_ID=your-distribution-id
 
 # S3 配置
 S3_BUCKET_NAME=your-bucket-name
+
+# Cloudflare 配置（可选，用于 R2 功能）
+CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
+CLOUDFLARE_API_EMAIL=your-cloudflare-email
+CLOUDFLARE_API_KEY=your-cloudflare-api-key
 ```
 
 ### 3. 使用 Docker Compose 启动（推荐）
@@ -395,6 +431,55 @@ kubectl get pods -n aws-cdn
 - [ ] 支持批量域名操作
 - [ ] 实现域名转出功能
 - [ ] 添加 API 文档（Swagger）
+
+## 文档索引
+
+### 快速入门
+- [QUICKSTART.md](./QUICKSTART.md) - 快速开始指南
+- [DEPLOYMENT.md](./DEPLOYMENT.md) - 部署文档
+
+### Cloudflare R2 相关
+- [CLOUDFLARE_R2_CDN_TUTORIAL.md](./CLOUDFLARE_R2_CDN_TUTORIAL.md) - Cloudflare R2 CDN 完整教程
+- [R2_FILE_MANAGEMENT.md](./R2_FILE_MANAGEMENT.md) - R2 文件管理指南
+- [AUTO_CACHE_RULE_CONFIGURATION.md](./AUTO_CACHE_RULE_CONFIGURATION.md) - 自动缓存规则配置
+- [CORS_CONFIGURATION.md](./CORS_CONFIGURATION.md) - CORS 跨域配置
+
+### 安全配置 🔥
+- [AUTO_WAF_RULE_CONFIGURATION.md](./AUTO_WAF_RULE_CONFIGURATION.md) - 自动 WAF 规则配置（新）
+- [CLOUDFLARE_WAF_CONFIGURATION.md](./CLOUDFLARE_WAF_CONFIGURATION.md) - Cloudflare WAF 手动配置指南
+- [CLOUDFLARE_PERMISSIONS.md](./CLOUDFLARE_PERMISSIONS.md) - Cloudflare API 权限配置
+
+### 监控和运维
+- [MONITOR_QUICKSTART.md](./MONITOR_QUICKSTART.md) - 监控快速入门
+- [MONITOR_CONFIGURATION.md](./MONITOR_CONFIGURATION.md) - 监控配置详解
+- [CHANGELOG_MONITOR.md](./CHANGELOG_MONITOR.md) - 变更日志监控
+- [SPEED_PROBE_API.md](./SPEED_PROBE_API.md) - 速度探测 API
+
+### 系统优化
+- [SYSTEM_OPTIMIZATION.md](./SYSTEM_OPTIMIZATION.md) - 系统优化指南
+- [SCHEDULED_TASKS_CONFIGURATION.md](./SCHEDULED_TASKS_CONFIGURATION.md) - 定时任务配置
+
+## 亮点功能 🌟
+
+### 自动 WAF 安全规则
+
+当你添加 R2 自定义域名时，系统会**自动创建 WAF 安全规则**，无需手动配置！
+
+**自动配置内容:**
+- ✅ VPN 白名单 - 威胁分 ≤ 50 的用户无需验证码
+- ✅ IDM 高频下载豁免 - 支持 IDM/ADM 多线程下载
+- ✅ 智能安全防护 - 恶意流量仍然被拦截
+- ✅ 零配置 - 添加域名即可自动生效
+
+**规则详情:**
+```
+触发条件: (cf.threat_score le 50) and (http.host eq "你的域名") and (http.request.uri.path.extension eq "apk")
+执行动作: Skip - Rate Limiting, Bot Fight Mode, WAF Managed Rules
+效果: VPN 用户可直接下载，IDM 可开启 32 线程
+```
+
+详见 [AUTO_WAF_RULE_CONFIGURATION.md](./AUTO_WAF_RULE_CONFIGURATION.md)
+
 
 ## 许可证
 

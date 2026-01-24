@@ -1428,3 +1428,412 @@ func (s *CloudflareService) updateRule(zoneID, rulesetID, ruleID string, rule ma
 
 	return result.Result.ID, nil
 }
+
+// CreateWAFSecurityRule 创建 WAF 安全规则（VPN 白名单 + IDM 高频下载豁免）
+// zoneID: 域名所在的 Zone ID
+// domain: 要保护的域名（例如：test111.wkljm.com）
+// fileExtensions: 要豁免的文件扩展名列表（例如：[]string{"apk", "exe", "zip"}）
+func (s *CloudflareService) CreateWAFSecurityRule(zoneID, domain string, fileExtensions []string) (string, error) {
+	log := logger.GetLogger()
+
+	// 如果没有指定文件扩展名，默认使用 apk
+	if len(fileExtensions) == 0 {
+		fileExtensions = []string{"apk"}
+	}
+
+	// 构建文件扩展名匹配表达式
+	var extensionExpr string
+	if len(fileExtensions) == 1 {
+		extensionExpr = fmt.Sprintf(`http.request.uri.path.extension eq "%s"`, fileExtensions[0])
+	} else {
+		// 多个扩展名使用 in 操作符
+		exts := make([]string, len(fileExtensions))
+		for i, ext := range fileExtensions {
+			exts[i] = fmt.Sprintf(`"%s"`, ext)
+		}
+		extensionExpr = fmt.Sprintf(`http.request.uri.path.extension in {%s}`, strings.Join(exts, " "))
+	}
+
+	// 构建完整的匹配表达式
+	// (cf.threat_score le 50) and (http.host eq "domain") and (http.request.uri.path.extension eq "apk")
+	expression := fmt.Sprintf(`(cf.threat_score le 50) and (http.host eq "%s") and (%s)`, domain, extensionExpr)
+	description := fmt.Sprintf("VPN白名单+IDM高频下载豁免: %s (%s)", domain, strings.Join(fileExtensions, ", "))
+
+	// 构建 WAF 规则
+	rule := map[string]interface{}{
+		"expression":  expression,
+		"action":      "skip",
+		"description": description,
+		"enabled":     true,
+		"action_parameters": map[string]interface{}{
+			"phases": []string{
+				"http_ratelimit",
+				"http_request_sbfm",
+				"http_request_firewall_managed",
+			},
+		},
+	}
+
+	// 步骤1: 获取或创建 http_request_firewall_custom ruleset
+	rulesetID, err := s.getOrCreateWAFRuleset(zoneID)
+	if err != nil {
+		return "", fmt.Errorf("获取或创建 WAF ruleset 失败: %w", err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id":    zoneID,
+		"ruleset_id": rulesetID,
+		"domain":     domain,
+		"extensions": fileExtensions,
+	}).Info("准备创建 WAF 安全规则")
+
+	// 步骤2: 检查是否已存在相同域名的规则
+	existingRuleID, err := s.findWAFRuleByDomain(zoneID, rulesetID, domain)
+	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"zone_id":    zoneID,
+			"ruleset_id": rulesetID,
+			"domain":     domain,
+		}).Warn("查找现有 WAF rule 失败，尝试创建新 rule")
+		existingRuleID = ""
+	}
+
+	// 步骤3: 如果存在，使用 PATCH 更新；否则使用 POST 添加
+	var ruleID string
+	if existingRuleID != "" {
+		// 更新已存在的 rule
+		rule["id"] = existingRuleID
+		rule["ref"] = fmt.Sprintf("waf_security_%s", domain)
+		ruleID, err = s.updateWAFRule(zoneID, rulesetID, existingRuleID, rule)
+		if err != nil {
+			return "", fmt.Errorf("更新 WAF rule 失败: %w", err)
+		}
+		log.WithFields(map[string]interface{}{
+			"zone_id":    zoneID,
+			"ruleset_id": rulesetID,
+			"rule_id":    ruleID,
+			"domain":     domain,
+		}).Info("WAF 安全规则更新成功")
+	} else {
+		// 添加新 rule
+		newRule := make(map[string]interface{})
+		for k, v := range rule {
+			newRule[k] = v
+		}
+		newRule["ref"] = fmt.Sprintf("waf_security_%s", domain)
+		delete(newRule, "id")
+
+		ruleID, err = s.addWAFRule(zoneID, rulesetID, newRule)
+		if err != nil {
+			return "", fmt.Errorf("添加 WAF rule 失败: %w", err)
+		}
+		log.WithFields(map[string]interface{}{
+			"zone_id":    zoneID,
+			"ruleset_id": rulesetID,
+			"rule_id":    ruleID,
+			"domain":     domain,
+		}).Info("WAF 安全规则创建成功")
+	}
+
+	return ruleID, nil
+}
+
+// getOrCreateWAFRuleset 获取或创建 http_request_firewall_custom ruleset
+func (s *CloudflareService) getOrCreateWAFRuleset(zoneID string) (string, error) {
+	log := logger.GetLogger()
+
+	// 先尝试获取现有的 ruleset
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets", zoneID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		if err == nil {
+			var rulesetsResp struct {
+				Success bool `json:"success"`
+				Result  []struct {
+					ID    string `json:"id"`
+					Name  string `json:"name"`
+					Kind  string `json:"kind"`
+					Phase string `json:"phase"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(body, &rulesetsResp); err == nil && rulesetsResp.Success {
+				// 查找 http_request_firewall_custom ruleset
+				for _, rs := range rulesetsResp.Result {
+					if rs.Phase == "http_request_firewall_custom" {
+						log.WithFields(map[string]interface{}{
+							"zone_id":    zoneID,
+							"ruleset_id": rs.ID,
+						}).Info("找到现有的 WAF ruleset")
+						return rs.ID, nil
+					}
+				}
+			}
+		}
+	}
+
+	// 如果不存在，创建新的 ruleset
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("未找到 http_request_firewall_custom ruleset，尝试创建")
+
+	payload := map[string]interface{}{
+		"name":  "http_request_firewall_custom",
+		"kind":  "zone",
+		"phase": "http_request_firewall_custom",
+		"rules": []map[string]interface{}{},
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url = fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets", zoneID)
+	req, err = http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err = s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return "", fmt.Errorf("创建 WAF ruleset 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return "", fmt.Errorf("创建 WAF ruleset 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		return "", fmt.Errorf("创建 WAF ruleset 失败")
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id":    zoneID,
+		"ruleset_id": result.Result.ID,
+	}).Info("WAF ruleset 创建成功")
+
+	return result.Result.ID, nil
+}
+
+// findWAFRuleByDomain 根据域名查找 WAF rule ID
+func (s *CloudflareService) findWAFRuleByDomain(zoneID, rulesetID, domain string) (string, error) {
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets/%s", zoneID, rulesetID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("获取 WAF ruleset 失败 (状态码: %d)", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	var rulesetResp struct {
+		Success bool `json:"success"`
+		Result  struct {
+			Rules []struct {
+				ID         string `json:"id"`
+				Expression string `json:"expression"`
+				Ref        string `json:"ref"`
+			} `json:"rules"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &rulesetResp); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !rulesetResp.Success {
+		return "", fmt.Errorf("获取 WAF ruleset 失败")
+	}
+
+	// 查找匹配的 rule（通过 ref 或 expression 中包含域名）
+	refPattern := fmt.Sprintf("waf_security_%s", domain)
+	for _, rule := range rulesetResp.Result.Rules {
+		if rule.Ref == refPattern || strings.Contains(rule.Expression, fmt.Sprintf(`http.host eq "%s"`, domain)) {
+			return rule.ID, nil
+		}
+	}
+
+	return "", nil // 未找到
+}
+
+// addWAFRule 添加 WAF rule 到 ruleset
+func (s *CloudflareService) addWAFRule(zoneID, rulesetID string, rule map[string]interface{}) (string, error) {
+	jsonData, err := json.Marshal(rule)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets/%s/rules", zoneID, rulesetID)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return "", fmt.Errorf("添加 WAF rule 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return "", fmt.Errorf("添加 WAF rule 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		return "", fmt.Errorf("添加 WAF rule 失败")
+	}
+
+	return result.Result.ID, nil
+}
+
+// updateWAFRule 使用 PATCH 更新 WAF rule
+func (s *CloudflareService) updateWAFRule(zoneID, rulesetID, ruleID string, rule map[string]interface{}) (string, error) {
+	jsonData, err := json.Marshal(rule)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets/%s/rules/%s", zoneID, rulesetID, ruleID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return "", fmt.Errorf("更新 WAF rule 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return "", fmt.Errorf("更新 WAF rule 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		return "", fmt.Errorf("更新 WAF rule 失败")
+	}
+
+	return result.Result.ID, nil
+}
