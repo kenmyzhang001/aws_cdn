@@ -2,14 +2,16 @@ package config
 
 import (
 	"os"
+	"strconv"
 )
 
 type Config struct {
-	Database   DatabaseConfig
-	Server     ServerConfig
-	JWT        JWTConfig
-	AWS        AWSConfig
-	Cloudflare CloudflareConfig
+	Database      DatabaseConfig
+	Server        ServerConfig
+	JWT           JWTConfig
+	AWS           AWSConfig
+	Cloudflare    CloudflareConfig
+	ScheduledTask ScheduledTaskConfig
 }
 
 type DatabaseConfig struct {
@@ -46,6 +48,12 @@ type CloudflareConfig struct {
 	APIToken string // 如果使用Token认证，优先使用Token
 }
 
+type ScheduledTaskConfig struct {
+	EnableSpeedProbeAlert       bool // 是否启用速度探测告警检查任务
+	EnableCleanOldResults       bool // 是否启用清理旧探测结果任务
+	EnableUpdateCustomDownloadLinks bool // 是否启用更新自定义下载链接实际URL任务
+}
+
 func Load() *Config {
 	return &Config{
 		Database: DatabaseConfig{
@@ -77,12 +85,28 @@ func Load() *Config {
 			APIKey:   getEnv("CLOUDFLARE_API_KEY", ""),
 			APIToken: getEnv("CLOUDFLARE_API_TOKEN", ""),
 		},
+		ScheduledTask: ScheduledTaskConfig{
+			EnableSpeedProbeAlert:           getBoolEnv("ENABLE_SPEED_PROBE_ALERT", true),
+			EnableCleanOldResults:           getBoolEnv("ENABLE_CLEAN_OLD_RESULTS", true),
+			EnableUpdateCustomDownloadLinks: getBoolEnv("ENABLE_UPDATE_CUSTOM_DOWNLOAD_LINKS", true),
+		},
 	}
 }
 
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+func getBoolEnv(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		boolValue, err := strconv.ParseBool(value)
+		if err != nil {
+			return defaultValue
+		}
+		return boolValue
 	}
 	return defaultValue
 }

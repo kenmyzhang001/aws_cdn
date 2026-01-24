@@ -225,7 +225,7 @@ func (s *SpeedProbeService) CheckAndPrepareAlertForURL(url string, timeWindowMin
 	}).Info("URL探测结果分析完成")
 
 	// 如果未达标IP超过一半，准备告警
-	if failedIPRate > 0.5 { // 超过50%
+	if failedIPRate == 0 { // 超过50%
 		log.WithFields(map[string]interface{}{
 			"url":         url,
 			"failed_rate": failedIPRate,

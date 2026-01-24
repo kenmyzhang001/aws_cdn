@@ -61,31 +61,46 @@ func main() {
 	// 初始化并启动定时任务服务
 	schedulerService := services.NewSchedulerService()
 
-	go speedProbeService.CheckAndAlertAll(30)
-	// 添加速度探测告警检查任务（每30分钟检查一次，检查最近30分钟的数据）
-	schedulerService.AddTask("速度探测告警检查", func() error {
-		return speedProbeService.CheckAndAlertAll(30)
-	}, 30*time.Minute)
+	// 速度探测告警检查任务（根据配置决定是否启用）
+	if cfg.ScheduledTask.EnableSpeedProbeAlert {
+		go speedProbeService.CheckAndAlertAll(30)
+		// 添加速度探测告警检查任务（每30分钟检查一次，检查最近30分钟的数据）
+		schedulerService.AddTask("速度探测告警检查", func() error {
+			return speedProbeService.CheckAndAlertAll(30)
+		}, 30*time.Minute)
+		log.Info("定时任务已启用：速度探测告警检查（每30分钟执行一次）")
+	} else {
+		log.Info("定时任务已禁用：速度探测告警检查")
+	}
 
-	go speedProbeService.CleanOldResults(30)
-	// 添加清理旧探测结果任务（每天执行一次，保留30天数据）
-	schedulerService.AddTask("清理旧探测结果", func() error {
-		return speedProbeService.CleanOldResults(30)
-	}, 30*time.Hour)
+	// 清理旧探测结果任务（根据配置决定是否启用）
+	if cfg.ScheduledTask.EnableCleanOldResults {
+		go speedProbeService.CleanOldResults(30)
+		// 添加清理旧探测结果任务（每天执行一次，保留30天数据）
+		schedulerService.AddTask("清理旧探测结果", func() error {
+			return speedProbeService.CleanOldResults(30)
+		}, 24*time.Hour)
+		log.Info("定时任务已启用：清理旧探测结果（每24小时执行一次）")
+	} else {
+		log.Info("定时任务已禁用：清理旧探测结果")
+	}
 
-	go customDownloadLinkService.UpdateActualURLsForAllLinks()
-	// 添加更新自定义下载链接 actual_url 任务（每30分钟执行一次）
-	schedulerService.AddTask("更新自定义下载链接实际URL", func() error {
-		return customDownloadLinkService.UpdateActualURLsForAllLinks()
-	}, 30*time.Minute)
+	// 更新自定义下载链接实际URL任务（根据配置决定是否启用）
+	if cfg.ScheduledTask.EnableUpdateCustomDownloadLinks {
+		go customDownloadLinkService.UpdateActualURLsForAllLinks()
+		// 添加更新自定义下载链接 actual_url 任务（每30分钟执行一次）
+		schedulerService.AddTask("更新自定义下载链接实际URL", func() error {
+			return customDownloadLinkService.UpdateActualURLsForAllLinks()
+		}, 30*time.Minute)
+		log.Info("定时任务已启用：更新自定义下载链接实际URL（每30分钟执行一次）")
+	} else {
+		log.Info("定时任务已禁用：更新自定义下载链接实际URL")
+	}
 
 	// 启动所有定时任务
 	go schedulerService.Start()
 
 	log.Info("定时任务服务已启动")
-	log.Info("  - 速度探测告警检查：每30分钟执行一次")
-	log.Info("  - 清理旧探测结果：每24小时执行一次")
-	log.Info("  - 更新自定义下载链接实际URL：每30分钟执行一次")
 	log.Info("  - 注意：链接探测由独立的 agent 进程执行")
 
 	// 初始化路由（传入 Telegram 服务以支持 webhook）
