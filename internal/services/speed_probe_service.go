@@ -335,6 +335,23 @@ func (s *SpeedProbeService) CheckAndAlertAll(timeWindowMinutes int) error {
 		}
 	} else {
 		log.Info("所有URL检查完成，无需发送告警")
+		// 发送成功提示消息到Telegram
+		if s.telegram != nil {
+			message := "✅ 速度监控检查完成\n\n"
+			if s.telegram.GetSitename() != "" {
+				message = fmt.Sprintf("[%s] ✅ 速度监控检查完成\n\n", s.telegram.GetSitename())
+			}
+			message += fmt.Sprintf("检查时间: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+			message += fmt.Sprintf("检查URL数量: %d\n", len(urls))
+			message += fmt.Sprintf("时间窗口: %d 分钟\n\n", timeWindowMinutes)
+			message += "所有URL状态正常，未发现告警！"
+
+			if err := s.telegram.SendMessage(message); err != nil {
+				log.WithError(err).Error("发送成功消息到Telegram失败")
+			} else {
+				log.Info("成功消息已发送到Telegram")
+			}
+		}
 	}
 
 	return nil
