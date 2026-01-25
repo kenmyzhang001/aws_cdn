@@ -47,6 +47,10 @@
     - Edge Cache TTL: 30 天（节点缓存）
     - Browser Cache TTL: 1 年（浏览器缓存）
     - **节省 95-99% 源站流量费用** 💰
+  - **自动启用网络优化** 🚀
+    - Smart Tiered Cache（智能分层缓存，节点接力）
+    - HTTP/3 (QUIC)（抗丢包，移动网络优化）
+    - 0-RTT（秒连，回头客优化）
   
 - ✅ **缓存规则管理**
   - 配置自定义缓存规则
@@ -457,6 +461,12 @@ kubectl get pods -n aws-cdn
 ### 缓存优化 💰
 - [CLOUDFLARE_PAGE_RULES.md](./CLOUDFLARE_PAGE_RULES.md) - Page Rules 缓存优化（新）
 - [AUTO_CACHE_RULE_CONFIGURATION.md](./AUTO_CACHE_RULE_CONFIGURATION.md) - 自动缓存规则配置
+
+### 网络优化 🚀
+- [CLOUDFLARE_NETWORK_OPTIMIZATION.md](./CLOUDFLARE_NETWORK_OPTIMIZATION.md) - 网络与缓存优化配置（新）
+  - Smart Tiered Cache（智能分层缓存）
+  - HTTP/3 (QUIC) 抗丢包优化
+  - 0-RTT 秒连优化
 
 ### 监控和运维
 - [MONITOR_QUICKSTART.md](./MONITOR_QUICKSTART.md) - 监控快速入门

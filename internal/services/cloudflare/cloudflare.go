@@ -1986,3 +1986,171 @@ func (s *CloudflareService) CreatePageRule(zoneID, domain string, enableCaching 
 
 	return result.Result.ID, nil
 }
+
+// EnableSmartTieredCache 启用智能分层缓存
+// zoneID: 域名所在的 Zone ID
+func (s *CloudflareService) EnableSmartTieredCache(zoneID string) error {
+	log := logger.GetLogger()
+
+	payload := map[string]interface{}{
+		"value": "on",
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/cache/tiered_cache_smart_topology_enable", zoneID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return fmt.Errorf("启用智能分层缓存失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return fmt.Errorf("启用智能分层缓存失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("智能分层缓存已启用")
+
+	return nil
+}
+
+// EnableHTTP3 启用 HTTP/3 (QUIC)
+// zoneID: 域名所在的 Zone ID
+func (s *CloudflareService) EnableHTTP3(zoneID string) error {
+	log := logger.GetLogger()
+
+	payload := map[string]interface{}{
+		"value": "on",
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/settings/http3", zoneID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return fmt.Errorf("启用 HTTP/3 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return fmt.Errorf("启用 HTTP/3 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("HTTP/3 (QUIC) 已启用")
+
+	return nil
+}
+
+// Enable0RTT 启用 0-RTT 连接恢复
+// zoneID: 域名所在的 Zone ID
+func (s *CloudflareService) Enable0RTT(zoneID string) error {
+	log := logger.GetLogger()
+
+	payload := map[string]interface{}{
+		"value": "on",
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/settings/0rtt", zoneID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return fmt.Errorf("启用 0-RTT 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return fmt.Errorf("启用 0-RTT 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("0-RTT 连接恢复已启用")
+
+	return nil
+}

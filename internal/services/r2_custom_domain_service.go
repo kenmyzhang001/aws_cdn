@@ -201,10 +201,49 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 				"zone_id": zoneID,
 			}).Info("Page Rule 可能已存在，跳过创建")
 		}
+
+		// 自动启用智能分层缓存 (Smart Tiered Cache)
+		if smartCacheErr := cloudflareSvc.EnableSmartTieredCache(zoneID); smartCacheErr != nil {
+			log.WithError(smartCacheErr).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("启用智能分层缓存失败，请手动在 Cloudflare Dashboard 配置")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Info("智能分层缓存已启用，节点接力优化完成")
+		}
+
+		// 自动启用 HTTP/3 (QUIC)
+		if http3Err := cloudflareSvc.EnableHTTP3(zoneID); http3Err != nil {
+			log.WithError(http3Err).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("启用 HTTP/3 (QUIC) 失败，请手动在 Cloudflare Dashboard 配置")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Info("HTTP/3 (QUIC) 已启用，抗丢包优化完成")
+		}
+
+		// 自动启用 0-RTT 连接恢复
+		if rttErr := cloudflareSvc.Enable0RTT(zoneID); rttErr != nil {
+			log.WithError(rttErr).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("启用 0-RTT 连接恢复失败，请手动在 Cloudflare Dashboard 配置")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Info("0-RTT 连接恢复已启用，秒连优化完成")
+		}
 	} else {
 		log.WithFields(map[string]interface{}{
 			"domain": domain,
-		}).Warn("Zone ID 为空，跳过自动创建 CORS Transform Rule、WAF 安全规则和 Page Rule，请手动在 Cloudflare Dashboard 配置")
+		}).Warn("Zone ID 为空，跳过自动创建 CORS Transform Rule、WAF 安全规则、Page Rule 和网络优化规则，请手动在 Cloudflare Dashboard 配置")
 	}
 
 	// 保存到数据库
