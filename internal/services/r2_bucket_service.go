@@ -141,6 +141,15 @@ func (s *R2BucketService) DeleteR2Bucket(id uint) error {
 		return err
 	}
 
+	// 检查是否存在关联的自定义域名
+	var customDomainCount int64
+	if err := s.db.Model(&models.R2CustomDomain{}).Where("r2_bucket_id = ?", id).Count(&customDomainCount).Error; err != nil {
+		return fmt.Errorf("检查自定义域名失败: %w", err)
+	}
+	if customDomainCount > 0 {
+		return fmt.Errorf("存储桶关联了 %d 个自定义域名，请先删除所有自定义域名后再删除存储桶", customDomainCount)
+	}
+
 	// 获取 CF 账号信息
 	cfAccount, err := s.cfAccountService.GetCFAccount(bucket.CFAccountID)
 	if err != nil {
