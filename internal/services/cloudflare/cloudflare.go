@@ -1809,10 +1809,10 @@ func (s *CloudflareService) findWAFRuleByDomain(zoneID, rulesetID, domain string
 		return "", fmt.Errorf("获取 WAF ruleset 失败")
 	}
 
-	// 查找匹配的 rule（通过 ref 或 expression 中包含域名）
+	// 查找匹配的 rule（只通过 ref 精确匹配，避免误匹配 VIP 规则）
 	refPattern := fmt.Sprintf("waf_security_%s", domain)
 	for _, rule := range rulesetResp.Result.Rules {
-		if rule.Ref == refPattern || strings.Contains(rule.Expression, fmt.Sprintf(`http.host eq "%s"`, domain)) {
+		if rule.Ref == refPattern {
 			return rule.ID, nil
 		}
 	}
