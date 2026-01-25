@@ -516,3 +516,89 @@ func (h *R2Handler) DeleteFile(c *gin.Context) {
 	}).Info("文件删除成功")
 	c.JSON(http.StatusOK, gin.H{"message": "文件删除成功"})
 }
+
+// ListApkFiles 列出所有APK文件（不包含域名信息）
+func (h *R2Handler) ListApkFiles(c *gin.Context) {
+	log := logger.GetLogger()
+	r2BucketID, err := strconv.ParseUint(c.Param("r2_bucket_id"), 10, 32)
+	if err != nil {
+		log.WithError(err).Error("列出APK文件失败：无效的存储桶ID")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的存储桶 ID"})
+		return
+	}
+
+	prefix := c.Query("prefix")
+
+	// 获取所有文件
+	files, err := h.fileService.ListFiles(uint(r2BucketID), prefix)
+	if err != nil {
+		log.WithError(err).Error("列出APK文件操作失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 过滤出APK文件
+	apkFiles := make([]map[string]interface{}, 0)
+	for _, file := range files {
+		// 跳过目录
+		if len(file) > 0 && file[len(file)-1:] == "/" {
+			continue
+		}
+		// 检查是否是APK文件
+		if len(file) > 4 && file[len(file)-4:] == ".apk" {
+			// 提取文件名
+			fileName := file
+			if idx := len(file) - 1; idx >= 0 {
+				for i := idx; i >= 0; i-- {
+					if file[i:i+1] == "/" {
+						fileName = file[i+1:]
+						break
+					}
+				}
+			}
+
+			apkFiles = append(apkFiles, map[string]interface{}{
+				"file_name": fileName,
+				"file_path": file,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, apkFiles)
+}
+
+// GetApkFileUrls 获取指定APK文件的所有自定义域名访问链接
+func (h *R2Handler) GetApkFileUrls(c *gin.Context) {
+	log := logger.GetLogger()
+	r2BucketID, err := strconv.ParseUint(c.Param("r2_bucket_id"), 10, 32)
+	if err != nil {
+		log.WithError(err).Error("获取APK文件链接失败：无效的存储桶ID")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的存储桶 ID"})
+		return
+	}
+
+	filePath := c.Query("file_path")
+	if filePath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 file_path 参数"})
+		return
+	}
+
+	// 获取该存储桶的所有自定义域名
+	domains, err := h.domainService.ListR2CustomDomains(uint(r2BucketID))
+	if err != nil {
+		log.WithError(err).Error("获取自定义域名列表失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 为每个域名生成访问链接
+	urls := make([]map[string]interface{}, 0, len(domains))
+	for _, domain := range domains {
+		urls = append(urls, map[string]interface{}{
+			"domain": domain.Domain,
+			"url":    "https://" + domain.Domain + "/" + filePath,
+		})
+	}
+
+	c.JSON(http.StatusOK, urls)
+}

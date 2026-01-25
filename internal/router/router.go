@@ -232,6 +232,9 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 			r2Files.POST("/buckets/:r2_bucket_id/directories", r2Handler.CreateDirectory)
 			r2Files.GET("/buckets/:r2_bucket_id", r2Handler.ListFiles)
 			r2Files.DELETE("/buckets/:r2_bucket_id", r2Handler.DeleteFile)
+			// APK 文件管理
+			r2Files.GET("/buckets/:r2_bucket_id/apk-files", r2Handler.ListApkFiles)
+			r2Files.GET("/buckets/:r2_bucket_id/apk-file-urls", r2Handler.GetApkFileUrls)
 		}
 
 		// 自定义下载链接管理
