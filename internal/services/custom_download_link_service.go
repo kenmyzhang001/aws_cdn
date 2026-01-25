@@ -225,7 +225,7 @@ func (s *CustomDownloadLinkService) UpdateActualURLsForAllLinks() error {
 
 // getActualURL 获取URL的实际地址（跟踪301/302重定向）
 func (s *CustomDownloadLinkService) getActualURL(url string) (string, error) {
-	if !strings.Contains(url, ".") {
+	if strings.HasSuffix(strings.ToLower(url), ".apk") {
 		return url, nil
 	}
 	log := logger.GetLogger()
@@ -235,6 +235,7 @@ func (s *CustomDownloadLinkService) getActualURL(url string) (string, error) {
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			// 最多跟踪10次重定向
 			if len(via) >= 10 {
+				log.WithField("url", url).Error("重定向次数过多")
 				return fmt.Errorf("重定向次数过多")
 			}
 			return nil
@@ -243,7 +244,8 @@ func (s *CustomDownloadLinkService) getActualURL(url string) (string, error) {
 
 	req, err := http.NewRequest("HEAD", url, nil)
 	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %w", err)
+		log.WithError(err).WithField("url", url).Error("创建请求失败")
+		return url, nil
 	}
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; URL-Checker/1.0)")
@@ -253,14 +255,15 @@ func (s *CustomDownloadLinkService) getActualURL(url string) (string, error) {
 		// 如果HEAD请求失败，尝试GET请求
 		req, err = http.NewRequest("GET", url, nil)
 		if err != nil {
-			return "", fmt.Errorf("创建GET请求失败: %w", err)
+			log.WithError(err).WithField("url", url).Error("创建GET请求失败")
+			return url, nil
 		}
 		req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; URL-Checker/1.0)")
 
 		resp, err = client.Do(req)
 		if err != nil {
 			log.WithError(err).WithField("url", url).Debug("URL 请求失败")
-			return "", fmt.Errorf("请求失败: %w", err)
+			return url, nil
 		}
 	}
 	defer resp.Body.Close()
