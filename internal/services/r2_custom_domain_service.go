@@ -66,7 +66,7 @@ func (s *R2CustomDomainService) ListAllR2CustomDomains() ([]models.R2CustomDomai
 // ListR2CustomDomains 列出所有自定义域名
 func (s *R2CustomDomainService) ListR2CustomDomains(r2BucketID uint) ([]models.R2CustomDomain, error) {
 	var domains []models.R2CustomDomain
-	if err := s.db.Preload("R2Bucket").Where("r2_bucket_id = ?", r2BucketID).Order("id DESC").Find(&domains).Error; err != nil {
+	if err := s.db.Preload("R2Bucket").Where("r2_bucket_id = ? AND deleted_at IS NULL", r2BucketID).Order("id DESC").Find(&domains).Error; err != nil {
 		return nil, fmt.Errorf("获取自定义域名列表失败: %w", err)
 	}
 	return domains, nil
