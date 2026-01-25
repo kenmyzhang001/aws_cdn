@@ -2144,6 +2144,144 @@ func (s *CloudflareService) CreatePageRule(zoneID, domain string, enableCaching 
 	return result.Result.ID, nil
 }
 
+// EnableTieredCache 启用基础分层缓存（Tiered Cache）
+// 这是 Smart Tiered Caching Topology 的前置条件
+// zoneID: 域名所在的 Zone ID
+func (s *CloudflareService) EnableTieredCache(zoneID string) error {
+	log := logger.GetLogger()
+
+	// 先查询 Argo Tiered Cache 是否已启用
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/argo/tiered_caching", zoneID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("创建查询请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("查询请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	var queryResult struct {
+		Success bool `json:"success"`
+		Result  struct {
+			Value string `json:"value"` // "on" 或 "off"
+		} `json:"result"`
+	}
+
+	// 如果查询成功且已启用，则跳过
+	if resp.StatusCode == http.StatusOK {
+		if err := json.Unmarshal(body, &queryResult); err == nil && queryResult.Success {
+			if queryResult.Result.Value == "on" {
+				log.WithFields(map[string]interface{}{
+					"zone_id": zoneID,
+				}).Debug("基础分层缓存已启用，跳过配置")
+				return nil
+			}
+		}
+	}
+
+	// 启用 Argo Tiered Cache
+	payload := map[string]interface{}{
+		"value": "on",
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	req, err = http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err = s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id":     zoneID,
+		"status_code": resp.StatusCode,
+		"response":    string(body),
+	}).Debug("收到基础分层缓存启用响应")
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return fmt.Errorf("启用基础分层缓存失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return fmt.Errorf("启用基础分层缓存失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			Value string `json:"value"`
+		} `json:"result"`
+		Errors []struct {
+			Message string `json:"message"`
+			Code    int    `json:"code"`
+		} `json:"errors"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		var errorMsg string
+		if len(result.Errors) > 0 {
+			errorMsg = result.Errors[0].Message
+		} else {
+			errorMsg = "未知错误"
+		}
+		return fmt.Errorf("启用基础分层缓存失败: %s", errorMsg)
+	}
+
+	if result.Result.Value != "on" {
+		log.WithFields(map[string]interface{}{
+			"zone_id":      zoneID,
+			"actual_value": result.Result.Value,
+		}).Warn("基础分层缓存启用请求成功，但返回值不是 'on'")
+		return fmt.Errorf("基础分层缓存启用失败：期望值为 'on'，实际值为 '%s'", result.Result.Value)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+		"value":   result.Result.Value,
+	}).Info("✅ 基础分层缓存（Tiered Cache）已成功启用")
+
+	return nil
+}
+
 // GetSmartTieredCacheStatus 查询智能分层缓存状态
 // zoneID: 域名所在的 Zone ID
 // 返回: enabled (true/false), error
@@ -2209,24 +2347,46 @@ func (s *CloudflareService) GetSmartTieredCacheStatus(zoneID string) (bool, erro
 	return enabled, nil
 }
 
-// EnableSmartTieredCache 启用智能分层缓存
+// EnableSmartTieredCache 启用智能分层缓存（Smart Tiered Caching Topology）
+// 注意：这个功能需要先启用基础的 Tiered Cache
 // zoneID: 域名所在的 Zone ID
 func (s *CloudflareService) EnableSmartTieredCache(zoneID string) error {
 	log := logger.GetLogger()
 
-	// 先查询当前状态
+	// 步骤1：先启用基础的 Tiered Cache（前置条件）
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("开始启用智能分层缓存：第 1 步 - 启用基础 Tiered Cache")
+
+	if err := s.EnableTieredCache(zoneID); err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"zone_id": zoneID,
+		}).Warn("启用基础分层缓存失败，但继续尝试启用智能拓扑")
+		// 不中断流程，继续尝试启用智能拓扑
+	}
+
+	// 步骤2：查询智能拓扑当前状态
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Debug("开始启用智能分层缓存：第 2 步 - 检查智能拓扑状态")
+
 	enabled, err := s.GetSmartTieredCacheStatus(zoneID)
 	if err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
 			"zone_id": zoneID,
-		}).Warn("查询智能分层缓存状态失败，尝试直接启用")
+		}).Warn("查询智能分层缓存拓扑状态失败，尝试直接启用")
 		// 查询失败不影响启用操作，继续执行
 	} else if enabled {
 		log.WithFields(map[string]interface{}{
 			"zone_id": zoneID,
-		}).Info("智能分层缓存已启用，跳过配置")
+		}).Info("✅ 智能分层缓存拓扑已启用，跳过配置")
 		return nil
 	}
+
+	// 步骤3：启用智能拓扑
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("开始启用智能分层缓存：第 3 步 - 启用智能拓扑（Smart Topology）")
 
 	payload := map[string]interface{}{
 		"value": "on",
@@ -2258,6 +2418,12 @@ func (s *CloudflareService) EnableSmartTieredCache(zoneID string) error {
 		return fmt.Errorf("读取响应失败: %w", err)
 	}
 
+	log.WithFields(map[string]interface{}{
+		"zone_id":     zoneID,
+		"status_code": resp.StatusCode,
+		"response":    string(body),
+	}).Debug("收到智能分层缓存启用响应")
+
 	if resp.StatusCode != http.StatusOK {
 		var errorResp struct {
 			Success bool `json:"success"`
@@ -2272,9 +2438,50 @@ func (s *CloudflareService) EnableSmartTieredCache(zoneID string) error {
 		return fmt.Errorf("启用智能分层缓存失败 (状态码: %d): %s", resp.StatusCode, string(body))
 	}
 
+	// 解析响应，验证是否真的启用成功
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			Value string `json:"value"` // 应该是 "on"
+		} `json:"result"`
+		Errors []struct {
+			Message string `json:"message"`
+			Code    int    `json:"code"`
+		} `json:"errors"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		var errorMsg string
+		if len(result.Errors) > 0 {
+			errorMsg = result.Errors[0].Message
+			log.WithFields(map[string]interface{}{
+				"zone_id":    zoneID,
+				"error_msg":  errorMsg,
+				"error_code": result.Errors[0].Code,
+			}).Error("启用智能分层缓存失败：API 返回失败状态")
+		} else {
+			errorMsg = "未知错误"
+		}
+		return fmt.Errorf("启用智能分层缓存失败: %s", errorMsg)
+	}
+
+	// 验证实际状态
+	if result.Result.Value != "on" {
+		log.WithFields(map[string]interface{}{
+			"zone_id":      zoneID,
+			"actual_value": result.Result.Value,
+		}).Warn("智能分层缓存启用请求成功，但返回值不是 'on'")
+		return fmt.Errorf("智能分层缓存启用失败：期望值为 'on'，实际值为 '%s'", result.Result.Value)
+	}
+
 	log.WithFields(map[string]interface{}{
 		"zone_id": zoneID,
-	}).Info("智能分层缓存已启用")
+		"value":   result.Result.Value,
+	}).Info("✅ 智能分层缓存已成功启用")
 
 	return nil
 }
