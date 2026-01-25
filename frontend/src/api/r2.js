@@ -99,4 +99,15 @@ export const r2Api = {
       data: { key },
     })
   },
+
+  // APK 文件管理
+  listApkFiles(r2BucketId, prefix = '') {
+    return request.get(`/r2-files/buckets/${r2BucketId}/apk-files`, { params: { prefix } })
+  },
+
+  getApkFileUrls(r2BucketId, filePath) {
+    return request.get(`/r2-files/buckets/${r2BucketId}/apk-file-urls`, {
+      params: { file_path: filePath },
+    })
+  },
 }

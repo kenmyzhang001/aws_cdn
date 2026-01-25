@@ -30,7 +30,7 @@
       <div style="margin-bottom: 20px">
         <el-input
           v-model="searchKeyword"
-          placeholder="搜索文件名、域名或完整链接"
+          placeholder="搜索文件名或文件路径"
           clearable
           @input="handleSearch"
           style="width: 100%"
@@ -41,53 +41,88 @@
         </el-input>
       </div>
 
-      <!-- APK 文件列表 -->
-      <el-table :data="paginatedApkList" v-loading="loading" stripe>
-        <el-table-column prop="fileName" label="文件名" min-width="250" show-overflow-tooltip>
+      <!-- APK 文件列表 - 可展开的表格 -->
+      <el-table
+        :data="paginatedApkList"
+        v-loading="loading"
+        stripe
+        row-key="file_path"
+        :expand-row-keys="expandedRows"
+        @expand-change="handleExpandChange"
+      >
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <div style="padding: 20px">
+              <div v-loading="row.loadingUrls" style="min-height: 100px">
+                <div v-if="row.urls && row.urls.length > 0">
+                  <h4 style="margin-bottom: 15px">自定义域名访问链接：</h4>
+                  <el-space direction="vertical" :size="10" style="width: 100%">
+                    <div
+                      v-for="(urlItem, index) in row.urls"
+                      :key="index"
+                      style="
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                        padding: 10px;
+                        background: #f5f7fa;
+                        border-radius: 4px;
+                      "
+                    >
+                      <div style="flex: 0 0 200px">
+                        <el-tag type="info">{{ urlItem.domain }}</el-tag>
+                      </div>
+                      <el-input :value="urlItem.url" readonly style="flex: 1">
+                        <template #append>
+                          <el-button
+                            @click="copyToClipboard(urlItem.url, row, index)"
+                            :type="urlItem.copied ? 'success' : 'primary'"
+                          >
+                            <el-icon>
+                              <component :is="urlItem.copied ? Check : DocumentCopy" />
+                            </el-icon>
+                            {{ urlItem.copied ? '已复制' : '复制' }}
+                          </el-button>
+                        </template>
+                      </el-input>
+                    </div>
+                  </el-space>
+                </div>
+                <div v-else-if="!row.loadingUrls">
+                  <el-empty description="该存储桶未配置自定义域名" />
+                </div>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="file_name" label="文件名" min-width="300" show-overflow-tooltip>
           <template #default="{ row }">
             <div style="display: flex; align-items: center; gap: 8px">
               <el-icon><Document /></el-icon>
-              <span>{{ row.fileName }}</span>
+              <span>{{ row.file_name }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="domain" label="域名" width="200" show-overflow-tooltip />
-        <el-table-column label="访问链接" min-width="400">
+        <el-table-column prop="file_path" label="文件路径" min-width="300" show-overflow-tooltip>
           <template #default="{ row }">
-            <div style="display: flex; align-items: center; gap: 8px">
-              <el-input
-                :value="row.fullUrl"
-                readonly
-                style="flex: 1"
-                ref="urlInputRef"
-              >
-                <template #append>
-                  <el-button
-                    @click="copyToClipboard(row.fullUrl)"
-                    :icon="row.copied ? 'Check' : 'DocumentCopy'"
-                    :type="row.copied ? 'success' : 'primary'"
-                  >
-                    {{ row.copied ? '已复制' : '复制' }}
-                  </el-button>
-                </template>
-              </el-input>
-            </div>
+            <code style="font-size: 12px">{{ row.file_path }}</code>
           </template>
         </el-table-column>
-        <el-table-column prop="filePath" label="文件路径" min-width="200" show-overflow-tooltip>
+        <el-table-column label="域名数量" width="120" align="center">
           <template #default="{ row }">
-            <code style="font-size: 12px">{{ row.filePath }}</code>
+            <el-tag v-if="row.urls" type="success">{{ row.urls.length }}</el-tag>
+            <el-tag v-else type="info">-</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="100">
+        <el-table-column label="操作" width="120" align="center">
           <template #default="{ row }">
             <el-button
               size="small"
               type="primary"
-              @click="copyToClipboard(row.fullUrl)"
-              :icon="row.copied ? 'Check' : 'DocumentCopy'"
+              @click="toggleExpand(row)"
+              :loading="row.loadingUrls"
             >
-              {{ row.copied ? '已复制' : '复制' }}
+              {{ isExpanded(row) ? '收起' : '查看链接' }}
             </el-button>
           </template>
         </el-table-column>
@@ -121,8 +156,9 @@ const selectedBucketId = ref(null)
 const searchKeyword = ref('')
 const currentPage = ref(1)
 const pageSize = ref(20)
+const expandedRows = ref([])
 
-// APK 文件列表（包含完整链接信息）
+// APK 文件列表
 const apkList = ref([])
 
 // 加载存储桶列表
@@ -139,7 +175,7 @@ const loadBucketList = async () => {
   }
 }
 
-// 加载 APK 文件
+// 加载 APK 文件列表（不加载域名信息）
 const loadApkFiles = async () => {
   if (!selectedBucketId.value) {
     ElMessage.warning('请先选择存储桶')
@@ -148,58 +184,78 @@ const loadApkFiles = async () => {
 
   loading.value = true
   try {
-    // 1. 获取存储桶的自定义域名列表
-    const domainRes = await r2Api.getR2CustomDomainList(selectedBucketId.value)
-    const domains = domainRes || []
-
-    if (domains.length === 0) {
-      ElMessage.warning('该存储桶未配置自定义域名，无法生成访问链接')
-      apkList.value = []
-      return
-    }
-
-    // 2. 获取文件列表
-    const filesRes = await r2Api.listFiles(selectedBucketId.value, '')
-    // 后端返回的是数组，不是对象
-    const files = Array.isArray(filesRes) ? filesRes : (filesRes.files || [])
-
-    // 3. 过滤出 APK 文件
-    const apkFiles = files.filter((file) => {
-      // 排除目录（以 / 结尾的）
-      if (file.endsWith('/')) return false
-      // 检查是否是 APK 文件
-      return file.toLowerCase().endsWith('.apk')
-    })
-
-    // 4. 为每个 APK 文件生成访问链接
-    const apkListWithUrls = []
-    for (const file of apkFiles) {
-      // 为每个域名生成一个链接
-      for (const domain of domains) {
-        // 构建完整 URL
-        // 文件路径需要正确编码：路径分隔符 / 保持不变，其他特殊字符需要编码
-        const pathParts = file.split('/')
-        const encodedParts = pathParts.map((part) => encodeURIComponent(part))
-        const encodedPath = encodedParts.join('/')
-        const fullUrl = `https://${domain.domain}/${encodedPath}`
-
-        apkListWithUrls.push({
-          fileName: file.split('/').pop(), // 文件名
-          filePath: file, // 完整路径
-          domain: domain.domain,
-          fullUrl: fullUrl,
-          copied: false, // 是否已复制
-        })
-      }
-    }
-
-    apkList.value = apkListWithUrls
+    const files = await r2Api.listApkFiles(selectedBucketId.value, '')
+    apkList.value = (files || []).map((file) => ({
+      ...file,
+      urls: null, // 延迟加载
+      loadingUrls: false,
+    }))
+    // 清空展开的行
+    expandedRows.value = []
   } catch (error) {
     ElMessage.error('加载 APK 文件列表失败')
     console.error(error)
   } finally {
     loading.value = false
   }
+}
+
+// 加载指定文件的域名链接
+const loadFileUrls = async (row) => {
+  if (row.urls !== null) {
+    // 已经加载过了
+    return
+  }
+
+  row.loadingUrls = true
+  try {
+    const urls = await r2Api.getApkFileUrls(selectedBucketId.value, row.file_path)
+    // URL编码处理
+    row.urls = (urls || []).map((item) => {
+      // 对文件路径进行正确编码
+      const pathParts = row.file_path.split('/')
+      const encodedParts = pathParts.map((part) => encodeURIComponent(part))
+      const encodedPath = encodedParts.join('/')
+      return {
+        domain: item.domain,
+        url: `https://${item.domain}/${encodedPath}`,
+        copied: false,
+      }
+    })
+  } catch (error) {
+    ElMessage.error('加载域名链接失败')
+    console.error(error)
+    row.urls = []
+  } finally {
+    row.loadingUrls = false
+  }
+}
+
+// 处理展开/收起
+const handleExpandChange = async (row, expandedRowsData) => {
+  if (expandedRowsData.includes(row)) {
+    // 展开行
+    expandedRows.value = [row.file_path]
+    await loadFileUrls(row)
+  } else {
+    // 收起行
+    expandedRows.value = []
+  }
+}
+
+// 切换展开状态
+const toggleExpand = async (row) => {
+  if (isExpanded(row)) {
+    expandedRows.value = []
+  } else {
+    expandedRows.value = [row.file_path]
+    await loadFileUrls(row)
+  }
+}
+
+// 判断是否展开
+const isExpanded = (row) => {
+  return expandedRows.value.includes(row.file_path)
 }
 
 // 处理存储桶切换
@@ -217,23 +273,10 @@ const filteredApkList = computed(() => {
 
   const keyword = searchKeyword.value.toLowerCase()
   return apkList.value.filter((item) => {
-    // 文件名搜索
-    if (item.fileName.toLowerCase().includes(keyword)) {
-      return true
-    }
-    // 域名搜索
-    if (item.domain.toLowerCase().includes(keyword)) {
-      return true
-    }
-    // 完整链接搜索
-    if (item.fullUrl.toLowerCase().includes(keyword)) {
-      return true
-    }
-    // 文件路径搜索
-    if (item.filePath.toLowerCase().includes(keyword)) {
-      return true
-    }
-    return false
+    return (
+      item.file_name.toLowerCase().includes(keyword) ||
+      item.file_path.toLowerCase().includes(keyword)
+    )
   })
 })
 
@@ -246,30 +289,32 @@ const paginatedApkList = computed(() => {
 
 // 处理搜索
 const handleSearch = () => {
-  currentPage.value = 1 // 搜索时重置到第一页
+  currentPage.value = 1
+  expandedRows.value = [] // 搜索时收起所有展开的行
 }
 
 // 处理分页大小变化
 const handleSizeChange = (val) => {
   pageSize.value = val
   currentPage.value = 1
+  expandedRows.value = []
 }
 
 // 处理当前页变化
 const handleCurrentChange = (val) => {
   currentPage.value = val
+  expandedRows.value = []
 }
 
 // 复制到剪贴板
-const copyToClipboard = async (text) => {
+const copyToClipboard = async (text, row, index) => {
   try {
     await navigator.clipboard.writeText(text)
     // 更新复制状态
-    const item = apkList.value.find((item) => item.fullUrl === text)
-    if (item) {
-      item.copied = true
+    if (row.urls && row.urls[index]) {
+      row.urls[index].copied = true
       setTimeout(() => {
-        item.copied = false
+        row.urls[index].copied = false
       }, 2000)
     }
     ElMessage.success('链接已复制到剪贴板')
@@ -283,11 +328,10 @@ const copyToClipboard = async (text) => {
     textArea.select()
     try {
       document.execCommand('copy')
-      const item = apkList.value.find((item) => item.fullUrl === text)
-      if (item) {
-        item.copied = true
+      if (row.urls && row.urls[index]) {
+        row.urls[index].copied = true
         setTimeout(() => {
-          item.copied = false
+          row.urls[index].copied = false
         }, 2000)
       }
       ElMessage.success('链接已复制到剪贴板')
