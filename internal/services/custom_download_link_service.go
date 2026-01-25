@@ -195,24 +195,22 @@ func (s *CustomDownloadLinkService) UpdateActualURLsForAllLinks() error {
 				return
 			}
 
-			// 只有当 actual_url 发生变化时才更新
-			if actualURL != l.ActualURL {
-				if err := s.db.Model(&models.CustomDownloadLink{}).
-					Where("id = ?", l.ID).
-					Update("actual_url", actualURL).Error; err != nil {
-					log.WithError(err).WithFields(map[string]interface{}{
-						"link_id": l.ID,
-						"url":     l.URL,
-					}).Error("更新 actual_url 失败")
-					return
-				}
-
-				log.WithFields(map[string]interface{}{
-					"link_id":    l.ID,
-					"url":        l.URL,
-					"actual_url": actualURL,
-				}).Info("更新 actual_url 成功")
+			if err := s.db.Model(&models.CustomDownloadLink{}).
+				Where("id = ?", l.ID).
+				Update("actual_url", actualURL).Error; err != nil {
+				log.WithError(err).WithFields(map[string]interface{}{
+					"link_id": l.ID,
+					"url":     l.URL,
+				}).Error("更新 actual_url 失败")
+				return
 			}
+
+			log.WithFields(map[string]interface{}{
+				"link_id":    l.ID,
+				"url":        l.URL,
+				"actual_url": actualURL,
+			}).Info("更新 actual_url 成功")
+
 		}(link)
 	}
 
