@@ -61,7 +61,22 @@
           <el-input v-model="createForm.bucket_name" placeholder="请输入存储桶名称（小写字母、数字、连字符）" />
         </el-form-item>
         <el-form-item label="存储位置">
-          <el-input v-model="createForm.location" placeholder="留空则自动选择（可选）" />
+          <el-select v-model="createForm.location" placeholder="请选择存储位置" style="width: 100%">
+            <el-option label="🌏 亚太地区 (推荐)" value="apac">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>🌏 亚太地区 (APAC)</span>
+                <el-tag size="small" type="success">推荐</el-tag>
+              </div>
+            </el-option>
+            <el-option label="🌎 北美西部 (WNAM)" value="wnam" />
+            <el-option label="🌎 北美东部 (ENAM)" value="enam" />
+            <el-option label="🌍 欧洲西部 (WEUR)" value="weur" />
+            <el-option label="🌍 欧洲东部 (EEUR)" value="eeur" />
+            <el-option label="🤖 自动选择" value="auto" />
+          </el-select>
+          <div style="margin-top: 5px; font-size: 12px; color: #909399;">
+            💡 提示：如果您的用户主要在亚洲，选择"亚太地区"可获得 5-10 倍速度提升
+          </div>
         </el-form-item>
         <el-form-item label="备注">
           <el-input
@@ -191,7 +206,7 @@ const createForm = ref({
   cf_account_id: null,
   account_id: '',
   bucket_name: '',
-  location: '',
+  location: 'apac', // 默认选择亚太地区
   note: '',
 })
 const createFormRef = ref(null)
@@ -270,7 +285,7 @@ const resetCreateForm = () => {
     cf_account_id: null,
     account_id: '',
     bucket_name: '',
-    location: '',
+    location: 'apac', // 默认选择亚太地区
     note: '',
   }
   if (createFormRef.value) {

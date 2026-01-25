@@ -1538,6 +1538,108 @@ func (s *CloudflareService) CreateWAFSecurityRule(zoneID, domain string, fileExt
 	return ruleID, nil
 }
 
+// CreateWAFVIPDownloadRule 创建 WAF "免检金牌" VIP 下载规则（00_Allow_APK_Download_VIP）
+// 这是整个下载站的核心规则，优先级最高，跳过所有防火墙检查
+// zoneID: 域名所在的 Zone ID
+// domain: 要保护的域名（例如：dl1.example.com）
+func (s *CloudflareService) CreateWAFVIPDownloadRule(zoneID, domain string) (string, error) {
+	log := logger.GetLogger()
+
+	// 构建匹配表达式：.apk 或 .obb 或 /download/ 路径
+	// 这是最宽松的规则，只要是下载相关的，统统放行！
+	expression := fmt.Sprintf(
+		`(http.host eq "%s") and (`+
+			`http.request.uri.path.extension eq "apk" or `+
+			`http.request.uri.path.extension eq "obb" or `+
+			`http.request.uri.path contains "/download/"`+
+			`)`,
+		domain,
+	)
+
+	description := fmt.Sprintf("00_Allow_APK_Download_VIP: %s - 免检金牌，最高优先级，跳过所有防火墙", domain)
+
+	// 构建 WAF 规则
+	// action: skip - 跳过所有防火墙检查
+	// phases: 跳过限速、机器人检测、托管防火墙规则
+	rule := map[string]interface{}{
+		"expression":  expression,
+		"action":      "skip",
+		"description": description,
+		"enabled":     true,
+		"action_parameters": map[string]interface{}{
+			"phases": []string{
+				"http_ratelimit",                // 跳过限速
+				"http_request_sbfm",             // 跳过超级机器人对抗模式
+				"http_request_firewall_managed", // 跳过托管防火墙规则
+			},
+		},
+	}
+
+	// 步骤1: 获取或创建 http_request_firewall_custom ruleset
+	rulesetID, err := s.getOrCreateWAFRuleset(zoneID)
+	if err != nil {
+		return "", fmt.Errorf("获取或创建 WAF ruleset 失败: %w", err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id":    zoneID,
+		"ruleset_id": rulesetID,
+		"domain":     domain,
+	}).Info("准备创建 WAF VIP 下载规则（00_Allow_APK_Download_VIP）")
+
+	// 步骤2: 检查是否已存在 VIP 规则
+	existingRuleID, err := s.findWAFRuleByRef(zoneID, rulesetID, fmt.Sprintf("00_vip_download_%s", domain))
+	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"zone_id":    zoneID,
+			"ruleset_id": rulesetID,
+			"domain":     domain,
+		}).Warn("查找现有 VIP 规则失败，尝试创建新规则")
+		existingRuleID = ""
+	}
+
+	// 步骤3: 如果存在，使用 PATCH 更新；否则使用 POST 添加
+	var ruleID string
+	if existingRuleID != "" {
+		// 更新已存在的 rule
+		rule["id"] = existingRuleID
+		rule["ref"] = fmt.Sprintf("00_vip_download_%s", domain)
+		ruleID, err = s.updateWAFRule(zoneID, rulesetID, existingRuleID, rule)
+		if err != nil {
+			return "", fmt.Errorf("更新 VIP 规则失败: %w", err)
+		}
+		log.WithFields(map[string]interface{}{
+			"zone_id":    zoneID,
+			"ruleset_id": rulesetID,
+			"rule_id":    ruleID,
+			"domain":     domain,
+		}).Info("WAF VIP 下载规则更新成功（免检金牌已更新）")
+	} else {
+		// 添加新 rule
+		newRule := make(map[string]interface{})
+		for k, v := range rule {
+			newRule[k] = v
+		}
+		// 使用 "00_" 前缀确保最高优先级
+		newRule["ref"] = fmt.Sprintf("00_vip_download_%s", domain)
+		delete(newRule, "id")
+
+		ruleID, err = s.addWAFRule(zoneID, rulesetID, newRule)
+		if err != nil {
+			return "", fmt.Errorf("添加 VIP 规则失败: %w", err)
+		}
+		log.WithFields(map[string]interface{}{
+			"zone_id":    zoneID,
+			"ruleset_id": rulesetID,
+			"rule_id":    ruleID,
+			"domain":     domain,
+			"expression": expression,
+		}).Info("🎉 WAF VIP 下载规则创建成功！免检金牌已启用，所有 APK/OBB 下载将直接放行")
+	}
+
+	return ruleID, nil
+}
+
 // getOrCreateWAFRuleset 获取或创建 http_request_firewall_custom ruleset
 func (s *CloudflareService) getOrCreateWAFRuleset(zoneID string) (string, error) {
 	log := logger.GetLogger()
@@ -1711,6 +1813,61 @@ func (s *CloudflareService) findWAFRuleByDomain(zoneID, rulesetID, domain string
 	refPattern := fmt.Sprintf("waf_security_%s", domain)
 	for _, rule := range rulesetResp.Result.Rules {
 		if rule.Ref == refPattern || strings.Contains(rule.Expression, fmt.Sprintf(`http.host eq "%s"`, domain)) {
+			return rule.ID, nil
+		}
+	}
+
+	return "", nil // 未找到
+}
+
+// findWAFRuleByRef 根据 ref 查找 WAF rule ID
+func (s *CloudflareService) findWAFRuleByRef(zoneID, rulesetID, ref string) (string, error) {
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets/%s", zoneID, rulesetID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("获取 WAF ruleset 失败 (状态码: %d)", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	var rulesetResp struct {
+		Success bool `json:"success"`
+		Result  struct {
+			Rules []struct {
+				ID  string `json:"id"`
+				Ref string `json:"ref"`
+			} `json:"rules"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &rulesetResp); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !rulesetResp.Success {
+		return "", fmt.Errorf("获取 WAF ruleset 失败")
+	}
+
+	// 查找匹配的 rule
+	for _, rule := range rulesetResp.Result.Rules {
+		if rule.Ref == ref {
 			return rule.ID, nil
 		}
 	}
@@ -2151,6 +2308,346 @@ func (s *CloudflareService) Enable0RTT(zoneID string) error {
 	log.WithFields(map[string]interface{}{
 		"zone_id": zoneID,
 	}).Info("0-RTT 连接恢复已启用")
+
+	return nil
+}
+
+// EnableIPv6 启用 IPv6
+// zoneID: 域名所在的 Zone ID
+func (s *CloudflareService) EnableIPv6(zoneID string) error {
+	log := logger.GetLogger()
+
+	payload := map[string]interface{}{
+		"value": "on",
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/settings/ipv6", zoneID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return fmt.Errorf("启用 IPv6 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return fmt.Errorf("启用 IPv6 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("IPv6 已启用（直连东南亚移动网）")
+
+	return nil
+}
+
+// EnableMinTLS13 启用 TLS 1.3 最低版本
+// zoneID: 域名所在的 Zone ID
+func (s *CloudflareService) EnableMinTLS13(zoneID string) error {
+	log := logger.GetLogger()
+
+	payload := map[string]interface{}{
+		"value": "1.3",
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/settings/min_tls_version", zoneID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return fmt.Errorf("设置 TLS 1.3 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return fmt.Errorf("设置 TLS 1.3 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("TLS 1.3 最低版本已设置（新手机极速握手）")
+
+	return nil
+}
+
+// EnableBrotli 启用 Brotli 压缩
+// zoneID: 域名所在的 Zone ID
+func (s *CloudflareService) EnableBrotli(zoneID string) error {
+	log := logger.GetLogger()
+
+	payload := map[string]interface{}{
+		"value": "on",
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/settings/brotli", zoneID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return fmt.Errorf("启用 Brotli 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return fmt.Errorf("启用 Brotli 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("Brotli 压缩已启用（加速推广页白屏加载）")
+
+	return nil
+}
+
+// EnableAlwaysUseHTTPS 启用强制 HTTPS
+// zoneID: 域名所在的 Zone ID
+func (s *CloudflareService) EnableAlwaysUseHTTPS(zoneID string) error {
+	log := logger.GetLogger()
+
+	payload := map[string]interface{}{
+		"value": "on",
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/settings/always_use_https", zoneID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return fmt.Errorf("启用 Always Use HTTPS 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return fmt.Errorf("启用 Always Use HTTPS 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("Always Use HTTPS 已启用（全站强制 HTTPS，防劫持）")
+
+	return nil
+}
+
+// DisableRocketLoader 禁用 Rocket Loader
+// zoneID: 域名所在的 Zone ID
+func (s *CloudflareService) DisableRocketLoader(zoneID string) error {
+	log := logger.GetLogger()
+
+	payload := map[string]interface{}{
+		"value": "off",
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/settings/rocket_loader", zoneID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return fmt.Errorf("禁用 Rocket Loader 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return fmt.Errorf("禁用 Rocket Loader 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("Rocket Loader 已禁用（保护 APK 不被处理）")
+
+	return nil
+}
+
+// DisableAutoMinify 禁用 Auto Minify
+// zoneID: 域名所在的 Zone ID
+func (s *CloudflareService) DisableAutoMinify(zoneID string) error {
+	log := logger.GetLogger()
+
+	payload := map[string]interface{}{
+		"value": map[string]string{
+			"css":  "off",
+			"html": "off",
+			"js":   "off",
+		},
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/settings/minify", zoneID)
+	req, err := http.NewRequest("PATCH", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return fmt.Errorf("禁用 Auto Minify 失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return fmt.Errorf("禁用 Auto Minify 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+	}).Info("Auto Minify 已全部禁用（节省处理时间，纯净传输）")
 
 	return nil
 }

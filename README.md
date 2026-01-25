@@ -119,6 +119,23 @@ aws_cdn/
 
 ## 快速开始
 
+### ⚡ 完整操作流程
+
+**🎯 推荐新用户阅读**：[R2 CDN 完整操作流程指南](./R2_CDN_COMPLETE_WORKFLOW.md)
+
+这是一份从零开始的完整流程文档，包括：
+- ✅ Cloudflare 账号添加
+- ✅ R2 存储桶创建（亚太地区选择）
+- ✅ 文件上传
+- ✅ 自定义域名配置
+- ✅ 15 项自动优化规则配置
+- ✅ 验证与监控
+- ✅ 日常运维
+
+**预计耗时**：5 分钟完成所有配置 🚀
+
+---
+
 ### 前置要求
 
 - Go 1.21+
@@ -443,6 +460,14 @@ kubectl get pods -n aws-cdn
 
 ## 文档索引
 
+### 🎯 新手必读
+
+- **[R2_CDN_COMPLETE_WORKFLOW.md](./R2_CDN_COMPLETE_WORKFLOW.md) - R2 CDN 完整操作流程指南（强烈推荐）⭐⭐⭐**
+  - 从 Cloudflare 账号添加到配置完成的完整流程
+  - 5 分钟快速上手
+  - 包含所有关键配置项说明
+  - 验证和监控指南
+
 ### 快速入门
 - [QUICKSTART.md](./QUICKSTART.md) - 快速开始指南
 - [DEPLOYMENT.md](./DEPLOYMENT.md) - 部署文档
@@ -450,11 +475,13 @@ kubectl get pods -n aws-cdn
 ### Cloudflare R2 相关
 - [CLOUDFLARE_R2_CDN_TUTORIAL.md](./CLOUDFLARE_R2_CDN_TUTORIAL.md) - Cloudflare R2 CDN 完整教程
 - [R2_FILE_MANAGEMENT.md](./R2_FILE_MANAGEMENT.md) - R2 文件管理指南
+- [R2_REGION_SELECTION_GUIDE.md](./R2_REGION_SELECTION_GUIDE.md) - R2 存储桶地区选择指南（新）⭐
 - [AUTO_CACHE_RULE_CONFIGURATION.md](./AUTO_CACHE_RULE_CONFIGURATION.md) - 自动缓存规则配置
 - [CORS_CONFIGURATION.md](./CORS_CONFIGURATION.md) - CORS 跨域配置
 
 ### 安全配置 🔥
 - [AUTO_WAF_RULE_CONFIGURATION.md](./AUTO_WAF_RULE_CONFIGURATION.md) - 自动 WAF 规则配置（新）
+- [WAF_VIP_DOWNLOAD_RULE_GUIDE.md](./WAF_VIP_DOWNLOAD_RULE_GUIDE.md) - WAF "免检金牌" VIP 下载规则（新）⭐⭐⭐
 - [CLOUDFLARE_WAF_CONFIGURATION.md](./CLOUDFLARE_WAF_CONFIGURATION.md) - Cloudflare WAF 手动配置指南
 - [CLOUDFLARE_PERMISSIONS.md](./CLOUDFLARE_PERMISSIONS.md) - Cloudflare API 权限配置
 
@@ -467,6 +494,12 @@ kubectl get pods -n aws-cdn
   - Smart Tiered Cache（智能分层缓存）
   - HTTP/3 (QUIC) 抗丢包优化
   - 0-RTT 秒连优化
+- [CLOUDFLARE_APK_OPTIMIZATION_COMPLETE.md](./CLOUDFLARE_APK_OPTIMIZATION_COMPLETE.md) - APK 专用优化完整清单（新）⭐
+  - IPv6 直连
+  - TLS 1.3 极速握手
+  - Brotli 压缩
+  - Always Use HTTPS
+  - 禁用 Rocket Loader 和 Auto Minify
 
 ### 监控和运维
 - [MONITOR_QUICKSTART.md](./MONITOR_QUICKSTART.md) - 监控快速入门

@@ -163,8 +163,25 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 			}).Info("CORS Transform Rule 已自动创建")
 		}
 
+		// 自动创建 WAF "免检金牌" VIP 下载规则（00_Allow_APK_Download_VIP）
+		// 这是最重要的规则，优先级最高，跳过所有防火墙检查
+		// 匹配：.apk 或 .obb 或 /download/ 路径
+		vipRuleID, vipErr := cloudflareSvc.CreateWAFVIPDownloadRule(zoneID, domain)
+		if vipErr != nil {
+			log.WithError(vipErr).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("自动创建 WAF VIP 下载规则失败，请手动在 Cloudflare Dashboard 配置")
+		} else if vipRuleID != "" {
+			log.WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+				"rule_id": vipRuleID,
+			}).Info("🎉 WAF VIP 下载规则已自动创建（00_Allow_APK_Download_VIP - 免检金牌）")
+		}
+
 		// 自动创建 WAF 安全规则（VPN 白名单 + IDM 高频下载豁免）
-		// 默认对 apk 文件生效，可根据需要添加更多扩展名
+		// 注意：这是备用规则，VIP 规则优先级更高
 		wafRuleID, wafErr := cloudflareSvc.CreateWAFSecurityRule(zoneID, domain, []string{"apk"})
 		if wafErr != nil {
 			log.WithError(wafErr).WithFields(map[string]interface{}{
@@ -240,10 +257,88 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 				"zone_id": zoneID,
 			}).Info("0-RTT 连接恢复已启用，秒连优化完成")
 		}
+
+		// 自动启用 IPv6
+		if ipv6Err := cloudflareSvc.EnableIPv6(zoneID); ipv6Err != nil {
+			log.WithError(ipv6Err).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("启用 IPv6 失败，请手动在 Cloudflare Dashboard 配置")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Info("IPv6 已启用，直连东南亚移动网")
+		}
+
+		// 自动启用 TLS 1.3 最低版本
+		if tlsErr := cloudflareSvc.EnableMinTLS13(zoneID); tlsErr != nil {
+			log.WithError(tlsErr).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("设置 TLS 1.3 失败，请手动在 Cloudflare Dashboard 配置")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Info("TLS 1.3 最低版本已设置，新手机极速握手")
+		}
+
+		// 自动启用 Brotli 压缩
+		if brotliErr := cloudflareSvc.EnableBrotli(zoneID); brotliErr != nil {
+			log.WithError(brotliErr).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("启用 Brotli 失败，请手动在 Cloudflare Dashboard 配置")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Info("Brotli 压缩已启用，加速推广页白屏加载")
+		}
+
+		// 自动启用 Always Use HTTPS
+		if httpsErr := cloudflareSvc.EnableAlwaysUseHTTPS(zoneID); httpsErr != nil {
+			log.WithError(httpsErr).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("启用 Always Use HTTPS 失败，请手动在 Cloudflare Dashboard 配置")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Info("Always Use HTTPS 已启用，全站强制 HTTPS，防劫持")
+		}
+
+		// 自动禁用 Rocket Loader（保护 APK）
+		if rocketErr := cloudflareSvc.DisableRocketLoader(zoneID); rocketErr != nil {
+			log.WithError(rocketErr).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("禁用 Rocket Loader 失败，请手动在 Cloudflare Dashboard 配置")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Info("Rocket Loader 已禁用，保护 APK 不被处理")
+		}
+
+		// 自动禁用 Auto Minify（节省处理时间）
+		if minifyErr := cloudflareSvc.DisableAutoMinify(zoneID); minifyErr != nil {
+			log.WithError(minifyErr).WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Warn("禁用 Auto Minify 失败，请手动在 Cloudflare Dashboard 配置")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"domain":  domain,
+				"zone_id": zoneID,
+			}).Info("Auto Minify 已全部禁用，节省处理时间，纯净传输")
+		}
 	} else {
 		log.WithFields(map[string]interface{}{
 			"domain": domain,
-		}).Warn("Zone ID 为空，跳过自动创建 CORS Transform Rule、WAF 安全规则、Page Rule 和网络优化规则，请手动在 Cloudflare Dashboard 配置")
+		}).Warn("Zone ID 为空，跳过自动创建 CORS Transform Rule、WAF 安全规则、Page Rule 和所有网络优化规则，请手动在 Cloudflare Dashboard 配置")
 	}
 
 	// 保存到数据库
