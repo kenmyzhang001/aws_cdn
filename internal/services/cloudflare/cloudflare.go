@@ -2144,10 +2144,89 @@ func (s *CloudflareService) CreatePageRule(zoneID, domain string, enableCaching 
 	return result.Result.ID, nil
 }
 
+// GetSmartTieredCacheStatus 查询智能分层缓存状态
+// zoneID: 域名所在的 Zone ID
+// 返回: enabled (true/false), error
+func (s *CloudflareService) GetSmartTieredCacheStatus(zoneID string) (bool, error) {
+	log := logger.GetLogger()
+
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/cache/tiered_cache_smart_topology_enable", zoneID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errorResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"errors"`
+		}
+		if err := json.Unmarshal(body, &errorResp); err == nil && len(errorResp.Errors) > 0 {
+			return false, fmt.Errorf("查询智能分层缓存状态失败: %s (Code: %d)", errorResp.Errors[0].Message, errorResp.Errors[0].Code)
+		}
+		return false, fmt.Errorf("查询智能分层缓存状态失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			Value string `json:"value"` // "on" 或 "off"
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return false, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		return false, fmt.Errorf("查询智能分层缓存状态失败")
+	}
+
+	enabled := result.Result.Value == "on"
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+		"enabled": enabled,
+	}).Debug("查询智能分层缓存状态成功")
+
+	return enabled, nil
+}
+
 // EnableSmartTieredCache 启用智能分层缓存
 // zoneID: 域名所在的 Zone ID
 func (s *CloudflareService) EnableSmartTieredCache(zoneID string) error {
 	log := logger.GetLogger()
+
+	// 先查询当前状态
+	enabled, err := s.GetSmartTieredCacheStatus(zoneID)
+	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"zone_id": zoneID,
+		}).Warn("查询智能分层缓存状态失败，尝试直接启用")
+		// 查询失败不影响启用操作，继续执行
+	} else if enabled {
+		log.WithFields(map[string]interface{}{
+			"zone_id": zoneID,
+		}).Info("智能分层缓存已启用，跳过配置")
+		return nil
+	}
 
 	payload := map[string]interface{}{
 		"value": "on",
