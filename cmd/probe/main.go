@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -188,7 +189,10 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 	return availableURLs
 }
 
-// probeURL 实时探测单个URL，通过判断HTTP 206状态码来确认可下载性
+// probeURL 实时探测单个URL，通过以下任一条件判断可下载性：
+// 1. HTTP 206 状态码 (支持Range下载)
+// 2. Content-Disposition 包含 .apk 文件名
+// 3. Content-Type 为 application/vnd.android.package-archive
 func probeURL(url string, traceID string) (float64, error) {
 	log.Printf("[TraceID: %s] probeURL 开始探测 - URL: %s", traceID, url)
 	overallStart := time.Now()
@@ -223,11 +227,32 @@ func probeURL(url string, traceID string) (float64, error) {
 	requestDuration := time.Since(requestStartTime)
 	totalDuration := time.Since(overallStart)
 
-	log.Printf("[TraceID: %s] HTTP响应收到 - URL: %s, 状态码: %d, Content-Length: %d, 请求耗时: %v",
-		traceID, url, resp.StatusCode, resp.ContentLength, requestDuration)
+	// 获取响应头信息
+	contentType := resp.Header.Get("Content-Type")
+	contentDisposition := resp.Header.Get("Content-Disposition")
 
-	// 判断状态码是否为 206 (Partial Content)
+	log.Printf("[TraceID: %s] HTTP响应收到 - URL: %s, 状态码: %d, Content-Length: %d, Content-Type: %s, Content-Disposition: %s, 请求耗时: %v",
+		traceID, url, resp.StatusCode, resp.ContentLength, contentType, contentDisposition, requestDuration)
+
+	// 判断是否为有效的APK下载链接（满足以下任一条件即可）：
+	// 1. 状态码为 206 (Partial Content)
+	// 2. Content-Disposition 包含 .apk 文件名
+	// 3. Content-Type 为 application/vnd.android.package-archive
+	isValid := false
+	matchReason := ""
+
 	if resp.StatusCode == http.StatusPartialContent {
+		isValid = true
+		matchReason = "状态码206(支持Range下载)"
+	} else if strings.Contains(strings.ToLower(contentDisposition), ".apk") {
+		isValid = true
+		matchReason = "Content-Disposition包含.apk文件名"
+	} else if strings.Contains(strings.ToLower(contentType), "application/vnd.android.package-archive") {
+		isValid = true
+		matchReason = "Content-Type为APK类型"
+	}
+
+	if isValid {
 		// 基于响应时间计算一个估算速度值（响应越快，速度越高）
 		// 假设响应时间越短，服务器性能越好，给予更高的速度评分
 		// 速度范围：100ms以内=10000KB/s, 500ms=2000KB/s, 1000ms=1000KB/s
@@ -239,15 +264,15 @@ func probeURL(url string, traceID string) (float64, error) {
 			speedKbps = 100.0 // 设置下限
 		}
 
-		log.Printf("[TraceID: %s] probeURL 成功 - URL: %s, 状态码: 206 (支持Range下载), 响应时间: %v, 评估速度: %.2f KB/s, 总耗时: %v",
-			traceID, url, requestDuration, speedKbps, totalDuration)
+		log.Printf("[TraceID: %s] probeURL 成功 - URL: %s, 匹配原因: %s, 状态码: %d, 响应时间: %v, 评估速度: %.2f KB/s, 总耗时: %v",
+			traceID, url, matchReason, resp.StatusCode, requestDuration, speedKbps, totalDuration)
 		return speedKbps, nil
 	}
 
-	// 如果不是 206，记录详细信息并返回错误
-	log.Printf("[TraceID: %s] probeURL 失败 - URL: %s, 状态码: %d (期望 206), 响应时间: %v, 总耗时: %v",
-		traceID, url, resp.StatusCode, requestDuration, totalDuration)
-	return 0, fmt.Errorf("状态码不是206: 实际状态码=%d", resp.StatusCode)
+	// 如果不满足任何条件，记录详细信息并返回错误
+	log.Printf("[TraceID: %s] probeURL 失败 - URL: %s, 状态码: %d, Content-Type: %s, Content-Disposition: %s, 响应时间: %v, 总耗时: %v",
+		traceID, url, resp.StatusCode, contentType, contentDisposition, requestDuration, totalDuration)
+	return 0, fmt.Errorf("不满足下载条件: 状态码=%d, Content-Type=%s, Content-Disposition=%s", resp.StatusCode, contentType, contentDisposition)
 }
 
 // realTimeProbe 并发实时探测多个URL，返回按速度排序的URL列表
