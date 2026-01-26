@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func SetupRouter(db *gorm.DB, db2 *gorm.DB, cfg *config.Config, telegramService *services.TelegramService) *gin.Engine {
+func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *services.TelegramService) *gin.Engine {
 	// 设置 Gin 模式
 	gin.SetMode(cfg.Server.Mode)
 
@@ -68,7 +68,7 @@ func SetupRouter(db *gorm.DB, db2 *gorm.DB, cfg *config.Config, telegramService 
 	redirectService := services.NewRedirectService(db, cloudFrontSvc, s3Svc, domainService, &cfg.AWS)
 	authService := services.NewAuthService(db, &cfg.JWT)
 	cloudFrontService := services.NewCloudFrontService(cloudFrontSvc, s3Origin)
-	downloadPackageService := services.NewDownloadPackageService(db, domainService, cloudFrontSvc, s3Svc, route53Svc, &cfg.AWS)
+	downloadPackageService := services.NewDownloadPackageService(db, db3, domainService, cloudFrontSvc, s3Svc, route53Svc, &cfg.AWS)
 
 	// 初始化 R2 服务
 	r2BucketService := services.NewR2BucketService(db, cfAccountService)

@@ -18,6 +18,7 @@ import (
 
 type DownloadPackageService struct {
 	db            *gorm.DB
+	db3           *gorm.DB
 	domainService *DomainService
 	cloudFrontSvc *aws.CloudFrontService
 	s3Svc         *aws.S3Service
@@ -27,6 +28,7 @@ type DownloadPackageService struct {
 
 func NewDownloadPackageService(
 	db *gorm.DB,
+	db3 *gorm.DB,
 	domainService *DomainService,
 	cloudFrontSvc *aws.CloudFrontService,
 	s3Svc *aws.S3Service,
@@ -35,6 +37,7 @@ func NewDownloadPackageService(
 ) *DownloadPackageService {
 	return &DownloadPackageService{
 		db:            db,
+		db3:           db3,
 		domainService: domainService,
 		cloudFrontSvc: cloudFrontSvc,
 		s3Svc:         s3Svc,
@@ -633,7 +636,7 @@ func (s *DownloadPackageService) GetCloudFrontOriginPathInfo(pkg *models.Downloa
 // ListAllDownloadPackages 列出所有下载包（不分页）
 func (s *DownloadPackageService) ListAllDownloadPackages() ([]models.DownloadPackage, error) {
 	var packages []models.DownloadPackage
-	
+
 	if err := s.db.Preload("Domain").
 		Where("deleted_at IS NULL").
 		Order("created_at DESC").
@@ -641,7 +644,16 @@ func (s *DownloadPackageService) ListAllDownloadPackages() ([]models.DownloadPac
 		return nil, err
 	}
 
-	return packages, nil
+	var packages2 []models.DownloadPackage
+	if err := s.db3.Preload("Domain").
+		Where("deleted_at IS NULL").
+		Order("created_at DESC").
+		Find(&packages2).Error; err != nil {
+		logger.GetLogger().WithError(err).Error("获取下载包列表失败")
+		return packages, nil
+	}
+
+	return append(packages, packages2...), nil
 }
 
 // ListDownloadPackages 列出所有下载包，支持按分组筛选和搜索

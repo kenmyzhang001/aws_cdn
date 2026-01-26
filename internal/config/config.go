@@ -8,6 +8,7 @@ import (
 type Config struct {
 	Database      DatabaseConfig
 	Database2     DatabaseConfig
+	Database3     DatabaseConfig
 	Server        ServerConfig
 	JWT           JWTConfig
 	AWS           AWSConfig

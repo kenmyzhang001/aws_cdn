@@ -51,6 +51,18 @@ func main() {
 		log.Fatalf("数据库初始化失败: %v", err)
 	}
 
+	db3, err := database.Initialize(database.DatabaseConfig{
+		Host:     cfg.Database3.Host,
+		Port:     cfg.Database3.Port,
+		User:     cfg.Database3.User,
+		Password: cfg.Database3.Password,
+		DBName:   cfg.Database3.DBName,
+		SSLMode:  cfg.Database3.SSLMode,
+	})
+	if err != nil {
+		log.Fatalf("数据库初始化失败: %v", err)
+	}
+
 	//// 自动迁移数据库
 	//if err := database.AutoMigrate(db); err != nil {
 	//	log.WithError(err).Fatal("数据库迁移失败")
@@ -116,7 +128,7 @@ func main() {
 	log.Info("  - 注意：链接探测由独立的 agent 进程执行")
 
 	// 初始化路由（传入 Telegram 服务以支持 webhook）
-	r := router.SetupRouter(db, db2, cfg, telegramService)
+	r := router.SetupRouter(db, db2, db3, cfg, telegramService)
 
 	// 启动服务器
 	port := os.Getenv("SERVER_PORT")
