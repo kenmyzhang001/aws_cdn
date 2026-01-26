@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.TelegramService) *gin.Engine {
+func SetupRouter(db *gorm.DB, db2 *gorm.DB, cfg *config.Config, telegramService *services.TelegramService) *gin.Engine {
 	// 设置 Gin 模式
 	gin.SetMode(cfg.Server.Mode)
 
@@ -80,7 +80,7 @@ func SetupRouter(db *gorm.DB, cfg *config.Config, telegramService *services.Tele
 	customDownloadLinkService := services.NewCustomDownloadLinkService(db)
 
 	// 初始化速度探测服务（速度阈值100KB/s，失败率阈值50%）
-	speedProbeService := services.NewSpeedProbeService(db, telegramService, models.ThresholdSpeedKbps, 0.5)
+	speedProbeService := services.NewSpeedProbeServiceWithTwoDBs(db, db2, telegramService, models.ThresholdSpeedKbps, 0.5)
 
 	// 初始化处理器
 	groupHandler := handlers.NewGroupHandler(groupService)

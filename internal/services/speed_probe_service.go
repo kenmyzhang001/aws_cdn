@@ -13,6 +13,7 @@ import (
 
 type SpeedProbeService struct {
 	db                   *gorm.DB
+	db2                  *gorm.DB // 第二个数据库连接
 	telegram             *TelegramService
 	speedThreshold       float64 // 速度阈值（KB/s）
 	failureRateThreshold float64 // 失败率阈值（0-1）
@@ -27,7 +28,8 @@ type IPDetail struct {
 	Status     string  `json:"status"` // "达标" or "未达标"
 }
 
-func NewSpeedProbeService(db *gorm.DB, telegram *TelegramService, speedThreshold, failureRateThreshold float64) *SpeedProbeService {
+// NewSpeedProbeServiceWithTwoDBs 创建带有两个数据库连接的服务
+func NewSpeedProbeServiceWithTwoDBs(db *gorm.DB, db2 *gorm.DB, telegram *TelegramService, speedThreshold, failureRateThreshold float64) *SpeedProbeService {
 	// 设置默认值
 	if speedThreshold <= 0 {
 		speedThreshold = 100.0 // 默认100 KB/s
@@ -38,6 +40,7 @@ func NewSpeedProbeService(db *gorm.DB, telegram *TelegramService, speedThreshold
 
 	return &SpeedProbeService{
 		db:                   db,
+		db2:                  db2,
 		telegram:             telegram,
 		speedThreshold:       speedThreshold,
 		failureRateThreshold: failureRateThreshold,
@@ -56,10 +59,27 @@ func (s *SpeedProbeService) ReportProbeResult(result *models.SpeedProbeResult) e
 		return fmt.Errorf("客户端IP不能为空")
 	}
 
-	// 保存到数据库
+	// 保存到第一个数据库
 	if err := s.db.Create(result).Error; err != nil {
-		log.WithError(err).Error("保存探测结果失败")
-		return fmt.Errorf("保存探测结果失败: %w", err)
+		log.WithError(err).Error("保存探测结果到第一个数据库失败")
+		return fmt.Errorf("保存探测结果到第一个数据库失败: %w", err)
+	}
+
+	// 如果配置了第二个数据库，也保存到第二个数据库
+	if s.db2 != nil {
+		// 复制一份数据，避免ID冲突
+		result2 := *result
+		result2.ID = 0 // 重置ID，让第二个数据库自动生成
+
+		if err := s.db2.Create(&result2).Error; err != nil {
+			// 第二个数据库写入失败只记录日志，不影响主流程
+			log.WithError(err).Error("保存探测结果到第二个数据库失败")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"result_id": result2.ID,
+				"client_ip": result2.ClientIP,
+			}).Info("探测结果已保存到第二个数据库")
+		}
 	}
 
 	log.WithFields(map[string]interface{}{
@@ -91,10 +111,29 @@ func (s *SpeedProbeService) BatchReportProbeResults(results []models.SpeedProbeR
 		}
 	}
 
-	// 批量保存
+	// 批量保存到第一个数据库
 	if err := s.db.Create(&results).Error; err != nil {
-		log.WithError(err).Error("批量保存探测结果失败")
-		return fmt.Errorf("批量保存探测结果失败: %w", err)
+		log.WithError(err).Error("批量保存探测结果到第一个数据库失败")
+		return fmt.Errorf("批量保存探测结果到第一个数据库失败: %w", err)
+	}
+
+	// 如果配置了第二个数据库，也批量保存到第二个数据库
+	if s.db2 != nil {
+		// 复制数据，重置ID
+		results2 := make([]models.SpeedProbeResult, len(results))
+		for i, result := range results {
+			results2[i] = result
+			results2[i].ID = 0 // 重置ID，让第二个数据库自动生成
+		}
+
+		if err := s.db2.Create(&results2).Error; err != nil {
+			// 第二个数据库写入失败只记录日志，不影响主流程
+			log.WithError(err).Error("批量保存探测结果到第二个数据库失败")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"count": len(results2),
+			}).Info("探测结果已批量保存到第二个数据库")
+		}
 	}
 
 	log.WithFields(map[string]interface{}{

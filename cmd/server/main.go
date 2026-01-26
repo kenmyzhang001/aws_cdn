@@ -39,6 +39,18 @@ func main() {
 		log.WithError(err).Fatal("数据库初始化失败")
 	}
 
+	db2, err := database.Initialize(database.DatabaseConfig{
+		Host:     cfg.Database2.Host,
+		Port:     cfg.Database2.Port,
+		User:     cfg.Database2.User,
+		Password: cfg.Database2.Password,
+		DBName:   cfg.Database2.DBName,
+		SSLMode:  cfg.Database2.SSLMode,
+	})
+	if err != nil {
+		log.Fatalf("数据库初始化失败: %v", err)
+	}
+
 	//// 自动迁移数据库
 	//if err := database.AutoMigrate(db); err != nil {
 	//	log.WithError(err).Fatal("数据库迁移失败")
@@ -53,7 +65,7 @@ func main() {
 	telegramService := services.NewTelegramService(botToken, chatID, cfg.Server.Sitename)
 
 	// 初始化速度探测告警服务（速度阈值100KB/s，失败率阈值50%）
-	speedProbeService := services.NewSpeedProbeService(db, telegramService, models.ThresholdSpeedKbps, 0.5)
+	speedProbeService := services.NewSpeedProbeServiceWithTwoDBs(db, db2, telegramService, models.ThresholdSpeedKbps, 0.5)
 
 	// 初始化自定义下载链接服务
 	customDownloadLinkService := services.NewCustomDownloadLinkService(db)
@@ -104,7 +116,7 @@ func main() {
 	log.Info("  - 注意：链接探测由独立的 agent 进程执行")
 
 	// 初始化路由（传入 Telegram 服务以支持 webhook）
-	r := router.SetupRouter(db, cfg, telegramService)
+	r := router.SetupRouter(db, db2, cfg, telegramService)
 
 	// 启动服务器
 	port := os.Getenv("SERVER_PORT")

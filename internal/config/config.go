@@ -7,6 +7,7 @@ import (
 
 type Config struct {
 	Database      DatabaseConfig
+	Database2     DatabaseConfig
 	Server        ServerConfig
 	JWT           JWTConfig
 	AWS           AWSConfig
@@ -49,8 +50,8 @@ type CloudflareConfig struct {
 }
 
 type ScheduledTaskConfig struct {
-	EnableSpeedProbeAlert       bool // 是否启用速度探测告警检查任务
-	EnableCleanOldResults       bool // 是否启用清理旧探测结果任务
+	EnableSpeedProbeAlert           bool // 是否启用速度探测告警检查任务
+	EnableCleanOldResults           bool // 是否启用清理旧探测结果任务
 	EnableUpdateCustomDownloadLinks bool // 是否启用更新自定义下载链接实际URL任务
 }
 
@@ -63,6 +64,14 @@ func Load() *Config {
 			Password: getEnv("DB_PASSWORD", ""),
 			DBName:   getEnv("DB_NAME", "aws_cdn"),
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
+		},
+		Database2: DatabaseConfig{
+			Host:     getEnv("DB2_HOST", "localhost"),
+			Port:     getEnv("DB2_PORT", "3306"),
+			User:     getEnv("DB2_USER", "root"),
+			Password: getEnv("DB2_PASSWORD", ""),
+			DBName:   getEnv("DB2_NAME", "aws_cdn"),
+			SSLMode:  getEnv("DB2_SSLMODE", "disable"),
 		},
 		Server: ServerConfig{
 			Port:     getEnv("SERVER_PORT", "8080"),
