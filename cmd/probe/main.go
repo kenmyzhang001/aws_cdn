@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"gopkg.in/natefinch/lumberjack.v2"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -379,14 +380,36 @@ func probeHandler(db *gorm.DB) gin.HandlerFunc {
 }
 
 func main() {
+	// 配置日志输出到文件，支持自动切割
+	logFile := &lumberjack.Logger{
+		Filename:   "logs/probe.log", // 日志文件路径
+		MaxSize:    50,               // 每个日志文件最大50MB
+		MaxBackups: 10,               // 最多保留10个旧日志文件
+		MaxAge:     30,               // 日志文件最多保留30天
+		Compress:   true,             // 是否压缩旧日志文件
+		LocalTime:  true,             // 使用本地时间
+	}
+
+	// 设置日志输出到文件
+	log.SetOutput(logFile)
+	// 设置日志格式：日期 时间 文件名:行号
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
+	log.Println("========== Probe 服务启动 ==========")
+	log.Printf("日志文件配置 - 路径: %s, 最大大小: %dMB, 最多保留: %d个文件",
+		logFile.Filename, logFile.MaxSize, logFile.MaxBackups)
+
 	// 加载配置
 	// 加载环境变量
 	if err := godotenv.Load(); err != nil {
 		log.Println("未找到 .env 文件，使用环境变量")
 	}
 	cfg := Load()
+	log.Printf("配置加载完成 - DB Host: %s, DB Port: %s, DB Name: %s",
+		cfg.Database.Host, cfg.Database.Port, cfg.Database.DBName)
 
 	// 初始化数据库连接
+	log.Println("开始连接数据库...")
 	db, err := Initialize(DatabaseConfig{
 		Host:     cfg.Database.Host,
 		Port:     cfg.Database.Port,
@@ -398,12 +421,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("数据库连接失败: %v", err)
 	}
+	log.Println("数据库连接成功")
 
 	// 创建Gin路由
+	log.Println("初始化Gin路由...")
 	r := gin.Default()
 
 	// 定义探活接口
 	r.POST("/probe", probeHandler(db))
+	log.Println("注册路由 - POST /probe")
 
 	// 可选：添加健康检查接口
 	r.GET("/health", func(c *gin.Context) {
@@ -411,9 +437,13 @@ func main() {
 			"status": "ok",
 		})
 	})
+	log.Println("注册路由 - GET /health")
 
 	// 启动服务器，监听8080端口
-	r.Run(":8080")
+	log.Println("========== 服务器启动在 :8080 ==========")
+	if err := r.Run(":8080"); err != nil {
+		log.Fatalf("服务器启动失败: %v", err)
+	}
 }
 
 type DatabaseConfig struct {
