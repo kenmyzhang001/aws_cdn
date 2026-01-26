@@ -48,7 +48,7 @@ func main() {
 		SSLMode:  cfg.Database2.SSLMode,
 	})
 	if err != nil {
-		log.Fatalf("数据库初始化失败: %v", err)
+		log.Infof("数据库初始化失败: %v", err)
 	}
 
 	db3, err := database.Initialize(database.DatabaseConfig{
@@ -60,7 +60,7 @@ func main() {
 		SSLMode:  cfg.Database3.SSLMode,
 	})
 	if err != nil {
-		log.Fatalf("数据库初始化失败: %v", err)
+		log.Infof("数据库初始化失败: %v", err)
 	}
 
 	//// 自动迁移数据库
