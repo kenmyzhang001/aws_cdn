@@ -4,8 +4,10 @@ import (
 	"aws_cdn/internal/config"
 	"aws_cdn/internal/database"
 	"aws_cdn/internal/models"
+	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -30,12 +32,13 @@ func probeURLs(db *gorm.DB, urls []string) []string {
 		var result models.SpeedProbeResult
 
 		// 查询该URL的探测结果，按照 speed_kbps 倒序，只取第一条（最快的记录）
-		err := db.Where("url = ? AND status = ?", url, models.SpeedProbeStatusSuccess).
+		err := db.Where("url = ? AND status = ? AND created_at > ?", url, models.SpeedProbeStatusSuccess, time.Now().Add(-time.Minute*35)).
 			Order("speed_kbps DESC").
 			First(&result).Error
 
 		// 如果查询成功，说明该URL有可用的探测记录
 		if err == nil {
+			fmt.Println("url:", result.URL, ",speed:", result.SpeedKbps, ",created_at:", result.CreatedAt)
 			availableURLs = append(availableURLs, result.URL)
 		}
 	}
