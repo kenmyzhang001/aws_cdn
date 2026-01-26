@@ -250,6 +250,15 @@ func probeURL(url string, traceID string) (float64, error) {
 	} else if strings.Contains(strings.ToLower(contentType), "application/vnd.android.package-archive") {
 		isValid = true
 		matchReason = "Content-Type为APK类型"
+	} else if resp.StatusCode == http.StatusTemporaryRedirect {
+		isValid = true
+		matchReason = "状态码302(临时重定向)"
+	} else if resp.StatusCode == http.StatusMovedPermanently {
+		isValid = true
+		matchReason = "状态码301(永久重定向)"
+	} else if resp.StatusCode == http.StatusFound {
+		isValid = true
+		matchReason = "状态码302(重定向)"
 	}
 
 	if isValid {
