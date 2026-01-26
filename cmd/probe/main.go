@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -55,12 +59,17 @@ type ProbeResponse struct {
 }
 
 // probeURLs 从数据库查询链接的探测结果，按照 speed_kbps 倒序返回
-func probeURLs(db *gorm.DB, urls []string) []string {
+func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
+	log.Printf("[TraceID: %s] probeURLs 开始 - URLs数量: %d, URLs: %v", traceID, len(urls), urls)
+	startTime := time.Now()
+
 	if len(urls) == 0 {
+		log.Printf("[TraceID: %s] probeURLs 结束 - URLs为空，耗时: %v", traceID, time.Since(startTime))
 		return []string{}
 	}
 
 	var results []SpeedProbeResult
+	queryStartTime := time.Now()
 
 	// 一次性查询所有URL的探测结果
 	err := db.Where("url IN ? AND created_at > ?",
@@ -69,9 +78,19 @@ func probeURLs(db *gorm.DB, urls []string) []string {
 		Order("speed_kbps DESC").
 		Find(&results).Error
 
+	queryDuration := time.Since(queryStartTime)
+	log.Printf("[TraceID: %s] 数据库查询完成 - 耗时: %v, 结果数量: %d", traceID, queryDuration, len(results))
+
 	if err != nil {
-		log.Printf("查询探测结果失败: %v", err)
+		log.Printf("[TraceID: %s] 查询探测结果失败 - 错误: %v, 耗时: %v", traceID, err, time.Since(startTime))
 		return []string{}
+	}
+
+	if len(results) == 0 {
+		log.Printf("[TraceID: %s] 数据库无结果，切换到实时探测模式", traceID)
+		probeResults := realTimeProbe(urls, traceID)
+		log.Printf("[TraceID: %s] probeURLs 结束（实时探测） - 结果数量: %d, 总耗时: %v", traceID, len(probeResults), time.Since(startTime))
+		return probeResults
 	}
 
 	// 使用map去重，每个URL只保留speed最高的那条记录
@@ -82,25 +101,35 @@ func probeURLs(db *gorm.DB, urls []string) []string {
 			urlMap[result.URL] = result
 		}
 	}
+	log.Printf("[TraceID: %s] 去重后唯一URL数量: %d", traceID, len(urlMap))
 
 	// 按原始urls顺序返回可用的URL
 	var availableURLs []string
 	for _, url := range urls {
 		if result, exists := urlMap[url]; exists {
-			fmt.Printf("url: %s, speed: %.2f, created_at: %v\n", result.URL, result.SpeedKbps, result.CreatedAt)
+			log.Printf("[TraceID: %s] 匹配到URL: %s, 速度: %.2f KB/s, 记录时间: %v",
+				traceID, result.URL, result.SpeedKbps, result.CreatedAt.Format("2006-01-02 15:04:05"))
 			availableURLs = append(availableURLs, result.URL)
+		} else {
+			log.Printf("[TraceID: %s] 未匹配到URL: %s", traceID, url)
 		}
 	}
 
+	log.Printf("[TraceID: %s] probeURLs 结束 - 返回URLs数量: %d, 总耗时: %v", traceID, len(availableURLs), time.Since(startTime))
 	return availableURLs
 }
 
-func probeURLsByType(db *gorm.DB, urls []string) []string {
+func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
+	log.Printf("[TraceID: %s] probeURLsByType 开始 - URLs数量: %d, URLs: %v", traceID, len(urls), urls)
+	startTime := time.Now()
+
 	if len(urls) == 0 {
+		log.Printf("[TraceID: %s] probeURLsByType 结束 - URLs为空，耗时: %v", traceID, time.Since(startTime))
 		return []string{}
 	}
 
 	var results []SpeedProbeResult
+	queryStartTime := time.Now()
 
 	// 一次性查询所有URL的探测结果
 	err := db.Where("url IN ? AND created_at > ?",
@@ -109,9 +138,19 @@ func probeURLsByType(db *gorm.DB, urls []string) []string {
 		Order("speed_kbps DESC").
 		Find(&results).Error
 
+	queryDuration := time.Since(queryStartTime)
+	log.Printf("[TraceID: %s] 数据库查询完成（按类型） - 耗时: %v, 结果数量: %d", traceID, queryDuration, len(results))
+
 	if err != nil {
-		log.Printf("查询探测结果失败: %v", err)
+		log.Printf("[TraceID: %s] 查询探测结果失败（按类型） - 错误: %v, 耗时: %v", traceID, err, time.Since(startTime))
 		return []string{}
+	}
+
+	if len(results) == 0 {
+		log.Printf("[TraceID: %s] 数据库无结果（按类型），切换到实时探测模式", traceID)
+		probeResults := realTimeProbe(urls, traceID)
+		log.Printf("[TraceID: %s] probeURLsByType 结束（实时探测） - 结果数量: %d, 总耗时: %v", traceID, len(probeResults), time.Since(startTime))
+		return probeResults
 	}
 
 	// 使用map去重，每个URL只保留speed最高的那条记录
@@ -122,6 +161,7 @@ func probeURLsByType(db *gorm.DB, urls []string) []string {
 			urlMap[result.URL] = result
 		}
 	}
+	log.Printf("[TraceID: %s] 去重后唯一URL数量: %d", traceID, len(urlMap))
 
 	// 将结果转换为数组，按speed_kbps倒序排序
 	var sortedResults []SpeedProbeResult
@@ -133,38 +173,203 @@ func probeURLsByType(db *gorm.DB, urls []string) []string {
 		return sortedResults[i].SpeedKbps > sortedResults[j].SpeedKbps
 	})
 
+	log.Printf("[TraceID: %s] 按速度排序完成", traceID)
+
 	// 返回按速度排序的URL列表
 	var availableURLs []string
-	for _, result := range sortedResults {
-		fmt.Printf("url: %s, speed: %.2f, created_at: %v\n", result.URL, result.SpeedKbps, result.CreatedAt)
+	for idx, result := range sortedResults {
+		log.Printf("[TraceID: %s] 排序结果 #%d: URL: %s, 速度: %.2f KB/s, 记录时间: %v",
+			traceID, idx+1, result.URL, result.SpeedKbps, result.CreatedAt.Format("2006-01-02 15:04:05"))
 		availableURLs = append(availableURLs, result.URL)
 	}
 
+	log.Printf("[TraceID: %s] probeURLsByType 结束 - 返回URLs数量: %d, 总耗时: %v", traceID, len(availableURLs), time.Since(startTime))
 	return availableURLs
+}
+
+// probeURL 实时探测单个URL，下载前50KB，返回速度（KB/s）
+func probeURL(url string, traceID string) (float64, error) {
+	log.Printf("[TraceID: %s] probeURL 开始探测 - URL: %s", traceID, url)
+	overallStart := time.Now()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		log.Printf("[TraceID: %s] probeURL 失败 - URL: %s, 错误: 创建请求失败 - %v, 耗时: %v",
+			traceID, url, err, time.Since(overallStart))
+		return 0, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	// 设置Range header，只下载前50KB
+	req.Header.Set("Range", "bytes=0-51199")
+	log.Printf("[TraceID: %s] 设置Range请求头 - URL: %s, Range: bytes=0-51199", traceID, url)
+
+	client := &http.Client{
+		Timeout: 1 * time.Second,
+	}
+
+	requestStartTime := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[TraceID: %s] probeURL 失败 - URL: %s, 错误: HTTP请求失败 - %v, 请求耗时: %v, 总耗时: %v",
+			traceID, url, err, time.Since(requestStartTime), time.Since(overallStart))
+		return 0, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	log.Printf("[TraceID: %s] HTTP响应收到 - URL: %s, 状态码: %d, Content-Length: %d, 请求耗时: %v",
+		traceID, url, resp.StatusCode, resp.ContentLength, time.Since(requestStartTime))
+
+	// 读取响应体
+	downloadStartTime := time.Now()
+	bytesRead, err := io.Copy(io.Discard, resp.Body)
+	downloadDuration := time.Since(downloadStartTime)
+
+	if err != nil && err != io.EOF && err != context.DeadlineExceeded {
+		log.Printf("[TraceID: %s] probeURL 失败 - URL: %s, 错误: 读取响应失败 - %v, 已读取: %d 字节, 下载耗时: %v, 总耗时: %v",
+			traceID, url, err, bytesRead, downloadDuration, time.Since(overallStart))
+		return 0, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	totalDuration := time.Since(overallStart)
+	if totalDuration == 0 {
+		log.Printf("[TraceID: %s] probeURL 失败 - URL: %s, 错误: 下载时间为0", traceID, url)
+		return 0, fmt.Errorf("下载时间为0")
+	}
+
+	// 计算速度 KB/s
+	speedKbps := float64(bytesRead) / 1024 / totalDuration.Seconds()
+
+	log.Printf("[TraceID: %s] probeURL 成功 - URL: %s, 下载字节: %d, 下载速度: %.2f KB/s, 下载耗时: %v, 总耗时: %v",
+		traceID, url, bytesRead, speedKbps, downloadDuration, totalDuration)
+
+	return speedKbps, nil
+}
+
+// realTimeProbe 并发实时探测多个URL，返回按速度排序的URL列表
+func realTimeProbe(urls []string, traceID string) []string {
+	log.Printf("[TraceID: %s] realTimeProbe 开始 - 待探测URLs数量: %d", traceID, len(urls))
+	startTime := time.Now()
+
+	type urlSpeed struct {
+		url   string
+		speed float64
+	}
+
+	var (
+		wg         sync.WaitGroup
+		mu         sync.Mutex
+		results    []urlSpeed
+		successCnt int
+		failedCnt  int
+	)
+
+	// 并发探测所有 URL
+	log.Printf("[TraceID: %s] 启动并发探测 - Goroutines数量: %d", traceID, len(urls))
+	for idx, url := range urls {
+		wg.Add(1)
+		go func(index int, u string) {
+			defer wg.Done()
+			goroutineStart := time.Now()
+			log.Printf("[TraceID: %s] Goroutine #%d 开始探测 - URL: %s", traceID, index+1, u)
+
+			speed, err := probeURL(u, traceID)
+			goroutineDuration := time.Since(goroutineStart)
+
+			if err != nil {
+				log.Printf("[TraceID: %s] Goroutine #%d 探测失败 - URL: %s, 错误: %v, 耗时: %v",
+					traceID, index+1, u, err, goroutineDuration)
+				mu.Lock()
+				failedCnt++
+				mu.Unlock()
+				return
+			}
+
+			log.Printf("[TraceID: %s] Goroutine #%d 探测成功 - URL: %s, 速度: %.2f KB/s, 耗时: %v",
+				traceID, index+1, u, speed, goroutineDuration)
+
+			// 使用互斥锁保护共享数据
+			mu.Lock()
+			results = append(results, urlSpeed{url: u, speed: speed})
+			successCnt++
+			mu.Unlock()
+		}(idx, url)
+	}
+
+	// 等待所有 goroutine 完成
+	log.Printf("[TraceID: %s] 等待所有Goroutines完成...", traceID)
+	wg.Wait()
+	waitDuration := time.Since(startTime)
+	log.Printf("[TraceID: %s] 所有Goroutines已完成 - 成功: %d, 失败: %d, 总耗时: %v",
+		traceID, successCnt, failedCnt, waitDuration)
+
+	// 按速度排序
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].speed > results[j].speed
+	})
+	log.Printf("[TraceID: %s] 结果排序完成", traceID)
+
+	// 提取URL列表
+	var sortedURLs []string
+	for idx, result := range results {
+		log.Printf("[TraceID: %s] 实时探测排序结果 #%d: URL: %s, 速度: %.2f KB/s",
+			traceID, idx+1, result.url, result.speed)
+		sortedURLs = append(sortedURLs, result.url)
+	}
+
+	log.Printf("[TraceID: %s] realTimeProbe 结束 - 返回URLs数量: %d, 总耗时: %v",
+		traceID, len(sortedURLs), time.Since(startTime))
+	return sortedURLs
 }
 
 // probeHandler 探活接口处理函数
 func probeHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 生成 trace_id
+		traceID := uuid.New().String()
+		requestStartTime := time.Now()
+
+		log.Printf("[TraceID: %s] ========== 新请求开始 ==========", traceID)
+		log.Printf("[TraceID: %s] 请求信息 - 方法: %s, 路径: %s, 客户端IP: %s, User-Agent: %s",
+			traceID, c.Request.Method, c.Request.URL.Path, c.ClientIP(), c.Request.UserAgent())
+
 		var req ProbeRequest
-		var availableURLs []string
 		// 绑定JSON请求体
+		bindStartTime := time.Now()
 		if err := c.ShouldBindJSON(&req); err != nil {
+			log.Printf("[TraceID: %s] 请求参数解析失败 - 错误: %v, 耗时: %v",
+				traceID, err, time.Since(bindStartTime))
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "无效的请求格式，需要urls字段（字符串数组）",
+				"error":    "无效的请求格式，需要urls字段（字符串数组）",
+				"trace_id": traceID,
 			})
 			return
 		}
+		log.Printf("[TraceID: %s] 请求参数解析成功 - Type: %s, URLs数量: %d, 耗时: %v",
+			traceID, req.Type, len(req.URLs), time.Since(bindStartTime))
+		log.Printf("[TraceID: %s] 请求URLs列表: %v", traceID, req.URLs)
+
+		var availableURLs []string
+		queryStartTime := time.Now()
 
 		// 从数据库查询链接
 		if req.Type == "" {
-			availableURLs = probeURLs(db, req.URLs)
+			log.Printf("[TraceID: %s] 使用 probeURLs 模式（保持原顺序）", traceID)
+			availableURLs = probeURLs(db, req.URLs, traceID)
 		} else {
-			availableURLs = probeURLsByType(db, req.URLs)
+			log.Printf("[TraceID: %s] 使用 probeURLsByType 模式（按速度排序）- Type: %s", traceID, req.Type)
+			availableURLs = probeURLsByType(db, req.URLs, traceID)
 		}
 
-		// 打印出参
-		log.Printf("[ProbeHandler] 请求参数 - Type: %s, URLs数量: %d, URLs: %v, 响应结果 - 可用URLs数量: %d, 可用URLs: %v", req.Type, len(req.URLs), req.URLs, len(availableURLs), availableURLs)
+		queryDuration := time.Since(queryStartTime)
+		log.Printf("[TraceID: %s] 查询处理完成 - 耗时: %v", traceID, queryDuration)
+
+		totalDuration := time.Since(requestStartTime)
+		log.Printf("[TraceID: %s] 请求参数解析成功 - Type: %s, URL: %v,响应结果 - 可用URLs数量: %d, 可用URLs: %v",
+			traceID, req.Type, req.URLs, len(availableURLs), availableURLs)
+		log.Printf("[TraceID: %s] ========== 请求完成 - 总耗时: %v ==========", traceID, totalDuration)
 
 		// 返回可用的链接数组
 		c.JSON(http.StatusOK, ProbeResponse{
