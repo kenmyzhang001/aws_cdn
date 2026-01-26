@@ -136,6 +136,9 @@ func probeHandler(db *gorm.DB) gin.HandlerFunc {
 			availableURLs = probeURLsByType(db, req.URLs)
 		}
 
+		// 打印出参
+		log.Printf("[ProbeHandler] 请求参数 - Type: %s, URLs数量: %d, URLs: %v, 响应结果 - 可用URLs数量: %d, 可用URLs: %v", req.Type, len(req.URLs), req.URLs, len(availableURLs), availableURLs)
+
 		// 返回可用的链接数组
 		c.JSON(http.StatusOK, ProbeResponse{
 			AvailableURLs: availableURLs,
