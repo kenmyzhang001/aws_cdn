@@ -1,11 +1,14 @@
 package main
 
 import (
+	"aws_cdn/internal/config"
+	"aws_cdn/internal/database"
+	"aws_cdn/internal/models"
+	"log"
 	"net/http"
-	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // ProbeRequest 请求结构体
@@ -18,71 +21,73 @@ type ProbeResponse struct {
 	AvailableURLs []string `json:"available_urls"`
 }
 
-// probeURL 检测单个链接是否可用（返回200状态码）
-func probeURL(url string) bool {
-	client := &http.Client{
-		Timeout: 500 * time.Millisecond, // 设置2秒超时
-	}
-
-	resp, err := client.Head(url)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-
-	// 检查状态码是否为200
-	return resp.StatusCode == http.StatusOK
-}
-
-// probeURLs 并发检测多个链接
-func probeURLs(urls []string) []string {
+// probeURLs 从数据库查询链接的探测结果，按照 speed_kbps 倒序返回
+func probeURLs(db *gorm.DB, urls []string) []string {
 	var availableURLs []string
-	var mu sync.Mutex
-	var wg sync.WaitGroup
 
+	// 对于每个URL，查询数据库中的探测结果
 	for _, url := range urls {
-		wg.Add(1)
-		go func(u string) {
-			defer wg.Done()
-			if probeURL(u) {
-				mu.Lock()
-				availableURLs = append(availableURLs, u)
-				mu.Unlock()
-			}
-		}(url)
+		var result models.SpeedProbeResult
+
+		// 查询该URL的探测结果，按照 speed_kbps 倒序，只取第一条（最快的记录）
+		err := db.Where("url = ? AND status = ?", url, models.SpeedProbeStatusSuccess).
+			Order("speed_kbps DESC").
+			First(&result).Error
+
+		// 如果查询成功，说明该URL有可用的探测记录
+		if err == nil {
+			availableURLs = append(availableURLs, result.URL)
+		}
 	}
 
-	wg.Wait()
 	return availableURLs
 }
 
 // probeHandler 探活接口处理函数
-func probeHandler(c *gin.Context) {
-	var req ProbeRequest
+func probeHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req ProbeRequest
 
-	// 绑定JSON请求体
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "无效的请求格式，需要urls字段（字符串数组）",
+		// 绑定JSON请求体
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "无效的请求格式，需要urls字段（字符串数组）",
+			})
+			return
+		}
+
+		// 从数据库查询链接
+		availableURLs := probeURLs(db, req.URLs)
+
+		// 返回可用的链接数组
+		c.JSON(http.StatusOK, ProbeResponse{
+			AvailableURLs: availableURLs,
 		})
-		return
 	}
-
-	// 检测链接
-	availableURLs := probeURLs(req.URLs)
-
-	// 返回可用的链接数组
-	c.JSON(http.StatusOK, ProbeResponse{
-		AvailableURLs: availableURLs,
-	})
 }
 
 func main() {
+	// 加载配置
+	cfg := config.Load()
+
+	// 初始化数据库连接
+	db, err := database.Initialize(database.DatabaseConfig{
+		Host:     cfg.Database.Host,
+		Port:     cfg.Database.Port,
+		User:     cfg.Database.User,
+		Password: cfg.Database.Password,
+		DBName:   cfg.Database.DBName,
+		SSLMode:  cfg.Database.SSLMode,
+	})
+	if err != nil {
+		log.Fatalf("数据库连接失败: %v", err)
+	}
+
 	// 创建Gin路由
 	r := gin.Default()
 
 	// 定义探活接口
-	r.POST("/probe", probeHandler)
+	r.POST("/probe", probeHandler(db))
 
 	// 可选：添加健康检查接口
 	r.GET("/health", func(c *gin.Context) {
