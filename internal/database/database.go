@@ -24,6 +24,7 @@ func Initialize(cfg DatabaseConfig) (*gorm.DB, error) {
 		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.DBName,
 	)
+	fmt.Println("dsn:", dsn)
 
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
