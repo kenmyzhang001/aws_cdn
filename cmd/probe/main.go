@@ -74,7 +74,7 @@ func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
 	queryStartTime := time.Now()
 
 	// 一次性查询所有URL的探测结果
-	err := db.Where("url IN ? AND created_at > ?",
+	err := db.Where("url IN ? AND created_at > ? AND speed_kbps != 0",
 		urls,
 		time.Now().Add(-time.Minute*35)).
 		Order("speed_kbps DESC").
@@ -134,7 +134,7 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 	queryStartTime := time.Now()
 
 	// 一次性查询所有URL的探测结果
-	err := db.Where("url IN ? AND created_at > ?",
+	err := db.Where("url IN ? AND created_at > ? AND speed_kbps != 0",
 		urls,
 		time.Now().Add(-time.Minute*35)).
 		Order("speed_kbps DESC").
@@ -189,6 +189,91 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 	return availableURLs
 }
 
+// probeRedirectTarget 探测重定向目标URL是否可下载
+// 不再跟随重定向，直接检查目标URL的响应
+func probeRedirectTarget(url string, traceID string) (float64, error) {
+	log.Printf("[TraceID: %s] probeRedirectTarget 开始探测重定向目标 - URL: %s", traceID, url)
+	overallStart := time.Now()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		log.Printf("[TraceID: %s] probeRedirectTarget 失败 - URL: %s, 错误: 创建请求失败 - %v",
+			traceID, url, err)
+		return 0, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	// 设置Range header
+	req.Header.Set("Range", "bytes=0-1023")
+
+	// 不跟随重定向的客户端
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// 不跟随重定向
+			return http.ErrUseLastResponse
+		},
+	}
+
+	requestStartTime := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[TraceID: %s] probeRedirectTarget 失败 - URL: %s, 错误: HTTP请求失败 - %v",
+			traceID, url, err)
+		return 0, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	requestDuration := time.Since(requestStartTime)
+
+	// 获取响应头信息
+	contentType := resp.Header.Get("Content-Type")
+	contentDisposition := resp.Header.Get("Content-Disposition")
+
+	log.Printf("[TraceID: %s] 重定向目标响应 - URL: %s, 状态码: %d, Content-Type: %s, Content-Disposition: %s, 请求耗时: %v",
+		traceID, url, resp.StatusCode, contentType, contentDisposition, requestDuration)
+
+	// 判断是否为有效的下载链接
+	isValid := false
+	matchReason := ""
+
+	if resp.StatusCode == http.StatusPartialContent {
+		isValid = true
+		matchReason = "重定向目标支持Range下载(206)"
+	} else if resp.StatusCode == http.StatusOK {
+		// 如果是200状态码，检查Content-Type和Content-Disposition
+		if strings.Contains(strings.ToLower(contentDisposition), ".apk") {
+			isValid = true
+			matchReason = "重定向目标Content-Disposition包含.apk"
+		} else if strings.Contains(strings.ToLower(contentType), "application/vnd.android.package-archive") {
+			isValid = true
+			matchReason = "重定向目标Content-Type为APK类型"
+		}
+	}
+
+	if !isValid {
+		log.Printf("[TraceID: %s] 重定向目标不满足下载条件 - URL: %s, 状态码: %d, Content-Type: %s, Content-Disposition: %s",
+			traceID, url, resp.StatusCode, contentType, contentDisposition)
+		return 0, fmt.Errorf("重定向目标不满足下载条件: 状态码=%d, Content-Type=%s, Content-Disposition=%s",
+			resp.StatusCode, contentType, contentDisposition)
+	}
+
+	// 计算速度评分
+	speedKbps := 1000000.0 / float64(requestDuration.Milliseconds())
+	if speedKbps > 10000.0 {
+		speedKbps = 10000.0
+	}
+	if speedKbps < 100.0 {
+		speedKbps = 100.0
+	}
+
+	log.Printf("[TraceID: %s] probeRedirectTarget 成功 - URL: %s, 匹配原因: %s, 状态码: %d, 评估速度: %.2f KB/s, 总耗时: %v",
+		traceID, url, matchReason, resp.StatusCode, speedKbps, time.Since(overallStart))
+	return speedKbps, nil
+}
+
 // probeURL 实时探测单个URL，通过以下任一条件判断可下载性：
 // 1. HTTP 206 状态码 (支持Range下载)
 // 2. Content-Disposition 包含 .apk 文件名
@@ -197,7 +282,7 @@ func probeURL(url string, traceID string) (float64, error) {
 	log.Printf("[TraceID: %s] probeURL 开始探测 - URL: %s", traceID, url)
 	overallStart := time.Now()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -211,8 +296,16 @@ func probeURL(url string, traceID string) (float64, error) {
 	req.Header.Set("Range", "bytes=0-1023")
 	log.Printf("[TraceID: %s] 设置Range请求头 - URL: %s, Range: bytes=0-1023", traceID, url)
 
+	// 自定义HTTP客户端，允许跟随重定向
 	client := &http.Client{
-		Timeout: 1 * time.Second,
+		Timeout: 2 * time.Second, // 增加超时时间以支持重定向
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// 最多允许10次重定向
+			if len(via) >= 10 {
+				return fmt.Errorf("重定向次数过多")
+			}
+			return nil
+		},
 	}
 
 	requestStartTime := time.Now()
@@ -238,6 +331,7 @@ func probeURL(url string, traceID string) (float64, error) {
 	// 1. 状态码为 206 (Partial Content)
 	// 2. Content-Disposition 包含 .apk 文件名
 	// 3. Content-Type 为 application/vnd.android.package-archive
+	// 4. 如果是重定向状态码，检查最终重定向后的URL是否可下载
 	isValid := false
 	matchReason := ""
 
@@ -250,15 +344,31 @@ func probeURL(url string, traceID string) (float64, error) {
 	} else if strings.Contains(strings.ToLower(contentType), "application/vnd.android.package-archive") {
 		isValid = true
 		matchReason = "Content-Type为APK类型"
-	} else if resp.StatusCode == http.StatusTemporaryRedirect {
-		isValid = true
-		matchReason = "状态码302(临时重定向)"
-	} else if resp.StatusCode == http.StatusMovedPermanently {
-		isValid = true
-		matchReason = "状态码301(永久重定向)"
-	} else if resp.StatusCode == http.StatusFound {
-		isValid = true
-		matchReason = "状态码302(重定向)"
+	} else if resp.StatusCode == http.StatusTemporaryRedirect ||
+		resp.StatusCode == http.StatusMovedPermanently ||
+		resp.StatusCode == http.StatusFound {
+		// 处理重定向情况
+		location := resp.Header.Get("Location")
+		if location == "" {
+			log.Printf("[TraceID: %s] 重定向但未找到Location头 - URL: %s, 状态码: %d",
+				traceID, url, resp.StatusCode)
+			return 0, fmt.Errorf("重定向但未找到Location头")
+		}
+
+		log.Printf("[TraceID: %s] 检测到重定向 - 原URL: %s, 状态码: %d, 目标URL: %s",
+			traceID, url, resp.StatusCode, location)
+
+		// 对重定向后的URL进行探测
+		finalSpeed, finalErr := probeRedirectTarget(location, traceID)
+		if finalErr != nil {
+			log.Printf("[TraceID: %s] 重定向目标不可用 - 目标URL: %s, 错误: %v",
+				traceID, location, finalErr)
+			return 0, fmt.Errorf("重定向目标不可用: %w", finalErr)
+		}
+
+		log.Printf("[TraceID: %s] 重定向目标可用 - 原URL: %s -> 目标URL: %s, 速度: %.2f KB/s",
+			traceID, url, location, finalSpeed)
+		return finalSpeed, nil
 	}
 
 	if isValid {
