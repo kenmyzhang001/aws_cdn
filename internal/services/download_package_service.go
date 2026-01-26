@@ -652,8 +652,8 @@ func (s *DownloadPackageService) ListAllDownloadPackages() ([]models.DownloadPac
 		logger.GetLogger().WithError(err).Error("获取下载包列表失败")
 		return packages, nil
 	}
-
-	return append(packages, packages2...), nil
+	result := append(packages, packages2...)
+	return result, nil
 }
 
 // ListDownloadPackages 列出所有下载包，支持按分组筛选和搜索
