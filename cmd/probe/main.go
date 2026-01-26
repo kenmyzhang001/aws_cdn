@@ -188,7 +188,7 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 	return availableURLs
 }
 
-// probeURL 实时探测单个URL，下载前50KB，返回速度（KB/s）
+// probeURL 实时探测单个URL，通过判断HTTP 206状态码来确认可下载性
 func probeURL(url string, traceID string) (float64, error) {
 	log.Printf("[TraceID: %s] probeURL 开始探测 - URL: %s", traceID, url)
 	overallStart := time.Now()
@@ -203,9 +203,9 @@ func probeURL(url string, traceID string) (float64, error) {
 		return 0, fmt.Errorf("创建请求失败: %w", err)
 	}
 
-	// 设置Range header，只下载前50KB
-	req.Header.Set("Range", "bytes=0-51199")
-	log.Printf("[TraceID: %s] 设置Range请求头 - URL: %s, Range: bytes=0-51199", traceID, url)
+	// 设置Range header，请求前1KB即可（只用于检测是否支持Range）
+	req.Header.Set("Range", "bytes=0-1023")
+	log.Printf("[TraceID: %s] 设置Range请求头 - URL: %s, Range: bytes=0-1023", traceID, url)
 
 	client := &http.Client{
 		Timeout: 1 * time.Second,
@@ -220,33 +220,34 @@ func probeURL(url string, traceID string) (float64, error) {
 	}
 	defer resp.Body.Close()
 
-	log.Printf("[TraceID: %s] HTTP响应收到 - URL: %s, 状态码: %d, Content-Length: %d, 请求耗时: %v",
-		traceID, url, resp.StatusCode, resp.ContentLength, time.Since(requestStartTime))
-
-	// 读取响应体
-	downloadStartTime := time.Now()
-	bytesRead, err := io.Copy(io.Discard, resp.Body)
-	downloadDuration := time.Since(downloadStartTime)
-
-	if err != nil && err != io.EOF && err != context.DeadlineExceeded {
-		log.Printf("[TraceID: %s] probeURL 失败 - URL: %s, 错误: 读取响应失败 - %v, 已读取: %d 字节, 下载耗时: %v, 总耗时: %v",
-			traceID, url, err, bytesRead, downloadDuration, time.Since(overallStart))
-		return 0, fmt.Errorf("读取响应失败: %w", err)
-	}
-
+	requestDuration := time.Since(requestStartTime)
 	totalDuration := time.Since(overallStart)
-	if totalDuration == 0 {
-		log.Printf("[TraceID: %s] probeURL 失败 - URL: %s, 错误: 下载时间为0", traceID, url)
-		return 0, fmt.Errorf("下载时间为0")
+
+	log.Printf("[TraceID: %s] HTTP响应收到 - URL: %s, 状态码: %d, Content-Length: %d, 请求耗时: %v",
+		traceID, url, resp.StatusCode, resp.ContentLength, requestDuration)
+
+	// 判断状态码是否为 206 (Partial Content)
+	if resp.StatusCode == http.StatusPartialContent {
+		// 基于响应时间计算一个估算速度值（响应越快，速度越高）
+		// 假设响应时间越短，服务器性能越好，给予更高的速度评分
+		// 速度范围：100ms以内=10000KB/s, 500ms=2000KB/s, 1000ms=1000KB/s
+		speedKbps := 1000000.0 / float64(requestDuration.Milliseconds())
+		if speedKbps > 10000.0 {
+			speedKbps = 10000.0 // 设置上限
+		}
+		if speedKbps < 100.0 {
+			speedKbps = 100.0 // 设置下限
+		}
+
+		log.Printf("[TraceID: %s] probeURL 成功 - URL: %s, 状态码: 206 (支持Range下载), 响应时间: %v, 评估速度: %.2f KB/s, 总耗时: %v",
+			traceID, url, requestDuration, speedKbps, totalDuration)
+		return speedKbps, nil
 	}
 
-	// 计算速度 KB/s
-	speedKbps := float64(bytesRead) / 1024 / totalDuration.Seconds()
-
-	log.Printf("[TraceID: %s] probeURL 成功 - URL: %s, 下载字节: %d, 下载速度: %.2f KB/s, 下载耗时: %v, 总耗时: %v",
-		traceID, url, bytesRead, speedKbps, downloadDuration, totalDuration)
-
-	return speedKbps, nil
+	// 如果不是 206，记录详细信息并返回错误
+	log.Printf("[TraceID: %s] probeURL 失败 - URL: %s, 状态码: %d (期望 206), 响应时间: %v, 总耗时: %v",
+		traceID, url, resp.StatusCode, requestDuration, totalDuration)
+	return 0, fmt.Errorf("状态码不是206: 实际状态码=%d", resp.StatusCode)
 }
 
 // realTimeProbe 并发实时探测多个URL，返回按速度排序的URL列表
@@ -305,12 +306,6 @@ func realTimeProbe(urls []string, traceID string) []string {
 	waitDuration := time.Since(startTime)
 	log.Printf("[TraceID: %s] 所有Goroutines已完成 - 成功: %d, 失败: %d, 总耗时: %v",
 		traceID, successCnt, failedCnt, waitDuration)
-
-	// 按速度排序
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].speed > results[j].speed
-	})
-	log.Printf("[TraceID: %s] 结果排序完成", traceID)
 
 	// 提取URL列表
 	var sortedURLs []string
