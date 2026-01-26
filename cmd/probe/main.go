@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,7 @@ import (
 // ProbeRequest 请求结构体
 type ProbeRequest struct {
 	URLs []string `json:"urls" binding:"required"`
+	Type string   `json:"type"`
 }
 
 // ProbeResponse 响应结构体
@@ -25,22 +27,90 @@ type ProbeResponse struct {
 
 // probeURLs 从数据库查询链接的探测结果，按照 speed_kbps 倒序返回
 func probeURLs(db *gorm.DB, urls []string) []string {
+	if len(urls) == 0 {
+		return []string{}
+	}
+
+	var results []models.SpeedProbeResult
+
+	// 一次性查询所有URL的探测结果
+	err := db.Where("url IN ? AND status = ? AND created_at > ?",
+		urls,
+		models.SpeedProbeStatusSuccess,
+		time.Now().Add(-time.Minute*35)).
+		Order("speed_kbps DESC").
+		Find(&results).Error
+
+	if err != nil {
+		log.Printf("查询探测结果失败: %v", err)
+		return []string{}
+	}
+
+	// 使用map去重，每个URL只保留speed最高的那条记录
+	urlMap := make(map[string]models.SpeedProbeResult)
+	for _, result := range results {
+		// 如果URL不存在，或者当前记录速度更快，则更新
+		if existing, exists := urlMap[result.URL]; !exists || result.SpeedKbps > existing.SpeedKbps {
+			urlMap[result.URL] = result
+		}
+	}
+
+	// 按原始urls顺序返回可用的URL
 	var availableURLs []string
-
-	// 对于每个URL，查询数据库中的探测结果
 	for _, url := range urls {
-		var result models.SpeedProbeResult
-
-		// 查询该URL的探测结果，按照 speed_kbps 倒序，只取第一条（最快的记录）
-		err := db.Where("url = ? AND status = ? AND created_at > ?", url, models.SpeedProbeStatusSuccess, time.Now().Add(-time.Minute*35)).
-			Order("speed_kbps DESC").
-			First(&result).Error
-
-		// 如果查询成功，说明该URL有可用的探测记录
-		if err == nil {
-			fmt.Println("url:", result.URL, ",speed:", result.SpeedKbps, ",created_at:", result.CreatedAt)
+		if result, exists := urlMap[url]; exists {
+			fmt.Printf("url: %s, speed: %.2f, created_at: %v\n", result.URL, result.SpeedKbps, result.CreatedAt)
 			availableURLs = append(availableURLs, result.URL)
 		}
+	}
+
+	return availableURLs
+}
+
+func probeURLsByType(db *gorm.DB, urls []string) []string {
+	if len(urls) == 0 {
+		return []string{}
+	}
+
+	var results []models.SpeedProbeResult
+
+	// 一次性查询所有URL的探测结果
+	err := db.Where("url IN ? AND status = ? AND created_at > ?",
+		urls,
+		models.SpeedProbeStatusSuccess,
+		time.Now().Add(-time.Minute*35)).
+		Order("speed_kbps DESC").
+		Find(&results).Error
+
+	if err != nil {
+		log.Printf("查询探测结果失败: %v", err)
+		return []string{}
+	}
+
+	// 使用map去重，每个URL只保留speed最高的那条记录
+	urlMap := make(map[string]models.SpeedProbeResult)
+	for _, result := range results {
+		// 如果URL不存在，或者当前记录速度更快，则更新
+		if existing, exists := urlMap[result.URL]; !exists || result.SpeedKbps > existing.SpeedKbps {
+			urlMap[result.URL] = result
+		}
+	}
+
+	// 将结果转换为数组，按speed_kbps倒序排序
+	var sortedResults []models.SpeedProbeResult
+	for _, result := range urlMap {
+		sortedResults = append(sortedResults, result)
+	}
+
+	sort.Slice(sortedResults, func(i, j int) bool {
+		return sortedResults[i].SpeedKbps > sortedResults[j].SpeedKbps
+	})
+
+	// 返回按速度排序的URL列表
+	var availableURLs []string
+	for _, result := range sortedResults {
+		fmt.Printf("url: %s, speed: %.2f, created_at: %v\n", result.URL, result.SpeedKbps, result.CreatedAt)
+		availableURLs = append(availableURLs, result.URL)
 	}
 
 	return availableURLs
@@ -50,7 +120,7 @@ func probeURLs(db *gorm.DB, urls []string) []string {
 func probeHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req ProbeRequest
-
+		var availableURLs []string
 		// 绑定JSON请求体
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -60,7 +130,11 @@ func probeHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		// 从数据库查询链接
-		availableURLs := probeURLs(db, req.URLs)
+		if req.Type == "" {
+			availableURLs = probeURLs(db, req.URLs)
+		} else {
+			availableURLs = probeURLsByType(db, req.URLs)
+		}
 
 		// 返回可用的链接数组
 		c.JSON(http.StatusOK, ProbeResponse{
