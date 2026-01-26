@@ -371,7 +371,6 @@ func probeHandler(db *gorm.DB) gin.HandlerFunc {
 		log.Printf("[TraceID: %s] 请求参数解析成功 - Type: %s, URL: %v,响应结果 - 可用URLs数量: %d, 可用URLs: %v",
 			traceID, req.Type, req.URLs, len(availableURLs), availableURLs)
 		log.Printf("[TraceID: %s] ========== 请求完成 - 总耗时: %v ==========", traceID, totalDuration)
-
 		// 返回可用的链接数组
 		c.JSON(http.StatusOK, ProbeResponse{
 			AvailableURLs: availableURLs,
@@ -380,6 +379,12 @@ func probeHandler(db *gorm.DB) gin.HandlerFunc {
 }
 
 func main() {
+	// 确保 logs 目录存在
+	if err := os.MkdirAll("logs", 0755); err != nil {
+		fmt.Printf("创建 logs 目录失败: %v\n", err)
+		os.Exit(1)
+	}
+
 	// 配置日志输出到文件，支持自动切割
 	logFile := &lumberjack.Logger{
 		Filename:   "logs/probe.log", // 日志文件路径
@@ -390,10 +395,15 @@ func main() {
 		LocalTime:  true,             // 使用本地时间
 	}
 
-	// 设置日志输出到文件
-	log.SetOutput(logFile)
+	// 同时输出到文件和控制台（方便调试）
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(multiWriter)
 	// 设置日志格式：日期 时间 文件名:行号
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
+	// 同时配置 Gin 的日志输出
+	gin.DefaultWriter = multiWriter
+	gin.DefaultErrorWriter = multiWriter
 
 	log.Println("========== Probe 服务启动 ==========")
 	log.Printf("日志文件配置 - 路径: %s, 最大大小: %dMB, 最多保留: %d个文件",
@@ -461,7 +471,7 @@ func Initialize(cfg DatabaseConfig) (*gorm.DB, error) {
 		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.DBName,
 	)
-	fmt.Println("dsn:", dsn)
+	log.Printf("数据库 DSN: %s:***@tcp(%s:%s)/%s", cfg.User, cfg.Host, cfg.Port, cfg.DBName)
 
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
