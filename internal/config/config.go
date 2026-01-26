@@ -74,6 +74,14 @@ func Load() *Config {
 			DBName:   getEnv("DB2_NAME", "aws_cdn"),
 			SSLMode:  getEnv("DB2_SSLMODE", "disable"),
 		},
+		Database3: DatabaseConfig{
+			Host:     getEnv("DB3_HOST", "localhost"),
+			Port:     getEnv("DB3_PORT", "3306"),
+			User:     getEnv("DB3_USER", "root"),
+			Password: getEnv("DB3_PASSWORD", ""),
+			DBName:   getEnv("DB3_NAME", "aws_cdn"),
+			SSLMode:  getEnv("DB3_SSLMODE", "disable"),
+		},
 		Server: ServerConfig{
 			Port:     getEnv("SERVER_PORT", "8080"),
 			Mode:     getEnv("SERVER_MODE", "debug"),
