@@ -394,7 +394,7 @@ func probeURL(url string, traceID string) (float64, error) {
 	return 0, fmt.Errorf("不满足下载条件: 状态码=%d, Content-Type=%s, Content-Disposition=%s", resp.StatusCode, contentType, contentDisposition)
 }
 
-// realTimeProbe 并发实时探测多个URL，返回按速度排序的URL列表
+// realTimeProbe 并发实时探测多个URL，返回按原始顺序排序的URL列表
 func realTimeProbe(urls []string, traceID string) []string {
 	log.Printf("[TraceID: %s] realTimeProbe 开始 - 待探测URLs数量: %d", traceID, len(urls))
 	startTime := time.Now()
@@ -402,6 +402,7 @@ func realTimeProbe(urls []string, traceID string) []string {
 	type urlSpeed struct {
 		url   string
 		speed float64
+		index int // 添加index字段记录原始位置
 	}
 
 	var (
@@ -438,7 +439,7 @@ func realTimeProbe(urls []string, traceID string) []string {
 
 			// 使用互斥锁保护共享数据
 			mu.Lock()
-			results = append(results, urlSpeed{url: u, speed: speed})
+			results = append(results, urlSpeed{url: u, speed: speed, index: index})
 			successCnt++
 			mu.Unlock()
 		}(idx, url)
@@ -451,10 +452,15 @@ func realTimeProbe(urls []string, traceID string) []string {
 	log.Printf("[TraceID: %s] 所有Goroutines已完成 - 成功: %d, 失败: %d, 总耗时: %v",
 		traceID, successCnt, failedCnt, waitDuration)
 
-	// 提取URL列表
+	// 按原始顺序排序结果
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].index < results[j].index
+	})
+
+	// 提取URL列表（保持原始顺序）
 	var sortedURLs []string
 	for idx, result := range results {
-		log.Printf("[TraceID: %s] 实时探测排序结果 #%d: URL: %s, 速度: %.2f KB/s",
+		log.Printf("[TraceID: %s] 实时探测结果（按原始顺序）#%d: URL: %s, 速度: %.2f KB/s",
 			traceID, idx+1, result.url, result.speed)
 		sortedURLs = append(sortedURLs, result.url)
 	}
