@@ -185,6 +185,29 @@
                 <el-tag size="small" type="success">已托管</el-tag>
               </div>
             </el-option>
+            
+            <!-- 加载更多选项 -->
+            <el-option
+              v-if="workerZonesPagination.hasMore && !workerDomainSearchQuery"
+              :value="'__load_more__'"
+              disabled
+              style="background-color: #f5f7fa; cursor: pointer !important;"
+            >
+              <div style="text-align: center; padding: 5px 0;">
+                <el-button 
+                  type="primary" 
+                  size="small"
+                  @click.stop="loadMoreWorkerZones"
+                  :loading="loadingWorkerDomains"
+                  style="width: 90%;"
+                >
+                  <span v-if="!loadingWorkerDomains">
+                    加载更多域名 ({{ workerDomains.length }}/{{ workerZonesPagination.totalCount }})
+                  </span>
+                  <span v-else>加载中...</span>
+                </el-button>
+              </div>
+            </el-option>
           </el-select>
           <div class="form-tip" v-if="!workerForm.cf_account_id">
             请先选择 CF 账号
@@ -194,11 +217,22 @@
             正在加载域名列表...
           </div>
           <div class="form-tip" v-else-if="workerDomains.length > 0" style="color: #67C23A;">
-            共 {{ workerDomains.length }} 个托管域名
+            已加载 {{ workerDomains.length }}/{{ workerZonesPagination.totalCount }} 个托管域名
             <span v-if="filteredWorkerDomains.length < workerDomains.length">
               （搜索结果: {{ filteredWorkerDomains.length }} 个）
             </span>
             ，支持搜索、选择或输入子域名
+            <el-button 
+              v-if="workerZonesPagination.hasMore" 
+              type="primary" 
+              link 
+              size="small"
+              @click="loadMoreWorkerZones"
+              :loading="loadingWorkerDomains"
+              style="margin-left: 8px;"
+            >
+              加载更多 (第 {{ workerZonesPagination.page + 1 }}/{{ workerZonesPagination.totalPages }} 页)
+            </el-button>
           </div>
           <div class="form-tip" v-else style="color: #E6A23C;">
             该账号暂无托管域名，请手动输入域名
@@ -397,6 +431,15 @@ const filteredWorkerDomains = ref([]);
 
 // Worker 域名搜索查询
 const workerDomainSearchQuery = ref('');
+
+// Worker 域名分页状态
+const workerZonesPagination = reactive({
+  page: 1,
+  perPage: 50,
+  totalPages: 0,
+  totalCount: 0,
+  hasMore: false
+});
 
 // 分页相关
 const domainPagination = reactive({
@@ -609,46 +652,94 @@ const handleCFAccountChange = async (cfAccountId) => {
   filteredWorkerDomains.value = [];
   workerDomainSearchQuery.value = '';
   
+  // 重置分页状态
+  workerZonesPagination.page = 1;
+  workerZonesPagination.totalPages = 0;
+  workerZonesPagination.totalCount = 0;
+  workerZonesPagination.hasMore = false;
+  
   if (!cfAccountId) {
     return;
   }
   
-  // 加载该账号下的域名列表
-  await loadCFAccountZones(cfAccountId);
+  // 加载该账号下的域名列表（第一页）
+  await loadCFAccountZones(cfAccountId, false);
 };
 
 // 加载 CF 账号的域名列表
-const loadCFAccountZones = async (cfAccountId) => {
+// isLoadMore: 是否为加载更多（true则追加，false则替换）
+const loadCFAccountZones = async (cfAccountId, isLoadMore = false) => {
   if (loadingWorkerDomains.value) return;
   
   try {
     loadingWorkerDomains.value = true;
-    console.log('开始加载 CF 账号域名列表, cfAccountId:', cfAccountId);
     
-    const zones = await cfAccountApi.getCFAccountZones(cfAccountId);
-    const zoneList = zones || [];
+    const page = isLoadMore ? workerZonesPagination.page + 1 : 1;
     
-    console.log('CF 账号域名列表:', zoneList);
+    console.log('开始加载 CF 账号域名列表, cfAccountId:', cfAccountId, 'page:', page);
+    
+    const result = await cfAccountApi.getCFAccountZones(cfAccountId, {
+      page: page,
+      per_page: workerZonesPagination.perPage
+    });
+    
+    console.log('CF 账号域名列表响应:', result);
+    
+    // 更新分页信息
+    workerZonesPagination.page = result.page || page;
+    workerZonesPagination.totalPages = result.total_pages || 0;
+    workerZonesPagination.totalCount = result.total_count || 0;
+    workerZonesPagination.hasMore = workerZonesPagination.page < workerZonesPagination.totalPages;
+    
+    const zoneList = result.zones || [];
     
     // 提取域名名称
-    workerDomains.value = zoneList.map(zone => zone.name || zone);
+    const newDomains = zoneList.map(zone => zone.name || zone);
     
-    // 初始化过滤列表
-    filteredWorkerDomains.value = [...workerDomains.value];
-    
-    if (workerDomains.value.length === 0) {
-      ElMessage.info('该 CF 账号暂无托管域名');
+    if (isLoadMore) {
+      // 追加到现有列表
+      workerDomains.value = [...workerDomains.value, ...newDomains];
     } else {
-      ElMessage.success(`已加载 ${workerDomains.value.length} 个托管域名`);
+      // 替换列表
+      workerDomains.value = newDomains;
+    }
+    
+    // 更新过滤列表
+    if (!workerDomainSearchQuery.value) {
+      filteredWorkerDomains.value = [...workerDomains.value];
+    } else {
+      // 重新应用搜索过滤
+      filterWorkerDomains(workerDomainSearchQuery.value);
+    }
+    
+    if (!isLoadMore) {
+      if (workerDomains.value.length === 0) {
+        ElMessage.info('该 CF 账号暂无托管域名');
+      } else {
+        const moreMsg = workerZonesPagination.hasMore ? `，还有更多域名可加载` : '';
+        ElMessage.success(`已加载 ${workerDomains.value.length}/${workerZonesPagination.totalCount} 个托管域名${moreMsg}`);
+      }
+    } else {
+      ElMessage.success(`已加载 ${newDomains.length} 个域名（总计 ${workerDomains.value.length}/${workerZonesPagination.totalCount}）`);
     }
   } catch (error) {
     console.error('加载 CF 账号域名失败:', error);
     ElMessage.error('加载域名列表失败: ' + error.message);
-    workerDomains.value = [];
-    filteredWorkerDomains.value = [];
+    if (!isLoadMore) {
+      workerDomains.value = [];
+      filteredWorkerDomains.value = [];
+    }
   } finally {
     loadingWorkerDomains.value = false;
   }
+};
+
+// 加载更多域名
+const loadMoreWorkerZones = async () => {
+  if (!workerForm.cf_account_id || !workerZonesPagination.hasMore) {
+    return;
+  }
+  await loadCFAccountZones(workerForm.cf_account_id, true);
 };
 
 // 过滤 Worker 域名

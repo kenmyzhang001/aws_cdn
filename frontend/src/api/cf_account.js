@@ -27,7 +27,7 @@ export const cfAccountApi = {
   },
 
   // 获取 CF 账号下的域名列表（Zones）
-  getCFAccountZones(id) {
-    return request.get(`/cf-accounts/${id}/zones`)
+  getCFAccountZones(id, params = {}) {
+    return request.get(`/cf-accounts/${id}/zones`, { params })
   },
 }

@@ -195,18 +195,45 @@ func (h *CFAccountHandler) GetCFAccountZones(c *gin.Context) {
 		return
 	}
 
-	// 获取域名列表
-	zones, err := cfService.ListZones()
+	// 获取分页参数
+	page := 1
+	if pageStr := c.Query("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	perPage := 20 // 默认每页 20 条
+	if perPageStr := c.Query("per_page"); perPageStr != "" {
+		if pp, err := strconv.Atoi(perPageStr); err == nil && pp > 0 && pp <= 50 {
+			perPage = pp
+		}
+	}
+
+	// 获取可选的域名搜索参数
+	name := c.Query("name")
+
+	// 获取域名列表（支持分页和搜索）
+	result, err := cfService.ListZones(page, perPage, name)
 	if err != nil {
-		log.WithError(err).WithField("account_id", id).Error("获取域名列表失败")
+		log.WithError(err).WithFields(map[string]interface{}{
+			"account_id": id,
+			"page":       page,
+			"per_page":   perPage,
+			"name":       name,
+		}).Error("获取域名列表失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	log.WithFields(map[string]interface{}{
-		"account_id": id,
-		"count":      len(zones),
+		"account_id":  id,
+		"page":        page,
+		"per_page":    perPage,
+		"name":        name,
+		"count":       len(result.Zones),
+		"total_count": result.TotalCount,
 	}).Info("获取域名列表成功")
 
-	c.JSON(http.StatusOK, zones)
+	c.JSON(http.StatusOK, result)
 }

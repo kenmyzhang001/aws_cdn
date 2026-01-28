@@ -112,21 +112,57 @@ func (s *CloudflareService) GetZoneID(domainName string) (string, error) {
 	return result.Result[0].ID, nil
 }
 
-// ListZones 获取账号下所有的 Zone（域名）
-func (s *CloudflareService) ListZones() ([]map[string]interface{}, error) {
+// ZonesResult 域名列表返回结果
+type ZonesResult struct {
+	Zones      []map[string]interface{} `json:"zones"`
+	Page       int                      `json:"page"`
+	PerPage    int                      `json:"per_page"`
+	TotalPages int                      `json:"total_pages"`
+	TotalCount int                      `json:"total_count"`
+}
+
+// ListZones 获取账号下的 Zone（域名）列表，支持分页和名称搜索
+// page: 页码，从 1 开始
+// perPage: 每页数量，默认 20，最大 50
+// name: 可选的域名搜索参数，为空则获取所有域名
+func (s *CloudflareService) ListZones(page, perPage int, name string) (*ZonesResult, error) {
 	log := logger.GetLogger()
 
-	url := "https://api.cloudflare.com/client/v4/zones"
-	req, err := http.NewRequest("GET", url, nil)
+	// 参数校验
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 || perPage > 50 {
+		perPage = 20 // 默认每页 20 条
+	}
+
+	// 构建 URL 和查询参数
+	baseURL := "https://api.cloudflare.com/client/v4/zones"
+	req, err := http.NewRequest("GET", baseURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
 	}
 
+	// 添加查询参数
+	q := req.URL.Query()
+	q.Add("page", fmt.Sprintf("%d", page))
+	q.Add("per_page", fmt.Sprintf("%d", perPage))
+	if name != "" {
+		q.Add("name", name)
+	}
+	req.URL.RawQuery = q.Encode()
+
+	// 设置认证头
 	for k, v := range s.getAuthHeaders() {
 		req.Header.Set(k, v)
 	}
 
-	log.WithField("url", url).Info("请求 Cloudflare Zones 列表")
+	log.WithFields(map[string]interface{}{
+		"url":      req.URL.String(),
+		"page":     page,
+		"per_page": perPage,
+		"name":     name,
+	}).Info("请求 Cloudflare Zones 列表")
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -149,6 +185,13 @@ func (s *CloudflareService) ListZones() ([]map[string]interface{}, error) {
 		Errors  []struct {
 			Message string `json:"message"`
 		} `json:"errors"`
+		ResultInfo struct {
+			Page       int `json:"page"`
+			PerPage    int `json:"per_page"`
+			TotalPages int `json:"total_pages"`
+			Count      int `json:"count"`
+			TotalCount int `json:"total_count"`
+		} `json:"result_info"`
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
@@ -162,9 +205,21 @@ func (s *CloudflareService) ListZones() ([]map[string]interface{}, error) {
 		return nil, fmt.Errorf("获取 Zones 列表失败")
 	}
 
-	log.WithField("count", len(result.Result)).Info("获取 Zones 列表成功")
+	log.WithFields(map[string]interface{}{
+		"page":        result.ResultInfo.Page,
+		"per_page":    result.ResultInfo.PerPage,
+		"count":       result.ResultInfo.Count,
+		"total_pages": result.ResultInfo.TotalPages,
+		"total_count": result.ResultInfo.TotalCount,
+	}).Info("获取 Zones 列表成功")
 
-	return result.Result, nil
+	return &ZonesResult{
+		Zones:      result.Result,
+		Page:       result.ResultInfo.Page,
+		PerPage:    result.ResultInfo.PerPage,
+		TotalPages: result.ResultInfo.TotalPages,
+		TotalCount: result.ResultInfo.TotalCount,
+	}, nil
 }
 
 // CreateCNAMERecord 创建CNAME记录
