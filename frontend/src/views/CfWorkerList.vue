@@ -148,20 +148,43 @@
         <el-form-item label="Worker 域名" prop="worker_domain" v-if="!isEdit">
           <el-select
             v-model="workerForm.worker_domain"
-            placeholder="请选择或输入 Worker 域名"
+            placeholder="搜索或选择域名，支持输入子域名"
             style="width: 100%"
             filterable
             allow-create
             clearable
+            default-first-option
             :loading="loadingWorkerDomains"
             :disabled="!workerForm.cf_account_id"
+            :filter-method="filterWorkerDomains"
           >
+            <template #empty>
+              <div style="padding: 10px; text-align: center; color: #909399;">
+                <div v-if="workerDomainSearchQuery">
+                  未找到匹配的域名
+                  <div style="margin-top: 8px;">
+                    <el-button size="small" type="primary" @click="useCustomDomain">
+                      使用 "{{ workerDomainSearchQuery }}" 作为域名
+                    </el-button>
+                  </div>
+                </div>
+                <div v-else>
+                  暂无可用域名，请输入域名
+                </div>
+              </div>
+            </template>
+            
             <el-option
-              v-for="domain in workerDomains"
+              v-for="domain in filteredWorkerDomains"
               :key="domain"
               :label="domain"
               :value="domain"
-            />
+            >
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>{{ domain }}</span>
+                <el-tag size="small" type="success">已托管</el-tag>
+              </div>
+            </el-option>
           </el-select>
           <div class="form-tip" v-if="!workerForm.cf_account_id">
             请先选择 CF 账号
@@ -171,7 +194,11 @@
             正在加载域名列表...
           </div>
           <div class="form-tip" v-else-if="workerDomains.length > 0" style="color: #67C23A;">
-            已加载 {{ workerDomains.length }} 个可用域名，可从列表选择或手动输入
+            共 {{ workerDomains.length }} 个托管域名
+            <span v-if="filteredWorkerDomains.length < workerDomains.length">
+              （搜索结果: {{ filteredWorkerDomains.length }} 个）
+            </span>
+            ，支持搜索、选择或输入子域名
           </div>
           <div class="form-tip" v-else style="color: #E6A23C;">
             该账号暂无托管域名，请手动输入域名
@@ -364,6 +391,12 @@ const loadingDomains = ref(false);
 // Worker 域名列表（从 CF 账号获取）
 const workerDomains = ref([]);
 const loadingWorkerDomains = ref(false);
+
+// 过滤后的 Worker 域名列表
+const filteredWorkerDomains = ref([]);
+
+// Worker 域名搜索查询
+const workerDomainSearchQuery = ref('');
 
 // 分页相关
 const domainPagination = reactive({
@@ -570,9 +603,11 @@ const handleClearDomain = () => {
 const handleCFAccountChange = async (cfAccountId) => {
   console.log('CF 账号变化:', cfAccountId);
   
-  // 清空 Worker 域名
+  // 清空 Worker 域名和搜索状态
   workerForm.worker_domain = '';
   workerDomains.value = [];
+  filteredWorkerDomains.value = [];
+  workerDomainSearchQuery.value = '';
   
   if (!cfAccountId) {
     return;
@@ -598,15 +633,46 @@ const loadCFAccountZones = async (cfAccountId) => {
     // 提取域名名称
     workerDomains.value = zoneList.map(zone => zone.name || zone);
     
+    // 初始化过滤列表
+    filteredWorkerDomains.value = [...workerDomains.value];
+    
     if (workerDomains.value.length === 0) {
       ElMessage.info('该 CF 账号暂无托管域名');
+    } else {
+      ElMessage.success(`已加载 ${workerDomains.value.length} 个托管域名`);
     }
   } catch (error) {
     console.error('加载 CF 账号域名失败:', error);
     ElMessage.error('加载域名列表失败: ' + error.message);
     workerDomains.value = [];
+    filteredWorkerDomains.value = [];
   } finally {
     loadingWorkerDomains.value = false;
+  }
+};
+
+// 过滤 Worker 域名
+const filterWorkerDomains = (query) => {
+  workerDomainSearchQuery.value = query;
+  
+  if (!query) {
+    filteredWorkerDomains.value = [...workerDomains.value];
+    return;
+  }
+  
+  const lowerQuery = query.toLowerCase();
+  filteredWorkerDomains.value = workerDomains.value.filter(domain => {
+    return domain.toLowerCase().includes(lowerQuery);
+  });
+  
+  console.log('域名搜索:', query, '结果数:', filteredWorkerDomains.value.length);
+};
+
+// 使用自定义域名
+const useCustomDomain = () => {
+  if (workerDomainSearchQuery.value) {
+    workerForm.worker_domain = workerDomainSearchQuery.value;
+    workerDomainSearchQuery.value = '';
   }
 };
 
@@ -702,6 +768,8 @@ const handleDialogClose = () => {
   selectedBucketId.value = null;
   selectedBucketDomains.value = [];
   workerDomains.value = [];
+  filteredWorkerDomains.value = [];
+  workerDomainSearchQuery.value = '';
   resetDomainPagination();
 };
 
