@@ -272,7 +272,8 @@ const workerFormRules = {
 const loadCFAccounts = async () => {
   try {
     const response = await cfAccountApi.getCFAccountList();
-    cfAccounts.value = response.data.data || [];
+    // API 直接返回数组
+    cfAccounts.value = response.data || [];
   } catch (error) {
     console.error('加载 CF 账号列表失败:', error);
   }
