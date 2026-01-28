@@ -65,10 +65,26 @@
           </div>
         </el-form-item>
         <el-form-item label="默认文件路径">
-          <el-input
+          <el-select
             v-model="addForm.default_file_path"
-            placeholder="例如：app.apk 或 download/latest.apk"
-          />
+            placeholder="请选择文件或手动输入路径"
+            filterable
+            allow-create
+            clearable
+            style="width: 100%"
+            :loading="filesLoading"
+            @visible-change="handleSelectVisibleChange"
+          >
+            <el-option
+              v-for="file in fileList"
+              :key="file"
+              :label="file"
+              :value="file"
+            >
+              <span style="float: left">{{ getFileName(file) }}</span>
+              <!--span style="float: right; color: #909399; font-size: 12px">{{ file }}</span-->
+            </el-option>
+          </el-select>
           <div style="font-size: 12px; color: #909399; margin-top: 5px">
             💡 设置后，访问域名根路径（如 https://assets.example.com/）时将自动下载该文件
           </div>
@@ -123,6 +139,10 @@ const addForm = ref({
 })
 const addFormRef = ref(null)
 
+// 文件列表相关
+const filesLoading = ref(false)
+const fileList = ref([])
+
 const showCacheRuleDialog = ref(false)
 const selectedDomain = ref(null)
 
@@ -161,6 +181,8 @@ const resetAddForm = () => {
     default_file_path: '',
     note: '',
   }
+  // 清空文件列表
+  fileList.value = []
   if (addFormRef.value) {
     addFormRef.value.clearValidate()
   }
@@ -239,6 +261,38 @@ const formatDate = (dateString) => {
     minute: '2-digit',
     second: '2-digit',
   })
+}
+
+// 加载文件列表
+const loadFileList = async () => {
+  if (!props.bucket || !props.bucket.id) return
+  
+  filesLoading.value = true
+  try {
+    const res = await r2Api.listFiles(props.bucket.id)
+    // 过滤掉目录（以 / 结尾的）
+    fileList.value = (res.files || []).filter(file => !file.endsWith('/'))
+  } catch (error) {
+    // 静默失败，用户仍可手动输入
+    console.error('加载文件列表失败:', error)
+  } finally {
+    filesLoading.value = false
+  }
+}
+
+// 下拉框显示/隐藏时触发
+const handleSelectVisibleChange = (visible) => {
+  // 当下拉框打开且文件列表为空时，加载文件列表
+  if (visible && fileList.value.length === 0) {
+    loadFileList()
+  }
+}
+
+// 从完整路径中提取文件名
+const getFileName = (filePath) => {
+  if (!filePath) return ''
+  const parts = filePath.split('/')
+  return parts[parts.length - 1]
 }
 </script>
 
