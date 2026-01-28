@@ -198,6 +198,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			cfAccounts.POST("", cfAccountHandler.CreateCFAccount)
 			cfAccounts.PUT("/:id", cfAccountHandler.UpdateCFAccount)
 			cfAccounts.DELETE("/:id", cfAccountHandler.DeleteCFAccount)
+			cfAccounts.GET("/:cf_account_id/zones", cfAccountHandler.GetCFAccountZones)
 			cfAccounts.POST("/:cf_account_id/enable-r2", r2Handler.EnableR2)
 		}
 

@@ -112,6 +112,61 @@ func (s *CloudflareService) GetZoneID(domainName string) (string, error) {
 	return result.Result[0].ID, nil
 }
 
+// ListZones 获取账号下所有的 Zone（域名）
+func (s *CloudflareService) ListZones() ([]map[string]interface{}, error) {
+	log := logger.GetLogger()
+
+	url := "https://api.cloudflare.com/client/v4/zones"
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	log.WithField("url", url).Info("请求 Cloudflare Zones 列表")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API请求失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool                     `json:"success"`
+		Result  []map[string]interface{} `json:"result"`
+		Errors  []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		if len(result.Errors) > 0 {
+			return nil, fmt.Errorf("Cloudflare API错误: %s", result.Errors[0].Message)
+		}
+		return nil, fmt.Errorf("获取 Zones 列表失败")
+	}
+
+	log.WithField("count", len(result.Result)).Info("获取 Zones 列表成功")
+
+	return result.Result, nil
+}
+
 // CreateCNAMERecord 创建CNAME记录
 // proxied: 是否启用Cloudflare代理（橙色云朵），默认为 false（灰色云朵，仅DNS）
 func (s *CloudflareService) CreateCNAMERecord(zoneID, name, value string, proxied ...bool) error {

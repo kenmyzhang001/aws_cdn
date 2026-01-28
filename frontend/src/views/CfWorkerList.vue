@@ -566,6 +566,50 @@ const handleClearDomain = () => {
   workerForm.target_domain = '';
 };
 
+// 处理 CF 账号选择变化
+const handleCFAccountChange = async (cfAccountId) => {
+  console.log('CF 账号变化:', cfAccountId);
+  
+  // 清空 Worker 域名
+  workerForm.worker_domain = '';
+  workerDomains.value = [];
+  
+  if (!cfAccountId) {
+    return;
+  }
+  
+  // 加载该账号下的域名列表
+  await loadCFAccountZones(cfAccountId);
+};
+
+// 加载 CF 账号的域名列表
+const loadCFAccountZones = async (cfAccountId) => {
+  if (loadingWorkerDomains.value) return;
+  
+  try {
+    loadingWorkerDomains.value = true;
+    console.log('开始加载 CF 账号域名列表, cfAccountId:', cfAccountId);
+    
+    const zones = await cfAccountApi.getCFAccountZones(cfAccountId);
+    const zoneList = zones || [];
+    
+    console.log('CF 账号域名列表:', zoneList);
+    
+    // 提取域名名称
+    workerDomains.value = zoneList.map(zone => zone.name || zone);
+    
+    if (workerDomains.value.length === 0) {
+      ElMessage.info('该 CF 账号暂无托管域名');
+    }
+  } catch (error) {
+    console.error('加载 CF 账号域名失败:', error);
+    ElMessage.error('加载域名列表失败: ' + error.message);
+    workerDomains.value = [];
+  } finally {
+    loadingWorkerDomains.value = false;
+  }
+};
+
 // 处理域名输入模式变化
 const handleDomainModeChange = (mode) => {
   console.log('域名输入模式切换为:', mode);
@@ -657,6 +701,7 @@ const handleDialogClose = () => {
   domainInputMode.value = 'manual';
   selectedBucketId.value = null;
   selectedBucketDomains.value = [];
+  workerDomains.value = [];
   resetDomainPagination();
 };
 

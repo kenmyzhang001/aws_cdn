@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"aws_cdn/internal/config"
 	"aws_cdn/internal/logger"
 	"aws_cdn/internal/services"
+	"aws_cdn/internal/services/cloudflare"
 	"net/http"
 	"strconv"
 	"strings"
@@ -161,4 +163,50 @@ func (h *CFAccountHandler) DeleteCFAccount(c *gin.Context) {
 
 	log.WithField("account_id", id).Info("Cloudflare账号删除成功")
 	c.JSON(http.StatusOK, gin.H{"message": "Cloudflare账号删除成功"})
+}
+
+// GetCFAccountZones 获取 CF 账号下的所有域名（Zones）
+func (h *CFAccountHandler) GetCFAccountZones(c *gin.Context) {
+	log := logger.GetLogger()
+	id, err := strconv.ParseUint(c.Param("cf_account_id"), 10, 32)
+	if err != nil {
+		log.WithError(err).WithField("id_param", c.Param("cf_account_id")).Error("获取域名列表失败：无效的账号ID")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的账号 ID"})
+		return
+	}
+
+	// 获取 CF 账号信息
+	account, err := h.service.GetCFAccount(uint(id))
+	if err != nil {
+		log.WithError(err).WithField("account_id", id).Error("获取CF账号失败")
+		c.JSON(http.StatusNotFound, gin.H{"error": "CF 账号不存在"})
+		return
+	}
+
+	// 使用 API Token 创建 Cloudflare 服务
+	cfg := &config.CloudflareConfig{
+		APIToken: account.APIToken,
+	}
+
+	cfService, err := cloudflare.NewCloudflareService(cfg)
+	if err != nil {
+		log.WithError(err).Error("创建 Cloudflare 服务失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建 Cloudflare 服务失败"})
+		return
+	}
+
+	// 获取域名列表
+	zones, err := cfService.ListZones()
+	if err != nil {
+		log.WithError(err).WithField("account_id", id).Error("获取域名列表失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	log.WithFields(map[string]interface{}{
+		"account_id": id,
+		"count":      len(zones),
+	}).Info("获取域名列表成功")
+
+	c.JSON(http.StatusOK, zones)
 }
