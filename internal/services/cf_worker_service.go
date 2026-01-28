@@ -4,7 +4,11 @@ import (
 	"aws_cdn/internal/logger"
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/cloudflare"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -271,8 +275,71 @@ func (s *CFWorkerService) DeleteWorker(id uint) error {
 
 // getZoneID 获取 Zone ID
 func (s *CFWorkerService) getZoneID(apiToken, domainName string) (string, error) {
-	// 为了简化实现，这里暂时返回空字符串
-	// 在实际使用时，Worker 路由可以在 Cloudflare Dashboard 手动配置
-	// 或者后续扩展实现完整的 Zone ID 查询逻辑
-	return "", nil
+	log := logger.GetLogger()
+
+	// 直接使用 HTTP 客户端来调用 Cloudflare API
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones?name=%s", domainName)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"domain":      domainName,
+		"status_code": resp.StatusCode,
+		"response":    string(body),
+	}).Info("获取 Zone ID 响应")
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API请求失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		if len(result.Errors) > 0 {
+			return "", fmt.Errorf("Cloudflare API错误: %s", result.Errors[0].Message)
+		}
+		return "", fmt.Errorf("获取Zone ID失败")
+	}
+
+	if len(result.Result) == 0 {
+		return "", fmt.Errorf("未找到域名 %s 的Zone，请确保该域名已添加到 Cloudflare", domainName)
+	}
+
+	zoneID := result.Result[0].ID
+	log.WithFields(map[string]interface{}{
+		"domain":  domainName,
+		"zone_id": zoneID,
+	}).Info("成功获取 Zone ID")
+
+	return zoneID, nil
 }

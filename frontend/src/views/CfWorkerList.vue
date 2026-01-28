@@ -146,69 +146,104 @@
         </el-form-item>
 
         <el-form-item label="Worker 域名" prop="worker_domain" v-if="!isEdit">
-          <el-select
-            v-model="workerForm.worker_domain"
-            placeholder="搜索或选择域名，支持输入子域名"
-            style="width: 100%"
-            filterable
-            allow-create
-            clearable
-            default-first-option
-            :loading="loadingWorkerDomains"
-            :disabled="!workerForm.cf_account_id"
-            :filter-method="filterWorkerDomains"
-          >
-            <template #empty>
-              <div style="padding: 10px; text-align: center; color: #909399;">
-                <div v-if="workerDomainSearchQuery">
-                  未找到匹配的域名
-                  <div style="margin-top: 8px;">
-                    <el-button size="small" type="primary" @click="useCustomDomain">
-                      使用 "{{ workerDomainSearchQuery }}" 作为域名
+          <div style="display: flex; align-items: flex-start; gap: 10px;">
+            <!-- 子域名前缀输入框 -->
+            <div style="flex: 0 0 220px;">
+              <el-input
+                v-model="workerForm.worker_domain_prefix"
+                placeholder="可选：如 www, api, cdn"
+                clearable
+                :disabled="!workerForm.cf_account_id"
+                @input="updateWorkerDomain"
+              >
+                <template #append>.</template>
+              </el-input>
+              <div class="form-tip" style="margin-top: 4px; white-space: nowrap;">
+                子域名前缀（可选）
+              </div>
+            </div>
+            
+            <!-- 基础域名选择框 -->
+            <div style="flex: 1; min-width: 0;">
+              <el-select
+                v-model="workerForm.worker_base_domain"
+                placeholder="选择或输入基础域名（必填）"
+                style="width: 100%"
+                filterable
+                allow-create
+                clearable
+                default-first-option
+                :loading="loadingWorkerDomains"
+                :disabled="!workerForm.cf_account_id"
+                :filter-method="filterWorkerDomains"
+                @change="updateWorkerDomain"
+              >
+                <template #empty>
+                  <div style="padding: 10px; text-align: center; color: #909399;">
+                    <div v-if="workerDomainSearchQuery">
+                      未找到匹配的域名
+                      <div style="margin-top: 8px;">
+                        <el-button size="small" type="primary" @click="useCustomDomain">
+                          使用 "{{ workerDomainSearchQuery }}" 作为域名
+                        </el-button>
+                      </div>
+                    </div>
+                    <div v-else>
+                      暂无可用域名，请输入完整域名
+                    </div>
+                  </div>
+                </template>
+                
+                <el-option
+                  v-for="domain in filteredWorkerDomains"
+                  :key="domain"
+                  :label="domain"
+                  :value="domain"
+                >
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>{{ domain }}</span>
+                    <el-tag size="small" type="success">已托管</el-tag>
+                  </div>
+                </el-option>
+                
+                <!-- 加载更多选项 -->
+                <el-option
+                  v-if="workerZonesPagination.hasMore && !workerDomainSearchQuery"
+                  :value="'__load_more__'"
+                  disabled
+                  style="background-color: #f5f7fa; cursor: pointer !important;"
+                >
+                  <div style="text-align: center; padding: 5px 0;">
+                    <el-button 
+                      type="primary" 
+                      size="small"
+                      @click.stop="loadMoreWorkerZones"
+                      :loading="loadingWorkerDomains"
+                      style="width: 90%;"
+                    >
+                      <span v-if="!loadingWorkerDomains">
+                        加载更多域名 ({{ workerDomains.length }}/{{ workerZonesPagination.totalCount }})
+                      </span>
+                      <span v-else>加载中...</span>
                     </el-button>
                   </div>
-                </div>
-                <div v-else>
-                  暂无可用域名，请输入域名
-                </div>
+                </el-option>
+              </el-select>
+              <div class="form-tip" style="margin-top: 4px;">
+                基础域名（必填）
               </div>
-            </template>
-            
-            <el-option
-              v-for="domain in filteredWorkerDomains"
-              :key="domain"
-              :label="domain"
-              :value="domain"
-            >
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span>{{ domain }}</span>
-                <el-tag size="small" type="success">已托管</el-tag>
-              </div>
-            </el-option>
-            
-            <!-- 加载更多选项 -->
-            <el-option
-              v-if="workerZonesPagination.hasMore && !workerDomainSearchQuery"
-              :value="'__load_more__'"
-              disabled
-              style="background-color: #f5f7fa; cursor: pointer !important;"
-            >
-              <div style="text-align: center; padding: 5px 0;">
-                <el-button 
-                  type="primary" 
-                  size="small"
-                  @click.stop="loadMoreWorkerZones"
-                  :loading="loadingWorkerDomains"
-                  style="width: 90%;"
-                >
-                  <span v-if="!loadingWorkerDomains">
-                    加载更多域名 ({{ workerDomains.length }}/{{ workerZonesPagination.totalCount }})
-                  </span>
-                  <span v-else>加载中...</span>
-                </el-button>
-              </div>
-            </el-option>
-          </el-select>
+            </div>
+          </div>
+          
+          <!-- 完整域名预览 -->
+          <div v-if="workerForm.worker_domain" style="margin-top: 10px; padding: 10px 14px; background: #f0f9ff; border: 1px solid #91caff; border-radius: 6px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <el-icon color="#1890ff" :size="16"><Link /></el-icon>
+              <span style="color: #1890ff; font-weight: 500;">完整域名:</span>
+              <span style="color: #262626; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; font-weight: 500;">{{ workerForm.worker_domain }}</span>
+            </div>
+          </div>
+          
           <div class="form-tip" v-if="!workerForm.cf_account_id">
             请先选择 CF 账号
           </div>
@@ -221,7 +256,6 @@
             <span v-if="filteredWorkerDomains.length < workerDomains.length">
               （搜索结果: {{ filteredWorkerDomains.length }} 个）
             </span>
-            ，支持搜索、选择或输入子域名
             <el-button 
               v-if="workerZonesPagination.hasMore" 
               type="primary" 
@@ -235,7 +269,7 @@
             </el-button>
           </div>
           <div class="form-tip" v-else style="color: #E6A23C;">
-            该账号暂无托管域名，请手动输入域名
+            该账号暂无托管域名，请手动输入完整域名
           </div>
         </el-form-item>
 
@@ -385,7 +419,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Plus, RefreshRight, Loading } from '@element-plus/icons-vue';
+import { Plus, RefreshRight, Loading, Link } from '@element-plus/icons-vue';
 import {
   getWorkerList,
   createWorker,
@@ -467,6 +501,8 @@ const workerForm = reactive({
   cf_account_id: null,
   worker_name: '',
   worker_domain: '',
+  worker_domain_prefix: '', // 子域名前缀
+  worker_base_domain: '', // 基础域名
   target_domain: '',
   status: 'active',
   description: ''
@@ -648,6 +684,8 @@ const handleCFAccountChange = async (cfAccountId) => {
   
   // 清空 Worker 域名和搜索状态
   workerForm.worker_domain = '';
+  workerForm.worker_domain_prefix = '';
+  workerForm.worker_base_domain = '';
   workerDomains.value = [];
   filteredWorkerDomains.value = [];
   workerDomainSearchQuery.value = '';
@@ -753,6 +791,27 @@ const loadMoreWorkerZones = async () => {
   await loadCFAccountZones(workerForm.cf_account_id, true);
 };
 
+// 更新完整的 Worker 域名（组合前缀和基础域名）
+const updateWorkerDomain = () => {
+  const prefix = workerForm.worker_domain_prefix?.trim();
+  const baseDomain = workerForm.worker_base_domain?.trim();
+  
+  if (!baseDomain) {
+    workerForm.worker_domain = '';
+    return;
+  }
+  
+  if (prefix) {
+    // 有前缀：组合成 prefix.baseDomain
+    workerForm.worker_domain = `${prefix}.${baseDomain}`;
+  } else {
+    // 无前缀：直接使用基础域名
+    workerForm.worker_domain = baseDomain;
+  }
+  
+  console.log('更新 Worker 域名:', workerForm.worker_domain);
+};
+
 // 过滤 Worker 域名
 const filterWorkerDomains = (query) => {
   workerDomainSearchQuery.value = query;
@@ -773,8 +832,9 @@ const filterWorkerDomains = (query) => {
 // 使用自定义域名
 const useCustomDomain = () => {
   if (workerDomainSearchQuery.value) {
-    workerForm.worker_domain = workerDomainSearchQuery.value;
+    workerForm.worker_base_domain = workerDomainSearchQuery.value;
     workerDomainSearchQuery.value = '';
+    updateWorkerDomain();
   }
 };
 
@@ -840,10 +900,13 @@ const showEditDialog = (row) => {
   isEdit.value = true;
   currentWorkerId.value = row.id;
   
+  // 编辑模式下不需要解析前缀和基础域名，因为域名字段是只读的
   Object.assign(workerForm, {
     cf_account_id: row.cf_account_id,
     worker_name: row.worker_name,
     worker_domain: row.worker_domain,
+    worker_domain_prefix: '',
+    worker_base_domain: '',
     target_domain: row.target_domain,
     status: row.status || 'active',
     description: row.description || ''
@@ -859,6 +922,8 @@ const handleDialogClose = () => {
     cf_account_id: null,
     worker_name: '',
     worker_domain: '',
+    worker_domain_prefix: '',
+    worker_base_domain: '',
     target_domain: '',
     status: 'active',
     description: ''
