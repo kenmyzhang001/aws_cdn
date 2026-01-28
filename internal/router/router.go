@@ -82,6 +82,9 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	// 初始化速度探测服务（速度阈值100KB/s，失败率阈值50%）
 	speedProbeService := services.NewSpeedProbeServiceWithTwoDBs(db, db2, telegramService, models.ThresholdSpeedKbps, 0.5)
 
+	// 初始化 Worker 服务
+	cfWorkerService := services.NewCFWorkerService(db)
+
 	// 初始化处理器
 	groupHandler := handlers.NewGroupHandler(groupService)
 	domainHandler := handlers.NewDomainHandler(domainService)
@@ -95,6 +98,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	customDownloadLinkHandler := handlers.NewCustomDownloadLinkHandler(customDownloadLinkService)
 	allLinksHandler := handlers.NewAllLinksHandler(downloadPackageService, customDownloadLinkService, r2CustomDomainService, r2FileService)
 	speedProbeHandler := handlers.NewSpeedProbeHandler(speedProbeService)
+	cfWorkerHandler := handlers.NewCFWorkerHandler(cfWorkerService)
 
 	// API 路由
 	api := r.Group("/api/v1")
@@ -257,6 +261,16 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			speedProbe.GET("/results/:ip", speedProbeHandler.GetProbeResultsByIP)
 			speedProbe.GET("/alerts", speedProbeHandler.GetAlertLogs)
 			speedProbe.POST("/check", speedProbeHandler.TriggerCheck) // 手动触发检查
+		}
+
+		// Cloudflare Worker 管理
+		cfWorkers := protected.Group("/cf-workers")
+		{
+			cfWorkers.GET("", cfWorkerHandler.GetWorkerList)
+			cfWorkers.GET("/:id", cfWorkerHandler.GetWorker)
+			cfWorkers.POST("", cfWorkerHandler.CreateWorker)
+			cfWorkers.PUT("/:id", cfWorkerHandler.UpdateWorker)
+			cfWorkers.DELETE("/:id", cfWorkerHandler.DeleteWorker)
 		}
 	}
 
