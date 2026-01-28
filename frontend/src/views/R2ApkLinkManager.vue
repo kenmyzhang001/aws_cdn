@@ -57,9 +57,26 @@
             <div class="expand-content">
               <div v-loading="row.loadingUrls" style="min-height: 100px">
                 <div v-if="row.urls && row.urls.length > 0">
-                  <h4 style="margin-bottom: 15px; color: #303133; font-size: 14px">
-                    自定义域名访问链接 (共 {{ row.urls.length }} 个)：
-                  </h4>
+                  <div style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 15px;
+                  ">
+                    <h4 style="margin: 0; color: #303133; font-size: 14px">
+                      自定义域名访问链接 (共 {{ row.urls.length }} 个)：
+                    </h4>
+                    <el-button
+                      size="small"
+                      :type="row.allCopied ? 'success' : 'primary'"
+                      @click="copyAllUrls(row)"
+                    >
+                      <el-icon>
+                        <component :is="row.allCopied ? Check : DocumentCopy" />
+                      </el-icon>
+                      {{ row.allCopied ? '已复制所有' : '复制所有链接' }}
+                    </el-button>
+                  </div>
                   <div class="url-list">
                     <div
                       v-for="(urlItem, index) in row.urls"
@@ -216,6 +233,7 @@ const loadApkFiles = async () => {
       ...file,
       urls: null, // 延迟加载
       loadingUrls: false,
+      allCopied: false, // 复制所有链接的状态
     }))
     // 清空展开的行
     expandedRows.value = []
@@ -364,6 +382,46 @@ const copyToClipboard = async (text, row, index) => {
         }, 2000)
       }
       ElMessage.success('链接已复制到剪贴板')
+    } catch (err) {
+      ElMessage.error('复制失败，请手动复制')
+    }
+    document.body.removeChild(textArea)
+  }
+}
+
+// 复制所有链接
+const copyAllUrls = async (row) => {
+  if (!row.urls || row.urls.length === 0) {
+    ElMessage.warning('没有可复制的链接')
+    return
+  }
+
+  // 将所有 URL 组合成多行文本
+  const allUrlsText = row.urls.map((urlItem) => urlItem.url).join('\n')
+
+  try {
+    await navigator.clipboard.writeText(allUrlsText)
+    // 更新复制状态
+    row.allCopied = true
+    setTimeout(() => {
+      row.allCopied = false
+    }, 2000)
+    ElMessage.success(`已复制 ${row.urls.length} 个链接到剪贴板`)
+  } catch (error) {
+    // 降级方案：使用传统方法
+    const textArea = document.createElement('textarea')
+    textArea.value = allUrlsText
+    textArea.style.position = 'fixed'
+    textArea.style.opacity = '0'
+    document.body.appendChild(textArea)
+    textArea.select()
+    try {
+      document.execCommand('copy')
+      row.allCopied = true
+      setTimeout(() => {
+        row.allCopied = false
+      }, 2000)
+      ElMessage.success(`已复制 ${row.urls.length} 个链接到剪贴板`)
     } catch (err) {
       ElMessage.error('复制失败，请手动复制')
     }
