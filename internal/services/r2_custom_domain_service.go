@@ -82,7 +82,7 @@ func (s *R2CustomDomainService) GetR2CustomDomain(id uint) (*models.R2CustomDoma
 }
 
 // AddCustomDomain 添加自定义域名
-func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note string) (*models.R2CustomDomain, error) {
+func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note, defaultFilePath string) (*models.R2CustomDomain, error) {
 	// 获取存储桶信息
 	var bucket models.R2Bucket
 	if err := s.db.Preload("CFAccount").First(&bucket, r2BucketID).Error; err != nil {
@@ -341,13 +341,39 @@ func (s *R2CustomDomainService) AddCustomDomain(r2BucketID uint, domain, note st
 		}).Warn("Zone ID 为空，跳过自动创建 CORS Transform Rule、WAF 安全规则、Page Rule 和所有网络优化规则，请手动在 Cloudflare Dashboard 配置")
 	}
 
+	// 如果设置了默认文件路径，创建重定向规则
+	if defaultFilePath != "" && zoneID != "" {
+		log.WithFields(map[string]interface{}{
+			"domain":            domain,
+			"zone_id":           zoneID,
+			"default_file_path": defaultFilePath,
+		}).Info("开始创建默认文件重定向规则")
+
+		redirectRuleID, redirectErr := cloudflareSvc.CreateDefaultFileRedirect(zoneID, domain, defaultFilePath)
+		if redirectErr != nil {
+			log.WithError(redirectErr).WithFields(map[string]interface{}{
+				"domain":            domain,
+				"zone_id":           zoneID,
+				"default_file_path": defaultFilePath,
+			}).Warn("创建默认文件重定向规则失败，请手动在 Cloudflare Dashboard 配置")
+		} else if redirectRuleID != "" {
+			log.WithFields(map[string]interface{}{
+				"domain":            domain,
+				"zone_id":           zoneID,
+				"rule_id":           redirectRuleID,
+				"default_file_path": defaultFilePath,
+			}).Info("🎉 默认文件重定向规则已创建，访问根路径将自动跳转到默认文件")
+		}
+	}
+
 	// 保存到数据库
 	customDomain := &models.R2CustomDomain{
-		R2BucketID: r2BucketID,
-		Domain:     domain,
-		ZoneID:     zoneID,
-		Status:     "active",
-		Note:       note,
+		R2BucketID:      r2BucketID,
+		Domain:          domain,
+		ZoneID:          zoneID,
+		Status:          "active",
+		Note:            note,
+		DefaultFilePath: defaultFilePath,
 	}
 
 	if err := s.db.Create(customDomain).Error; err != nil {

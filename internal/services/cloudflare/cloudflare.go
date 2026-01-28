@@ -2937,3 +2937,214 @@ func (s *CloudflareService) DisableAutoMinify(zoneID string) error {
 
 	return nil
 }
+
+// CreateDefaultFileRedirect 创建默认文件重定向规则
+// 当访问域名根路径（/）时，自动重定向到指定的默认文件
+func (s *CloudflareService) CreateDefaultFileRedirect(zoneID, domain, defaultFilePath string) (string, error) {
+	log := logger.GetLogger()
+
+	// 如果默认文件路径为空，不创建规则
+	if defaultFilePath == "" {
+		return "", nil
+	}
+
+	// 确保文件路径以 / 开头
+	if !strings.HasPrefix(defaultFilePath, "/") {
+		defaultFilePath = "/" + defaultFilePath
+	}
+
+	// 构建规则表达式：只匹配根路径访问
+	expression := fmt.Sprintf(`(http.host eq "%s" and http.request.uri.path eq "/")`, domain)
+
+	// 获取或创建 URL Redirect Ruleset
+	rulesetID, err := s.getOrCreateURLRedirectRuleset(zoneID)
+	if err != nil {
+		return "", fmt.Errorf("获取或创建 URL Redirect Ruleset 失败: %w", err)
+	}
+
+	// 检查是否已存在相同的规则
+	existingRuleID, err := s.findRuleByExpression(zoneID, rulesetID, expression)
+	if err == nil && existingRuleID != "" {
+		log.WithFields(map[string]interface{}{
+			"zone_id":   zoneID,
+			"domain":    domain,
+			"rule_id":   existingRuleID,
+			"file_path": defaultFilePath,
+		}).Info("默认文件重定向规则已存在，将更新")
+
+		// 更新现有规则
+		rule := map[string]interface{}{
+			"expression": expression,
+			"action":     "redirect",
+			"action_parameters": map[string]interface{}{
+				"from_value": map[string]interface{}{
+					"status_code": 302,
+					"target_url": map[string]interface{}{
+						"expression": fmt.Sprintf(`concat("https://", http.host, "%s")`, defaultFilePath),
+					},
+					"preserve_query_string": true,
+				},
+			},
+			"description": fmt.Sprintf("默认文件重定向: %s -> %s", domain, defaultFilePath),
+			"enabled":     true,
+		}
+
+		_, err := s.updateRule(zoneID, rulesetID, existingRuleID, rule)
+		if err != nil {
+			return "", fmt.Errorf("更新默认文件重定向规则失败: %w", err)
+		}
+
+		log.WithFields(map[string]interface{}{
+			"zone_id":   zoneID,
+			"domain":    domain,
+			"rule_id":   existingRuleID,
+			"file_path": defaultFilePath,
+		}).Info("默认文件重定向规则已更新")
+
+		return existingRuleID, nil
+	}
+
+	// 创建新规则
+	rule := map[string]interface{}{
+		"expression": expression,
+		"action":     "redirect",
+		"action_parameters": map[string]interface{}{
+			"from_value": map[string]interface{}{
+				"status_code": 302,
+				"target_url": map[string]interface{}{
+					"expression": fmt.Sprintf(`concat("https://", http.host, "%s")`, defaultFilePath),
+				},
+				"preserve_query_string": true,
+			},
+		},
+		"description": fmt.Sprintf("默认文件重定向: %s -> %s", domain, defaultFilePath),
+		"enabled":     true,
+	}
+
+	ruleID, err := s.addRule(zoneID, rulesetID, rule)
+	if err != nil {
+		return "", fmt.Errorf("创建默认文件重定向规则失败: %w", err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id":   zoneID,
+		"domain":    domain,
+		"rule_id":   ruleID,
+		"file_path": defaultFilePath,
+	}).Info("默认文件重定向规则已创建")
+
+	return ruleID, nil
+}
+
+// getOrCreateURLRedirectRuleset 获取或创建 URL Redirect Ruleset
+func (s *CloudflareService) getOrCreateURLRedirectRuleset(zoneID string) (string, error) {
+	log := logger.GetLogger()
+
+	// 1. 尝试获取现有的 http_request_dynamic_redirect ruleset
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets", zoneID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("获取 Ruleset 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  []struct {
+			ID    string `json:"id"`
+			Phase string `json:"phase"`
+			Kind  string `json:"kind"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	// 查找现有的 http_request_dynamic_redirect ruleset
+	for _, ruleset := range result.Result {
+		if ruleset.Phase == "http_request_dynamic_redirect" {
+			log.WithFields(map[string]interface{}{
+				"zone_id":    zoneID,
+				"ruleset_id": ruleset.ID,
+			}).Info("找到现有的 URL Redirect Ruleset")
+			return ruleset.ID, nil
+		}
+	}
+
+	// 2. 如果不存在，创建新的 ruleset
+	log.WithField("zone_id", zoneID).Info("未找到 URL Redirect Ruleset，将创建新的")
+
+	payload := map[string]interface{}{
+		"name":        "URL Redirect Ruleset",
+		"description": "自动创建的 URL 重定向规则集",
+		"kind":        "zone",
+		"phase":       "http_request_dynamic_redirect",
+		"rules":       []interface{}{},
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	createReq, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		createReq.Header.Set(k, v)
+	}
+
+	createResp, err := s.client.Do(createReq)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer createResp.Body.Close()
+
+	createBody, err := io.ReadAll(createResp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if createResp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("创建 Ruleset 失败 (状态码: %d): %s", createResp.StatusCode, string(createBody))
+	}
+
+	var createResult struct {
+		Success bool `json:"success"`
+		Result  struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(createBody, &createResult); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id":    zoneID,
+		"ruleset_id": createResult.Result.ID,
+	}).Info("URL Redirect Ruleset 创建成功")
+
+	return createResult.Result.ID, nil
+}

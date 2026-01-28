@@ -238,8 +238,9 @@ func (h *R2Handler) AddR2CustomDomain(c *gin.Context) {
 	}
 
 	var req struct {
-		Domain string `json:"domain" binding:"required"`
-		Note   string `json:"note"`
+		Domain          string `json:"domain" binding:"required"`
+		Note            string `json:"note"`
+		DefaultFilePath string `json:"default_file_path"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -248,7 +249,7 @@ func (h *R2Handler) AddR2CustomDomain(c *gin.Context) {
 		return
 	}
 
-	domain, err := h.domainService.AddCustomDomain(uint(r2BucketID), req.Domain, req.Note)
+	domain, err := h.domainService.AddCustomDomain(uint(r2BucketID), req.Domain, req.Note, req.DefaultFilePath)
 	if err != nil {
 		log.WithError(err).Error("添加自定义域名操作失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -28,6 +28,14 @@
             <el-tag :type="getStatusType(row.status)">{{ row.status || 'unknown' }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="default_file_path" label="默认文件" width="180">
+          <template #default="{ row }">
+            <span v-if="row.default_file_path" style="color: #67C23A;">
+              {{ row.default_file_path }}
+            </span>
+            <span v-else style="color: #909399;">未设置</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="note" label="备注" show-overflow-tooltip />
         <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">
@@ -49,11 +57,20 @@
 
     <!-- 添加域名对话框 -->
     <el-dialog v-model="showAddDialog" title="添加自定义域名" width="600px" @close="resetAddForm">
-      <el-form :model="addForm" :rules="formRules" ref="addFormRef" label-width="120px">
+      <el-form :model="addForm" :rules="formRules" ref="addFormRef" label-width="140px">
         <el-form-item label="域名" prop="domain">
           <el-input v-model="addForm.domain" placeholder="例如：assets.jjj0108.com" />
           <div style="font-size: 12px; color: #909399; margin-top: 5px">
             请输入要绑定的子域名，域名必须在 Cloudflare 上托管
+          </div>
+        </el-form-item>
+        <el-form-item label="默认文件路径">
+          <el-input
+            v-model="addForm.default_file_path"
+            placeholder="例如：app.apk 或 download/latest.apk"
+          />
+          <div style="font-size: 12px; color: #909399; margin-top: 5px">
+            💡 设置后，访问域名根路径（如 https://assets.example.com/）时将自动下载该文件
           </div>
         </el-form-item>
         <el-form-item label="备注">
@@ -101,6 +118,7 @@ const showAddDialog = ref(false)
 const addLoading = ref(false)
 const addForm = ref({
   domain: '',
+  default_file_path: '',
   note: '',
 })
 const addFormRef = ref(null)
@@ -140,6 +158,7 @@ const loadDomains = async () => {
 const resetAddForm = () => {
   addForm.value = {
     domain: '',
+    default_file_path: '',
     note: '',
   }
   if (addFormRef.value) {
