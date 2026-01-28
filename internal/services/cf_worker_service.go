@@ -84,35 +84,33 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 		"worker_name": req.WorkerName,
 	}).Info("Worker 脚本创建成功")
 
-	// 7. 创建 Worker 路由（如果有 Zone ID）
-	var workerRoute string
-	if zoneID != "" {
-		pattern := fmt.Sprintf("%s/*", req.WorkerDomain)
-		routeID, err := cfService.CreateWorkerRoute(zoneID, pattern, req.WorkerName)
-		if err != nil {
-			// 如果路由创建失败，删除已创建的 Worker
-			_ = cfService.DeleteWorker(req.WorkerName)
-			return nil, fmt.Errorf("创建 Worker 路由失败: %w", err)
-		}
-		workerRoute = routeID
-
-		log.WithFields(map[string]interface{}{
-			"worker_name": req.WorkerName,
-			"pattern":     pattern,
-			"route_id":    routeID,
-		}).Info("Worker 路由创建成功")
-	}
-
-	// 8. 添加自定义域名（如果有 Zone ID）
+	// 7. 添加自定义域名（优先使用，如果有 Zone ID）
 	var customDomainID string
+	var workerRoute string
+	
 	if zoneID != "" {
+		// 优先尝试使用自定义域名（Custom Domain）
 		domainID, err := cfService.AddWorkerCustomDomain(req.WorkerName, req.WorkerDomain, zoneID)
 		if err != nil {
 			log.WithError(err).WithFields(map[string]interface{}{
 				"worker_name":   req.WorkerName,
 				"worker_domain": req.WorkerDomain,
-			}).Warn("添加 Worker 自定义域名失败，但不影响 Worker 创建")
-			// 不阻止创建，继续执行
+			}).Warn("添加 Worker 自定义域名失败，尝试使用路由模式")
+			
+			// 如果自定义域名失败，尝试使用路由模式作为备选
+			pattern := fmt.Sprintf("%s/*", req.WorkerDomain)
+			routeID, routeErr := cfService.CreateWorkerRoute(zoneID, pattern, req.WorkerName)
+			if routeErr != nil {
+				// 两种方式都失败，删除已创建的 Worker
+				_ = cfService.DeleteWorker(req.WorkerName)
+				return nil, fmt.Errorf("Worker 域名绑定失败: 自定义域名错误(%v), 路由错误(%v)", err, routeErr)
+			}
+			workerRoute = routeID
+			log.WithFields(map[string]interface{}{
+				"worker_name": req.WorkerName,
+				"pattern":     pattern,
+				"route_id":    routeID,
+			}).Info("Worker 路由创建成功（使用备用方案）")
 		} else {
 			customDomainID = domainID
 			log.WithFields(map[string]interface{}{
