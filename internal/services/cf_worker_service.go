@@ -103,16 +103,37 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 		}).Info("Worker 路由创建成功")
 	}
 
-	// 8. 保存到数据库
+	// 8. 添加自定义域名（如果有 Zone ID）
+	var customDomainID string
+	if zoneID != "" {
+		domainID, err := cfService.AddWorkerCustomDomain(req.WorkerName, req.WorkerDomain, zoneID)
+		if err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"worker_name":   req.WorkerName,
+				"worker_domain": req.WorkerDomain,
+			}).Warn("添加 Worker 自定义域名失败，但不影响 Worker 创建")
+			// 不阻止创建，继续执行
+		} else {
+			customDomainID = domainID
+			log.WithFields(map[string]interface{}{
+				"worker_name":      req.WorkerName,
+				"worker_domain":    req.WorkerDomain,
+				"custom_domain_id": domainID,
+			}).Info("Worker 自定义域名添加成功")
+		}
+	}
+
+	// 9. 保存到数据库
 	worker := &models.CFWorker{
-		CFAccountID:  req.CFAccountID,
-		WorkerName:   req.WorkerName,
-		WorkerDomain: req.WorkerDomain,
-		TargetDomain: req.TargetDomain,
-		ZoneID:       zoneID,
-		WorkerRoute:  workerRoute,
-		Status:       "active",
-		Description:  req.Description,
+		CFAccountID:    req.CFAccountID,
+		WorkerName:     req.WorkerName,
+		WorkerDomain:   req.WorkerDomain,
+		TargetDomain:   req.TargetDomain,
+		ZoneID:         zoneID,
+		WorkerRoute:    workerRoute,
+		CustomDomainID: customDomainID,
+		Status:         "active",
+		Description:    req.Description,
 	}
 
 	if err := s.db.Create(worker).Error; err != nil {
@@ -251,7 +272,17 @@ func (s *CFWorkerService) DeleteWorker(id uint) error {
 		}
 	}
 
-	// 6. 删除 Worker 脚本
+	// 6. 删除自定义域名（如果存在）
+	if worker.CustomDomainID != "" {
+		if err := cfService.DeleteWorkerCustomDomain(worker.CustomDomainID); err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"worker_id":        worker.ID,
+				"custom_domain_id": worker.CustomDomainID,
+			}).Warn("删除 Worker 自定义域名失败，继续删除 Worker 脚本")
+		}
+	}
+
+	// 7. 删除 Worker 脚本
 	if err := cfService.DeleteWorker(worker.WorkerName); err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
 			"worker_id":   worker.ID,
@@ -260,7 +291,7 @@ func (s *CFWorkerService) DeleteWorker(id uint) error {
 		// 继续删除数据库记录
 	}
 
-	// 7. 从数据库删除
+	// 8. 从数据库删除
 	if err := s.db.Delete(worker).Error; err != nil {
 		return fmt.Errorf("删除 Worker 数据库记录失败: %w", err)
 	}
