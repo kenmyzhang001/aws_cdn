@@ -5,8 +5,10 @@ import (
 	"aws_cdn/internal/logger"
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/cloudflare"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -23,6 +25,61 @@ func NewR2CustomDomainService(db *gorm.DB, cfAccountService *CFAccountService, c
 		cfAccountService: cfAccountService,
 		cacheRuleService: cacheRuleService,
 	}
+}
+
+// ConfigLog 配置日志条目
+type ConfigLog struct {
+	Timestamp string `json:"timestamp"`
+	Level     string `json:"level"` // info, warning, error
+	Action    string `json:"action"`
+	Message   string `json:"message"`
+	Details   string `json:"details,omitempty"`
+}
+
+// configLogger 配置日志收集器
+type configLogger struct {
+	logs []ConfigLog
+}
+
+func newConfigLogger() *configLogger {
+	return &configLogger{
+		logs: make([]ConfigLog, 0),
+	}
+}
+
+func (cl *configLogger) info(action, message, details string) {
+	cl.logs = append(cl.logs, ConfigLog{
+		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+		Level:     "info",
+		Action:    action,
+		Message:   message,
+		Details:   details,
+	})
+}
+
+func (cl *configLogger) warning(action, message, details string) {
+	cl.logs = append(cl.logs, ConfigLog{
+		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+		Level:     "warning",
+		Action:    action,
+		Message:   message,
+		Details:   details,
+	})
+}
+
+func (cl *configLogger) error(action, message, details string) {
+	cl.logs = append(cl.logs, ConfigLog{
+		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+		Level:     "error",
+		Action:    action,
+		Message:   message,
+		Details:   details,
+	})
+}
+
+func (cl *configLogger) toJSON() string {
+	data, _ := json.Marshal(cl.logs)
+	return string(data)
 }
 
 // createCloudflareService 根据 CF 账号信息创建 CloudflareService
@@ -116,6 +173,7 @@ func (s *R2CustomDomainService) CreatePendingDomain(r2BucketID uint, domain, not
 // ConfigureCustomDomainAsync 异步配置自定义域名（执行实际的 Cloudflare API 调用）
 func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error {
 	log := logger.GetLogger()
+	configLog := newConfigLogger()
 
 	// 获取域名记录
 	var customDomain models.R2CustomDomain
@@ -123,12 +181,18 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 		return fmt.Errorf("域名记录不存在: %w", err)
 	}
 
+	configLog.info("开始配置", fmt.Sprintf("开始配置域名 %s", customDomain.Domain), "")
+
 	// 更新状态为 processing
 	customDomain.Status = "processing"
 	if err := s.db.Save(&customDomain).Error; err != nil {
 		log.WithError(err).Error("更新域名状态为 processing 失败")
+		configLog.error("状态更新", "更新域名状态为 processing 失败", err.Error())
+		s.saveConfigLogs(domainID, configLog)
 		return fmt.Errorf("更新域名状态为 processing 失败: %w", err)
 	}
+
+	configLog.info("状态更新", "域名状态已更新为 processing", "")
 
 	log.WithFields(map[string]interface{}{
 		"domain_id": customDomain.ID,
@@ -138,21 +202,27 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 	// 获取 CF 账号信息
 	cfAccount, err := s.cfAccountService.GetCFAccount(customDomain.R2Bucket.CFAccountID)
 	if err != nil {
+		configLog.error("获取账号", "获取 Cloudflare 账号信息失败", err.Error())
+		s.saveConfigLogs(domainID, configLog)
 		if updateErr := s.updateDomainStatus(domainID, "failed", fmt.Sprintf("获取CF账号失败: %v", err)); updateErr != nil {
 			log.WithError(updateErr).Error("更新域名状态失败")
 		}
 		return err
 	}
+	configLog.info("获取账号", "成功获取 Cloudflare 账号信息", fmt.Sprintf("Account ID: %s", cfAccount.AccountID))
 
 	// 获取 R2 API Token
 	r2APIToken := s.cfAccountService.GetR2APIToken(cfAccount)
 	if r2APIToken == "" {
 		err := fmt.Errorf("Cloudflare账号未配置 R2 API Token 或 API Token")
+		configLog.error("验证Token", "API Token 未配置", err.Error())
+		s.saveConfigLogs(domainID, configLog)
 		if updateErr := s.updateDomainStatus(domainID, "failed", err.Error()); updateErr != nil {
 			log.WithError(updateErr).Error("更新域名状态失败")
 		}
 		return err
 	}
+	configLog.info("验证Token", "API Token 验证成功", "")
 
 	// 创建 R2 API 服务
 	accountID := cfAccount.AccountID
@@ -160,15 +230,19 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 	// 根据 CF 账号信息创建 CloudflareService
 	cloudflareSvc, err := s.createCloudflareService(cfAccount)
 	if err != nil {
+		configLog.error("创建服务", "创建 Cloudflare Service 失败", err.Error())
+		s.saveConfigLogs(domainID, configLog)
 		if updateErr := s.updateDomainStatus(domainID, "failed", fmt.Sprintf("创建 CloudflareService 失败: %v", err)); updateErr != nil {
 			log.WithError(updateErr).Error("更新域名状态失败")
 		}
 		return fmt.Errorf("创建 CloudflareService 失败: %w", err)
 	}
+	configLog.info("创建服务", "Cloudflare Service 创建成功", "")
 
 	// 获取 Zone ID
 	rootDomain := s.ExtractRootDomain(customDomain.Domain)
 	if rootDomain != customDomain.Domain {
+		configLog.info("域名解析", fmt.Sprintf("检测到子域名，使用根域名获取 Zone ID: %s", rootDomain), "")
 		log.WithFields(map[string]interface{}{
 			"domain":      customDomain.Domain,
 			"root_domain": rootDomain,
@@ -178,11 +252,13 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 	zoneID, err := cloudflareSvc.GetZoneID(rootDomain)
 	if err != nil {
 		zoneID = ""
+		configLog.warning("获取Zone ID", "无法获取 Zone ID，将尝试自动查找", err.Error())
 		log.WithError(err).WithFields(map[string]interface{}{
 			"domain":      customDomain.Domain,
 			"root_domain": rootDomain,
 		}).Warn("无法获取 Zone ID，将尝试自动查找")
 	} else {
+		configLog.info("获取Zone ID", fmt.Sprintf("成功获取 Zone ID: %s", zoneID), "")
 		log.WithFields(map[string]interface{}{
 			"domain":      customDomain.Domain,
 			"root_domain": rootDomain,
@@ -193,32 +269,44 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 	// 添加自定义域名
 	domainIDStr, err := cloudflareSvc.AddCustomDomain(accountID, customDomain.R2Bucket.BucketName, customDomain.Domain, zoneID, true)
 	if err != nil {
+		configLog.error("添加域名", "添加自定义域名到 R2 失败", err.Error())
+		s.saveConfigLogs(domainID, configLog)
 		if updateErr := s.updateDomainStatus(domainID, "failed", fmt.Sprintf("添加自定义域名失败: %v", err)); updateErr != nil {
 			log.WithError(updateErr).Error("更新域名状态失败")
 		}
 		return fmt.Errorf("添加自定义域名失败: %w", err)
 	}
+	configLog.info("添加域名", fmt.Sprintf("自定义域名已成功添加到 R2 (ID: %s)", domainIDStr), "")
 
 	// 更新 ZoneID
 	if zoneID != "" {
 		customDomain.ZoneID = zoneID
 		if err := s.db.Save(&customDomain).Error; err != nil {
 			log.WithError(err).Error("更新 ZoneID 失败")
+			configLog.error("更新ZoneID", "保存 Zone ID 到数据库失败", err.Error())
+			s.saveConfigLogs(domainID, configLog)
 			if updateErr := s.updateDomainStatus(domainID, "failed", fmt.Sprintf("更新 ZoneID 失败: %v", err)); updateErr != nil {
 				log.WithError(updateErr).Error("更新域名状态失败")
 			}
 			return fmt.Errorf("更新 ZoneID 失败: %w", err)
 		}
+		configLog.info("更新ZoneID", "Zone ID 已保存到数据库", "")
 	}
 
 	// 自动创建各种规则和优化配置
-	s.configureCloudflareOptimizations(cloudflareSvc, zoneID, customDomain.Domain, customDomain.DefaultFilePath)
+	s.configureCloudflareOptimizations(cloudflareSvc, zoneID, customDomain.Domain, customDomain.DefaultFilePath, configLog)
+
+	// 保存配置日志
+	s.saveConfigLogs(domainID, configLog)
 
 	// 更新状态为 active
 	if err := s.updateDomainStatus(domainID, "active", ""); err != nil {
 		log.WithError(err).Error("更新域名状态为 active 失败")
 		return fmt.Errorf("更新域名状态为 active 失败: %w", err)
 	}
+
+	configLog.info("配置完成", "域名配置已全部完成", "")
+	s.saveConfigLogs(domainID, configLog)
 
 	log.WithFields(map[string]interface{}{
 		"domain_id":            customDomain.ID,
@@ -227,6 +315,16 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 	}).Info("自定义域名配置完成")
 
 	return nil
+}
+
+// saveConfigLogs 保存配置日志到数据库
+func (s *R2CustomDomainService) saveConfigLogs(domainID uint, configLog *configLogger) {
+	log := logger.GetLogger()
+	logsJSON := configLog.toJSON()
+
+	if err := s.db.Model(&models.R2CustomDomain{}).Where("id = ?", domainID).Update("config_logs", logsJSON).Error; err != nil {
+		log.WithError(err).WithField("domain_id", domainID).Error("保存配置日志失败")
+	}
 }
 
 // updateDomainStatus 更新域名状态
@@ -266,22 +364,27 @@ func (s *R2CustomDomainService) updateDomainStatus(domainID uint, status string,
 }
 
 // configureCloudflareOptimizations 配置 Cloudflare 优化规则
-func (s *R2CustomDomainService) configureCloudflareOptimizations(cloudflareSvc *cloudflare.CloudflareService, zoneID, domain, defaultFilePath string) {
+func (s *R2CustomDomainService) configureCloudflareOptimizations(cloudflareSvc *cloudflare.CloudflareService, zoneID, domain, defaultFilePath string, configLog *configLogger) {
 	log := logger.GetLogger()
 
 	if zoneID == "" {
+		configLog.warning("优化配置", "Zone ID 为空，跳过配置优化规则", "")
 		log.WithField("domain", domain).Warn("Zone ID 为空，跳过配置优化规则")
 		return
 	}
 
+	configLog.info("优化配置", "开始配置 Cloudflare 优化规则", "")
+
 	// 自动创建 CORS Transform Rule
 	corsRuleID, corsErr := cloudflareSvc.CreateCORSTransformRule(zoneID, domain, "*")
 	if corsErr != nil {
+		configLog.warning("CORS规则", "创建 CORS Transform Rule 失败", corsErr.Error())
 		log.WithError(corsErr).WithFields(map[string]interface{}{
 			"domain":  domain,
 			"zone_id": zoneID,
 		}).Warn("自动创建 CORS Transform Rule 失败")
 	} else if corsRuleID != "" {
+		configLog.info("CORS规则", fmt.Sprintf("CORS Transform Rule 已创建 (ID: %s)", corsRuleID), "")
 		log.WithFields(map[string]interface{}{
 			"domain":  domain,
 			"zone_id": zoneID,
@@ -292,11 +395,13 @@ func (s *R2CustomDomainService) configureCloudflareOptimizations(cloudflareSvc *
 	// 自动创建 WAF "免检金牌" VIP 下载规则
 	vipRuleID, vipErr := cloudflareSvc.CreateWAFVIPDownloadRule(zoneID, domain)
 	if vipErr != nil {
+		configLog.warning("WAF VIP规则", "创建 WAF VIP 下载规则失败", vipErr.Error())
 		log.WithError(vipErr).WithFields(map[string]interface{}{
 			"domain":  domain,
 			"zone_id": zoneID,
 		}).Warn("自动创建 WAF VIP 下载规则失败")
 	} else if vipRuleID != "" {
+		configLog.info("WAF VIP规则", fmt.Sprintf("WAF VIP 下载规则已创建 (ID: %s)", vipRuleID), "")
 		log.WithFields(map[string]interface{}{
 			"domain":  domain,
 			"zone_id": zoneID,
@@ -307,11 +412,13 @@ func (s *R2CustomDomainService) configureCloudflareOptimizations(cloudflareSvc *
 	// 自动创建 WAF 安全规则
 	wafRuleID, wafErr := cloudflareSvc.CreateWAFSecurityRule(zoneID, domain, []string{"apk"})
 	if wafErr != nil {
+		configLog.warning("WAF安全规则", "创建 WAF 安全规则失败", wafErr.Error())
 		log.WithError(wafErr).WithFields(map[string]interface{}{
 			"domain":  domain,
 			"zone_id": zoneID,
 		}).Warn("自动创建 WAF 安全规则失败")
 	} else if wafRuleID != "" {
+		configLog.info("WAF安全规则", fmt.Sprintf("WAF 安全规则已创建 (ID: %s)", wafRuleID), "")
 		log.WithFields(map[string]interface{}{
 			"domain":  domain,
 			"zone_id": zoneID,
@@ -322,11 +429,13 @@ func (s *R2CustomDomainService) configureCloudflareOptimizations(cloudflareSvc *
 	// 自动创建 Page Rule
 	pageRuleID, pageErr := cloudflareSvc.CreatePageRule(zoneID, domain, true)
 	if pageErr != nil {
+		configLog.warning("Page Rule", "创建 Page Rule (缓存优化) 失败", pageErr.Error())
 		log.WithError(pageErr).WithFields(map[string]interface{}{
 			"domain":  domain,
 			"zone_id": zoneID,
 		}).Warn("自动创建 Page Rule 失败")
 	} else if pageRuleID != "" {
+		configLog.info("Page Rule", fmt.Sprintf("Page Rule 已创建 (ID: %s, Edge TTL: 30天, Browser TTL: 1年)", pageRuleID), "")
 		log.WithFields(map[string]interface{}{
 			"domain":     domain,
 			"zone_id":    zoneID,
@@ -337,26 +446,72 @@ func (s *R2CustomDomainService) configureCloudflareOptimizations(cloudflareSvc *
 	}
 
 	// 启用各种优化功能
-	_ = cloudflareSvc.EnableSmartTieredCache(zoneID)
-	_ = cloudflareSvc.EnableHTTP3(zoneID)
-	_ = cloudflareSvc.Enable0RTT(zoneID)
-	_ = cloudflareSvc.EnableIPv6(zoneID)
-	_ = cloudflareSvc.EnableMinTLS13(zoneID)
-	_ = cloudflareSvc.EnableBrotli(zoneID)
-	_ = cloudflareSvc.EnableAlwaysUseHTTPS(zoneID)
-	_ = cloudflareSvc.DisableRocketLoader(zoneID)
-	_ = cloudflareSvc.DisableAutoMinify(zoneID)
+	if err := cloudflareSvc.EnableSmartTieredCache(zoneID); err == nil {
+		configLog.info("智能分层缓存", "智能分层缓存已启用", "")
+	} else {
+		configLog.warning("智能分层缓存", "启用智能分层缓存失败", err.Error())
+	}
+
+	if err := cloudflareSvc.EnableHTTP3(zoneID); err == nil {
+		configLog.info("HTTP/3", "HTTP/3 (QUIC) 已启用", "")
+	} else {
+		configLog.warning("HTTP/3", "启用 HTTP/3 失败", err.Error())
+	}
+
+	if err := cloudflareSvc.Enable0RTT(zoneID); err == nil {
+		configLog.info("0-RTT", "0-RTT 连接恢复已启用", "")
+	} else {
+		configLog.warning("0-RTT", "启用 0-RTT 失败", err.Error())
+	}
+
+	if err := cloudflareSvc.EnableIPv6(zoneID); err == nil {
+		configLog.info("IPv6", "IPv6 已启用", "")
+	} else {
+		configLog.warning("IPv6", "启用 IPv6 失败", err.Error())
+	}
+
+	if err := cloudflareSvc.EnableMinTLS13(zoneID); err == nil {
+		configLog.info("TLS 1.3", "TLS 1.3 最低版本已设置", "")
+	} else {
+		configLog.warning("TLS 1.3", "设置 TLS 1.3 失败", err.Error())
+	}
+
+	if err := cloudflareSvc.EnableBrotli(zoneID); err == nil {
+		configLog.info("Brotli压缩", "Brotli 压缩已启用", "")
+	} else {
+		configLog.warning("Brotli压缩", "启用 Brotli 失败", err.Error())
+	}
+
+	if err := cloudflareSvc.EnableAlwaysUseHTTPS(zoneID); err == nil {
+		configLog.info("Always HTTPS", "Always Use HTTPS 已启用", "")
+	} else {
+		configLog.warning("Always HTTPS", "启用 Always HTTPS 失败", err.Error())
+	}
+
+	if err := cloudflareSvc.DisableRocketLoader(zoneID); err == nil {
+		configLog.info("Rocket Loader", "Rocket Loader 已禁用", "")
+	} else {
+		configLog.warning("Rocket Loader", "禁用 Rocket Loader 失败", err.Error())
+	}
+
+	if err := cloudflareSvc.DisableAutoMinify(zoneID); err == nil {
+		configLog.info("Auto Minify", "Auto Minify 已禁用", "")
+	} else {
+		configLog.warning("Auto Minify", "禁用 Auto Minify 失败", err.Error())
+	}
 
 	// 如果设置了默认文件路径，创建重定向规则
 	if defaultFilePath != "" {
 		redirectRuleID, redirectErr := cloudflareSvc.CreateDefaultFileRedirect(zoneID, domain, defaultFilePath)
 		if redirectErr != nil {
+			configLog.warning("默认文件重定向", fmt.Sprintf("创建默认文件重定向规则失败 (%s)", defaultFilePath), redirectErr.Error())
 			log.WithError(redirectErr).WithFields(map[string]interface{}{
 				"domain":            domain,
 				"zone_id":           zoneID,
 				"default_file_path": defaultFilePath,
 			}).Warn("创建默认文件重定向规则失败")
 		} else if redirectRuleID != "" {
+			configLog.info("默认文件重定向", fmt.Sprintf("默认文件重定向规则已创建 (ID: %s, 文件: %s)", redirectRuleID, defaultFilePath), "")
 			log.WithFields(map[string]interface{}{
 				"domain":            domain,
 				"zone_id":           zoneID,
@@ -366,6 +521,7 @@ func (s *R2CustomDomainService) configureCloudflareOptimizations(cloudflareSvc *
 		}
 	}
 
+	configLog.info("优化配置", "Cloudflare 优化配置完成", "")
 	log.WithField("domain", domain).Info("Cloudflare 优化配置完成")
 }
 

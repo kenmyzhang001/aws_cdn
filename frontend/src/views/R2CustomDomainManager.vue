@@ -42,10 +42,13 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300">
+        <el-table-column label="操作" width="380">
           <template #default="{ row }">
             <el-button size="small" @click="viewCacheRules(row)">
               缓存规则
+            </el-button>
+            <el-button size="small" type="info" @click="viewConfigLogs(row)">
+              查看日志
             </el-button>
             <el-button size="small" type="danger" @click="handleDelete(row)">
               删除
@@ -110,6 +113,35 @@
     <el-dialog v-model="showCacheRuleDialog" title="缓存规则管理" width="1000px" @close="closeCacheRuleDialog">
       <R2CacheRuleManager v-if="selectedDomain" :domain="selectedDomain" />
     </el-dialog>
+
+    <!-- 配置日志查看对话框 -->
+    <el-dialog v-model="showConfigLogsDialog" title="域名配置日志" width="900px">
+      <div v-if="configLogs && configLogs.length > 0" style="max-height: 600px; overflow-y: auto;">
+        <el-timeline>
+          <el-timeline-item
+            v-for="(log, index) in configLogs"
+            :key="index"
+            :timestamp="log.timestamp"
+            :type="getLogType(log.level)"
+            placement="top"
+          >
+            <el-card>
+              <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                <el-tag :type="getLogType(log.level)" size="small" style="margin-right: 10px;">
+                  {{ log.level.toUpperCase() }}
+                </el-tag>
+                <strong>{{ log.action }}</strong>
+              </div>
+              <div style="margin-bottom: 5px;">{{ log.message }}</div>
+              <div v-if="log.details" style="color: #909399; font-size: 12px; white-space: pre-wrap; background: #f5f5f5; padding: 8px; border-radius: 4px; margin-top: 8px;">
+                {{ log.details }}
+              </div>
+            </el-card>
+          </el-timeline-item>
+        </el-timeline>
+      </div>
+      <el-empty v-else description="暂无配置日志" />
+    </el-dialog>
   </div>
 </template>
 
@@ -145,6 +177,9 @@ const fileList = ref([])
 
 const showCacheRuleDialog = ref(false)
 const selectedDomain = ref(null)
+
+const showConfigLogsDialog = ref(false)
+const configLogs = ref([])
 
 const formRules = {
   domain: [
@@ -275,6 +310,35 @@ const viewCacheRules = (row) => {
 
 const closeCacheRuleDialog = () => {
   selectedDomain.value = null
+}
+
+const viewConfigLogs = async (row) => {
+  try {
+    const domain = await r2Api.getR2CustomDomain(row.id)
+    if (domain.config_logs) {
+      try {
+        configLogs.value = JSON.parse(domain.config_logs)
+      } catch (e) {
+        console.error('解析配置日志失败:', e)
+        configLogs.value = []
+        ElMessage.warning('配置日志格式错误')
+      }
+    } else {
+      configLogs.value = []
+    }
+    showConfigLogsDialog.value = true
+  } catch (error) {
+    ElMessage.error('获取配置日志失败')
+  }
+}
+
+const getLogType = (level) => {
+  const typeMap = {
+    info: 'success',
+    warning: 'warning',
+    error: 'danger',
+  }
+  return typeMap[level] || 'info'
 }
 
 const handleDelete = (row) => {
