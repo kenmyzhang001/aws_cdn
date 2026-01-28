@@ -194,12 +194,12 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 		cfAccounts := protected.Group("/cf-accounts")
 		{
 			cfAccounts.GET("", cfAccountHandler.ListCFAccounts)
-			cfAccounts.GET("/:id", cfAccountHandler.GetCFAccount)
 			cfAccounts.POST("", cfAccountHandler.CreateCFAccount)
+			cfAccounts.GET("/:id", cfAccountHandler.GetCFAccount)
 			cfAccounts.PUT("/:id", cfAccountHandler.UpdateCFAccount)
 			cfAccounts.DELETE("/:id", cfAccountHandler.DeleteCFAccount)
-			cfAccounts.GET("/:cf_account_id/zones", cfAccountHandler.GetCFAccountZones)
-			cfAccounts.POST("/:cf_account_id/enable-r2", r2Handler.EnableR2)
+			cfAccounts.GET("/:id/zones", cfAccountHandler.GetCFAccountZones)
+			cfAccounts.POST("/:id/enable-r2", r2Handler.EnableR2)
 		}
 
 		// R2 存储桶管理

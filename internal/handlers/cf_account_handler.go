@@ -168,9 +168,9 @@ func (h *CFAccountHandler) DeleteCFAccount(c *gin.Context) {
 // GetCFAccountZones 获取 CF 账号下的所有域名（Zones）
 func (h *CFAccountHandler) GetCFAccountZones(c *gin.Context) {
 	log := logger.GetLogger()
-	id, err := strconv.ParseUint(c.Param("cf_account_id"), 10, 32)
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		log.WithError(err).WithField("id_param", c.Param("cf_account_id")).Error("获取域名列表失败：无效的账号ID")
+		log.WithError(err).WithField("id_param", c.Param("id")).Error("获取域名列表失败：无效的账号ID")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的账号 ID"})
 		return
 	}
