@@ -49,44 +49,71 @@
         row-key="file_path"
         :expand-row-keys="expandedRows"
         @expand-change="handleExpandChange"
+        style="width: 100%"
+        class="apk-table"
       >
         <el-table-column type="expand">
           <template #default="{ row }">
-            <div style="padding: 20px">
+            <div class="expand-content">
               <div v-loading="row.loadingUrls" style="min-height: 100px">
                 <div v-if="row.urls && row.urls.length > 0">
-                  <h4 style="margin-bottom: 15px">自定义域名访问链接：</h4>
-                  <el-space direction="vertical" :size="10" style="width: 100%">
+                  <h4 style="margin-bottom: 15px; color: #303133; font-size: 14px">
+                    自定义域名访问链接 (共 {{ row.urls.length }} 个)：
+                  </h4>
+                  <div class="url-list">
                     <div
                       v-for="(urlItem, index) in row.urls"
                       :key="index"
-                      style="
-                        display: flex;
-                        align-items: center;
-                        gap: 10px;
-                        padding: 10px;
-                        background: #f5f7fa;
-                        border-radius: 4px;
-                      "
+                      class="url-item"
                     >
-                      <div style="flex: 0 0 200px">
-                        <el-tag type="info">{{ urlItem.domain }}</el-tag>
+                      <div class="domain-row">
+                        <span class="domain-label">域名：</span>
+                        <el-tag type="primary" size="default" effect="plain">
+                          {{ urlItem.domain }}
+                        </el-tag>
+                        <el-tag
+                          v-if="urlItem.isDefault"
+                          type="success"
+                          size="default"
+                          effect="dark"
+                        >
+                          <el-icon style="margin-right: 4px"><Star /></el-icon>
+                          默认APK
+                        </el-tag>
+                        <el-tag
+                          v-else-if="urlItem.defaultFilePath"
+                          type="info"
+                          size="small"
+                          effect="plain"
+                        >
+                          默认：{{ urlItem.defaultFilePath }}
+                        </el-tag>
                       </div>
-                      <el-input :value="urlItem.url" readonly style="flex: 1">
-                        <template #append>
-                          <el-button
-                            @click="copyToClipboard(urlItem.url, row, index)"
-                            :type="urlItem.copied ? 'success' : 'primary'"
+                      <div class="url-row">
+                        <span class="url-label">链接：</span>
+                        <div class="url-input-wrapper">
+                          <el-input 
+                            :value="urlItem.url" 
+                            readonly 
+                            class="url-input"
+                            :title="urlItem.url"
                           >
-                            <el-icon>
-                              <component :is="urlItem.copied ? Check : DocumentCopy" />
-                            </el-icon>
-                            {{ urlItem.copied ? '已复制' : '复制' }}
-                          </el-button>
-                        </template>
-                      </el-input>
+                            <template #append>
+                              <el-button
+                                @click="copyToClipboard(urlItem.url, row, index)"
+                                :type="urlItem.copied ? 'success' : 'primary'"
+                              >
+                                <el-icon>
+                                  <component :is="urlItem.copied ? Check : DocumentCopy" />
+                                </el-icon>
+                                {{ urlItem.copied ? '已复制' : '复制' }}
+                              </el-button>
+                            </template>
+                          </el-input>
+                        </div>
+                      </div>
                     </div>
-                  </el-space>
+                  </div>
                 </div>
                 <div v-else-if="!row.loadingUrls">
                   <el-empty description="该存储桶未配置自定义域名" />
@@ -148,7 +175,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { r2Api } from '@/api/r2'
 import { ElMessage } from 'element-plus'
-import { Search, Refresh, Document, DocumentCopy, Check } from '@element-plus/icons-vue'
+import { Search, Refresh, Document, DocumentCopy, Check, Star } from '@element-plus/icons-vue'
 
 const loading = ref(false)
 const bucketList = ref([])
@@ -219,6 +246,8 @@ const loadFileUrls = async (row) => {
       return {
         domain: item.domain,
         url: `https://${item.domain}/${encodedPath}`,
+        isDefault: item.is_default || false,
+        defaultFilePath: item.default_file_path || '',
         copied: false,
       }
     })
@@ -363,5 +392,126 @@ code {
   padding: 2px 6px;
   border-radius: 3px;
   font-family: 'Courier New', monospace;
+}
+
+/* 表格样式 */
+.apk-table {
+  width: 100% !important;
+}
+
+.apk-table :deep(.el-table__body) {
+  width: 100%;
+}
+
+.apk-table :deep(.el-table__expanded-cell) {
+  padding: 0 !important;
+}
+
+/* 展开内容区域 */
+.expand-content {
+  padding: 20px 40px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* URL 列表容器 */
+.url-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  width: 100%;
+}
+
+/* URL 项容器 */
+.url-item {
+  padding: 15px;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  transition: all 0.3s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.url-item:hover {
+  background: #ecf5ff;
+  border-color: #d9ecff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+/* 域名行 */
+.domain-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.domain-label {
+  font-size: 13px;
+  color: #606266;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+/* URL 行 */
+.url-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+}
+
+.url-label {
+  font-size: 13px;
+  color: #606266;
+  font-weight: 500;
+  flex-shrink: 0;
+  padding-top: 8px;
+}
+
+/* URL 输入框包装器 */
+.url-input-wrapper {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+
+.url-input {
+  width: 100%;
+  font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
+}
+
+/* 让输入框中的文本更容易阅读 */
+.url-input :deep(.el-input__wrapper) {
+  width: 100%;
+}
+
+.url-input :deep(.el-input__inner) {
+  font-size: 12px;
+  color: #409eff;
+  font-weight: 500;
+  width: 100%;
+  min-width: 600px;
+}
+
+/* 复制按钮样式优化 */
+.url-input :deep(.el-input-group__append) {
+  padding: 0;
+  background-color: #fff;
+}
+
+.url-input :deep(.el-input-group__append .el-button) {
+  margin: 0;
+  border-left: 1px solid #dcdfe6;
+  height: 100%;
+  white-space: nowrap;
+}
+
+/* 默认 APK 标签样式 */
+.domain-row .el-tag {
+  display: inline-flex;
+  align-items: center;
 }
 </style>

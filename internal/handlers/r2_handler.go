@@ -627,9 +627,13 @@ func (h *R2Handler) GetApkFileUrls(c *gin.Context) {
 	// 为每个域名生成访问链接
 	urls := make([]map[string]interface{}, 0, len(domains))
 	for _, domain := range domains {
+		// 判断当前文件是否是该域名的默认文件
+		isDefault := domain.DefaultFilePath == filePath
 		urls = append(urls, map[string]interface{}{
-			"domain": domain.Domain,
-			"url":    "https://" + domain.Domain + "/" + filePath,
+			"domain":            domain.Domain,
+			"url":               "https://" + domain.Domain + "/" + filePath,
+			"is_default":        isDefault,
+			"default_file_path": domain.DefaultFilePath,
 		})
 	}
 
