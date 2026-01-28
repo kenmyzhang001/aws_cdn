@@ -5,7 +5,6 @@ import (
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/cloudflare"
 	"fmt"
-	"strings"
 
 	"gorm.io/gorm"
 )
@@ -58,7 +57,7 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 	var zoneID string
 	// 从 worker_domain 中提取根域名
 	rootDomain := extractRootDomain(req.WorkerDomain)
-	
+
 	// 尝试获取 Zone ID
 	zoneID, zoneErr := s.getZoneID(apiToken, rootDomain)
 	if zoneErr != nil {
@@ -135,7 +134,7 @@ func (s *CFWorkerService) GetWorkerList(page, pageSize int, cfAccountID uint) ([
 	var total int64
 
 	query := s.db.Model(&models.CFWorker{}).Preload("CFAccount")
-	
+
 	if cfAccountID > 0 {
 		query = query.Where("cf_account_id = ?", cfAccountID)
 	}
@@ -276,30 +275,4 @@ func (s *CFWorkerService) getZoneID(apiToken, domainName string) (string, error)
 	// 在实际使用时，Worker 路由可以在 Cloudflare Dashboard 手动配置
 	// 或者后续扩展实现完整的 Zone ID 查询逻辑
 	return "", nil
-}
-
-// extractRootDomain 提取根域名
-func extractRootDomain(domain string) string {
-	// 移除协议前缀
-	domain = strings.TrimPrefix(domain, "http://")
-	domain = strings.TrimPrefix(domain, "https://")
-	
-	// 移除路径
-	if idx := strings.Index(domain, "/"); idx != -1 {
-		domain = domain[:idx]
-	}
-	
-	// 移除端口
-	if idx := strings.Index(domain, ":"); idx != -1 {
-		domain = domain[:idx]
-	}
-	
-	// 分割域名
-	parts := strings.Split(domain, ".")
-	if len(parts) <= 2 {
-		return domain
-	}
-	
-	// 返回最后两部分（根域名）
-	return strings.Join(parts[len(parts)-2:], ".")
 }
