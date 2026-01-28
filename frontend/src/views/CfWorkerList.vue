@@ -48,11 +48,21 @@
           </template>
         </el-table-column>
         <el-table-column prop="worker_name" label="Worker 名称" width="180" />
-        <el-table-column label="Worker 域名" width="220">
+        <el-table-column label="Worker 域名" width="260">
           <template #default="{ row }">
-            <el-link :href="`https://${row.worker_domain}`" target="_blank" type="primary">
-              {{ row.worker_domain }}
-            </el-link>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <el-link :href="`https://${row.worker_domain}`" target="_blank" type="primary">
+                {{ row.worker_domain }}
+              </el-link>
+              <el-button
+                link
+                type="primary"
+                :icon="DocumentCopy"
+                size="small"
+                @click="copyToClipboard(row.worker_domain, 'Worker 域名')"
+                title="复制域名"
+              />
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="目标域名" width="220">
@@ -419,7 +429,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Plus, RefreshRight, Loading, Link } from '@element-plus/icons-vue';
+import { Plus, RefreshRight, Loading, Link, DocumentCopy } from '@element-plus/icons-vue';
 import {
   getWorkerList,
   createWorker,
@@ -994,6 +1004,30 @@ const handleDelete = async (row) => {
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('删除失败: ' + (error.response?.data?.error || error.message));
+    }
+  }
+};
+
+// 复制到剪贴板
+const copyToClipboard = async (text, label = '内容') => {
+  try {
+    await navigator.clipboard.writeText(text);
+    ElMessage.success(`${label}已复制到剪贴板`);
+  } catch (error) {
+    // 降级方案：使用传统方法
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      ElMessage.success(`${label}已复制到剪贴板`);
+    } catch (fallbackError) {
+      console.error('复制失败:', fallbackError);
+      ElMessage.error('复制失败，请手动复制');
     }
   }
 };
