@@ -685,13 +685,24 @@ const loadCFAccountZones = async (cfAccountId, isLoadMore = false) => {
     
     console.log('CF 账号域名列表响应:', result);
     
-    // 更新分页信息
-    workerZonesPagination.page = result.page || page;
-    workerZonesPagination.totalPages = result.total_pages || 0;
-    workerZonesPagination.totalCount = result.total_count || 0;
-    workerZonesPagination.hasMore = workerZonesPagination.page < workerZonesPagination.totalPages;
-    
-    const zoneList = result.zones || [];
+    // 兼容旧格式（数组）和新格式（带分页信息的对象）
+    let zoneList = [];
+    if (Array.isArray(result)) {
+      // 旧格式：直接返回数组
+      console.warn('检测到旧格式API响应，建议重启后端服务');
+      zoneList = result;
+      workerZonesPagination.page = 1;
+      workerZonesPagination.totalPages = 1;
+      workerZonesPagination.totalCount = result.length;
+      workerZonesPagination.hasMore = false;
+    } else {
+      // 新格式：带分页信息的对象
+      zoneList = result.zones || [];
+      workerZonesPagination.page = result.page || page;
+      workerZonesPagination.totalPages = result.total_pages || 0;
+      workerZonesPagination.totalCount = result.total_count || 0;
+      workerZonesPagination.hasMore = workerZonesPagination.page < workerZonesPagination.totalPages;
+    }
     
     // 提取域名名称
     const newDomains = zoneList.map(zone => zone.name || zone);
