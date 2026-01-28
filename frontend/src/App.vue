@@ -56,6 +56,10 @@
               <el-icon><Link /></el-icon>
               <span>下载包管理</span>
             </el-menu-item>
+            <el-menu-item index="/cf-workers">
+              <el-icon><Setting /></el-icon>
+              <span>Worker 管理</span>
+            </el-menu-item>
           </el-sub-menu>
 
           <!-- 自定义下载链接管理 -->
@@ -81,7 +85,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box } from '@element-plus/icons-vue'
+import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box, Setting } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)

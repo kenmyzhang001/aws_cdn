@@ -206,7 +206,7 @@ import {
   updateWorker,
   deleteWorker
 } from '@/api/cf_worker';
-import { getCFAccountList } from '@/api/cf_account';
+import { cfAccountApi } from '@/api/cf_account';
 
 // 搜索表单
 const searchForm = reactive({
@@ -271,7 +271,7 @@ const workerFormRules = {
 // 加载 CF 账号列表
 const loadCFAccounts = async () => {
   try {
-    const response = await getCFAccountList({ page: 1, page_size: 100 });
+    const response = await cfAccountApi.getCFAccountList();
     cfAccounts.value = response.data.data || [];
   } catch (error) {
     console.error('加载 CF 账号列表失败:', error);
