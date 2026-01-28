@@ -114,7 +114,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { r2Api } from '@/api/r2'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
@@ -168,6 +168,13 @@ const loadDomains = async () => {
   try {
     const res = await r2Api.getR2CustomDomainList(props.bucket.id)
     domainList.value = res
+    
+    // 检查是否有 pending 或 processing 状态的域名，如果有则启动轮询
+    res.forEach((domain) => {
+      if ((domain.status === 'pending' || domain.status === 'processing') && !pollingTimers.value.has(domain.id)) {
+        startPollingDomainStatus(domain.id)
+      }
+    })
   } catch (error) {
     ElMessage.error('加载域名列表失败')
   } finally {
@@ -196,10 +203,15 @@ const handleAdd = async () => {
 
     addLoading.value = true
     try {
-      await r2Api.addR2CustomDomain(props.bucket.id, addForm.value)
-      ElMessage.success('域名添加成功')
+      const newDomain = await r2Api.addR2CustomDomain(props.bucket.id, addForm.value)
+      ElMessage.success('域名正在配置中，请稍候...')
       showAddDialog.value = false
+      
+      // 立即刷新列表，显示 pending 状态的域名
       loadDomains()
+      
+      // 开始轮询查询域名状态
+      startPollingDomainStatus(newDomain.id)
     } catch (error) {
       // 错误已在拦截器中处理
     } finally {
@@ -207,6 +219,54 @@ const handleAdd = async () => {
     }
   })
 }
+
+// 轮询查询域名状态
+const pollingTimers = ref(new Map()) // 存储每个域名的轮询定时器
+
+const startPollingDomainStatus = (domainId) => {
+  // 如果已经有该域名的轮询定时器，先清除
+  if (pollingTimers.value.has(domainId)) {
+    clearInterval(pollingTimers.value.get(domainId))
+  }
+
+  // 每 3 秒查询一次
+  const timer = setInterval(async () => {
+    try {
+      const domain = await r2Api.getR2CustomDomain(domainId)
+      
+      // 如果状态变为 active 或 failed，停止轮询
+      if (domain.status === 'active') {
+        clearInterval(timer)
+        pollingTimers.value.delete(domainId)
+        ElMessage.success(`域名 ${domain.domain} 配置成功！`)
+        loadDomains()
+      } else if (domain.status === 'failed') {
+        clearInterval(timer)
+        pollingTimers.value.delete(domainId)
+        ElMessage.error(`域名 ${domain.domain} 配置失败，请查看备注了解详情`)
+        loadDomains()
+      } else {
+        // 状态仍为 pending 或 processing，更新列表
+        loadDomains()
+      }
+    } catch (error) {
+      // 如果查询失败，停止轮询
+      clearInterval(timer)
+      pollingTimers.value.delete(domainId)
+      console.error('查询域名状态失败:', error)
+    }
+  }, 3000)
+
+  pollingTimers.value.set(domainId, timer)
+}
+
+// 组件卸载时清除所有轮询定时器
+onUnmounted(() => {
+  pollingTimers.value.forEach((timer) => {
+    clearInterval(timer)
+  })
+  pollingTimers.value.clear()
+})
 
 const viewCacheRules = (row) => {
   selectedDomain.value = row
@@ -245,6 +305,7 @@ const getStatusType = (status) => {
   const statusMap = {
     active: 'success',
     pending: 'warning',
+    processing: 'info',
     failed: 'danger',
   }
   return statusMap[status] || 'info'

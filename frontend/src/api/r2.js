@@ -48,6 +48,10 @@ export const r2Api = {
     return request.post(`/r2-custom-domains/buckets/${r2BucketId}`, data)
   },
 
+  getR2CustomDomain(id) {
+    return request.get(`/r2-custom-domains/${id}`)
+  },
+
   deleteR2CustomDomain(id) {
     return request.delete(`/r2-custom-domains/${id}`)
   },

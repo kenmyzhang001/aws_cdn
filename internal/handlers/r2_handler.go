@@ -227,7 +227,7 @@ func (h *R2Handler) ListR2CustomDomains(c *gin.Context) {
 	c.JSON(http.StatusOK, domains)
 }
 
-// AddR2CustomDomain 添加自定义域名
+// AddR2CustomDomain 添加自定义域名（异步）
 func (h *R2Handler) AddR2CustomDomain(c *gin.Context) {
 	log := logger.GetLogger()
 	r2BucketID, err := strconv.ParseUint(c.Param("r2_bucket_id"), 10, 32)
@@ -249,9 +249,10 @@ func (h *R2Handler) AddR2CustomDomain(c *gin.Context) {
 		return
 	}
 
-	domain, err := h.domainService.AddCustomDomain(uint(r2BucketID), req.Domain, req.Note, req.DefaultFilePath)
+	// 先创建一个 pending 状态的域名记录
+	domain, err := h.domainService.CreatePendingDomain(uint(r2BucketID), req.Domain, req.Note, req.DefaultFilePath)
 	if err != nil {
-		log.WithError(err).Error("添加自定义域名操作失败")
+		log.WithError(err).Error("创建域名记录失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -259,11 +260,37 @@ func (h *R2Handler) AddR2CustomDomain(c *gin.Context) {
 	log.WithFields(map[string]interface{}{
 		"domain_id": domain.ID,
 		"domain":    domain.Domain,
-	}).Info("自定义域名添加成功")
+	}).Info("自定义域名记录已创建，开始异步配置")
 
-	// 注意：缓存规则已在 AddCustomDomain service 中通过 Page Rule 自动创建
-	// Page Rule 包含：Cache Everything + Edge TTL 30天 + Browser TTL 1年
-	// 无需在此处重复创建 Cache Rule
+	// 异步执行实际的配置操作
+	go func() {
+		// 执行实际的域名配置（包括 Cloudflare API 调用等）
+		err := h.domainService.ConfigureCustomDomainAsync(domain.ID)
+		if err != nil {
+			log.WithError(err).WithField("domain_id", domain.ID).Error("异步配置自定义域名失败")
+		}
+	}()
+
+	// 立即返回 pending 状态的域名记录
+	c.JSON(http.StatusOK, domain)
+}
+
+// GetR2CustomDomain 获取单个自定义域名信息（用于轮询查询状态）
+func (h *R2Handler) GetR2CustomDomain(c *gin.Context) {
+	log := logger.GetLogger()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		log.WithError(err).Error("获取自定义域名失败：无效的ID")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 ID"})
+		return
+	}
+
+	domain, err := h.domainService.GetR2CustomDomain(uint(id))
+	if err != nil {
+		log.WithError(err).Error("获取自定义域名操作失败")
+		c.JSON(http.StatusNotFound, gin.H{"error": "域名不存在"})
+		return
+	}
 
 	c.JSON(http.StatusOK, domain)
 }
