@@ -261,25 +261,9 @@ func (h *R2Handler) AddR2CustomDomain(c *gin.Context) {
 		"domain":    domain.Domain,
 	}).Info("自定义域名添加成功")
 
-	// 自动创建默认缓存规则
-	// Edge Cache TTL: 1个月 (30天) = 2592000秒
-	// Browser Cache TTL: 1年 = 31536000秒
-	// Cache Status: Eligible (启用缓存)
-	_, err = h.cacheRuleService.CreateCacheRule(
-		domain.ID,
-		"默认缓存规则",
-		"true", // 匹配所有请求
-		"Eligible",
-		"1 month",
-		"1 year",
-		"自动创建的默认缓存规则",
-	)
-	if err != nil {
-		log.WithError(err).Warn("自动创建默认缓存规则失败")
-		// 不影响域名添加成功的响应，只记录警告
-	} else {
-		log.WithField("domain_id", domain.ID).Info("默认缓存规则创建成功")
-	}
+	// 注意：缓存规则已在 AddCustomDomain service 中通过 Page Rule 自动创建
+	// Page Rule 包含：Cache Everything + Edge TTL 30天 + Browser TTL 1年
+	// 无需在此处重复创建 Cache Rule
 
 	c.JSON(http.StatusOK, domain)
 }
