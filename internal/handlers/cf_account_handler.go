@@ -213,26 +213,31 @@ func (h *CFAccountHandler) GetCFAccountZones(c *gin.Context) {
 	// 获取可选的域名搜索参数
 	name := c.Query("name")
 
+	// 获取可选的 Cloudflare 账户ID过滤参数
+	accountID := account.AccountID
+
 	// 获取域名列表（支持分页和搜索）
-	result, err := cfService.ListZones(page, perPage, name)
+	result, err := cfService.ListZones(page, perPage, name, accountID)
 	if err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
-			"account_id": id,
-			"page":       page,
-			"per_page":   perPage,
-			"name":       name,
+			"account_id":    id,
+			"cf_account_id": accountID,
+			"page":          page,
+			"per_page":      perPage,
+			"name":          name,
 		}).Error("获取域名列表失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	log.WithFields(map[string]interface{}{
-		"account_id":  id,
-		"page":        page,
-		"per_page":    perPage,
-		"name":        name,
-		"count":       len(result.Zones),
-		"total_count": result.TotalCount,
+		"account_id":    id,
+		"cf_account_id": accountID,
+		"page":          page,
+		"per_page":      perPage,
+		"name":          name,
+		"count":         len(result.Zones),
+		"total_count":   result.TotalCount,
 	}).Info("获取域名列表成功")
 
 	c.JSON(http.StatusOK, result)

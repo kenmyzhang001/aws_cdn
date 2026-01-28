@@ -427,7 +427,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue';
+import { ref, reactive, onMounted, computed, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus, RefreshRight, Loading, Link, DocumentCopy } from '@element-plus/icons-vue';
 import {
@@ -713,6 +713,31 @@ const handleCFAccountChange = async (cfAccountId) => {
   // 加载该账号下的域名列表（第一页）
   await loadCFAccountZones(cfAccountId, false);
 };
+
+// 监听 CF 账号变化，自动重新加载域名列表
+watch(() => workerForm.cf_account_id, async (newAccountId, oldAccountId) => {
+  // 当 CF 账号变化时（且不是初始化时的空值），重新加载域名列表
+  if (newAccountId !== oldAccountId && newAccountId && dialogVisible.value && !isEdit.value) {
+    console.log('检测到 CF 账号变化，自动重新加载域名列表');
+    
+    // 清空 Worker 域名和搜索状态
+    workerForm.worker_domain = '';
+    workerForm.worker_domain_prefix = '';
+    workerForm.worker_base_domain = '';
+    workerDomains.value = [];
+    filteredWorkerDomains.value = [];
+    workerDomainSearchQuery.value = '';
+    
+    // 重置分页状态
+    workerZonesPagination.page = 1;
+    workerZonesPagination.totalPages = 0;
+    workerZonesPagination.totalCount = 0;
+    workerZonesPagination.hasMore = false;
+    
+    // 加载新账号的域名列表
+    await loadCFAccountZones(newAccountId, false);
+  }
+});
 
 // 加载 CF 账号的域名列表
 // isLoadMore: 是否为加载更多（true则追加，false则替换）

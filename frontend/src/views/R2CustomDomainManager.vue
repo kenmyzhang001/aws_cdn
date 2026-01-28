@@ -59,12 +59,131 @@
     </el-card>
 
     <!-- 添加域名对话框 -->
-    <el-dialog v-model="showAddDialog" title="添加自定义域名" width="600px" @close="resetAddForm">
+    <el-dialog v-model="showAddDialog" title="添加自定义域名" width="600px" @close="resetAddForm" @open="loadCFAccountDomains">
       <el-form :model="addForm" :rules="formRules" ref="addFormRef" label-width="140px">
         <el-form-item label="域名" prop="domain">
-          <el-input v-model="addForm.domain" placeholder="例如：assets.jjj0108.com" />
-          <div style="font-size: 12px; color: #909399; margin-top: 5px">
-            请输入要绑定的子域名，域名必须在 Cloudflare 上托管
+          <div style="display: flex; align-items: flex-start; gap: 10px;">
+            <!-- 子域名前缀输入框 -->
+            <div style="flex: 0 0 200px;">
+              <el-input
+                v-model="addForm.domain_prefix"
+                placeholder="可选：如 www, api, cdn"
+                clearable
+                @input="updateDomain"
+              >
+                <template #append>.</template>
+              </el-input>
+              <div class="form-tip" style="margin-top: 4px; white-space: nowrap;">
+                子域名前缀（可选）
+              </div>
+            </div>
+            
+            <!-- 基础域名选择框 -->
+            <div style="flex: 1; min-width: 0;">
+              <el-select
+                v-model="addForm.base_domain"
+                placeholder="选择或输入基础域名（必填）"
+                style="width: 100%"
+                filterable
+                allow-create
+                clearable
+                default-first-option
+                :loading="loadingCfDomains"
+                :filter-method="filterCfDomains"
+                @change="updateDomain"
+              >
+                <template #empty>
+                  <div style="padding: 10px; text-align: center; color: #909399;">
+                    <div v-if="cfDomainSearchQuery">
+                      未找到匹配的域名
+                      <div style="margin-top: 8px;">
+                        <el-button size="small" type="primary" @click="useCustomDomain">
+                          使用 "{{ cfDomainSearchQuery }}" 作为域名
+                        </el-button>
+                      </div>
+                    </div>
+                    <div v-else>
+                      暂无可用域名，请输入完整域名
+                    </div>
+                  </div>
+                </template>
+                
+                <el-option
+                  v-for="domain in filteredCfDomains"
+                  :key="domain"
+                  :label="domain"
+                  :value="domain"
+                >
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>{{ domain }}</span>
+                    <el-tag size="small" type="success">已托管</el-tag>
+                  </div>
+                </el-option>
+                
+                <!-- 加载更多选项 -->
+                <el-option
+                  v-if="cfDomainsPagination.hasMore && !cfDomainSearchQuery"
+                  :value="'__load_more__'"
+                  disabled
+                  style="background-color: #f5f7fa; cursor: pointer !important;"
+                >
+                  <div style="text-align: center; padding: 5px 0;">
+                    <el-button 
+                      type="primary" 
+                      size="small"
+                      @click.stop="loadMoreCfDomains"
+                      :loading="loadingCfDomains"
+                      style="width: 90%;"
+                    >
+                      <span v-if="!loadingCfDomains">
+                        加载更多域名 ({{ cfDomains.length }}/{{ cfDomainsPagination.totalCount }})
+                      </span>
+                      <span v-else>加载中...</span>
+                    </el-button>
+                  </div>
+                </el-option>
+              </el-select>
+              <div class="form-tip" style="margin-top: 4px;">
+                基础域名（必填）
+              </div>
+            </div>
+          </div>
+          
+          <!-- 完整域名预览 -->
+          <div v-if="addForm.domain" style="margin-top: 10px; padding: 10px 14px; background: #f0f9ff; border: 1px solid #91caff; border-radius: 6px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <el-icon color="#1890ff" :size="16"><Link /></el-icon>
+              <span style="color: #1890ff; font-weight: 500;">完整域名:</span>
+              <span style="color: #262626; font-family: 'Monaco', 'Menlo', monospace; font-size: 14px; font-weight: 500;">{{ addForm.domain }}</span>
+            </div>
+          </div>
+          
+          <div class="form-tip" v-if="loadingCfDomains" style="color: #409EFF;">
+            <el-icon class="is-loading"><Loading /></el-icon>
+            正在加载域名列表...
+          </div>
+          <div class="form-tip" v-else-if="cfDomains.length > 0" style="color: #67C23A;">
+            已加载 {{ cfDomains.length }}/{{ cfDomainsPagination.totalCount }} 个托管域名
+            <span v-if="filteredCfDomains.length < cfDomains.length">
+              （搜索结果: {{ filteredCfDomains.length }} 个）
+            </span>
+            <el-button 
+              v-if="cfDomainsPagination.hasMore" 
+              type="primary" 
+              link 
+              size="small"
+              @click="loadMoreCfDomains"
+              :loading="loadingCfDomains"
+              style="margin-left: 8px;"
+            >
+              加载更多 (第 {{ cfDomainsPagination.page + 1 }}/{{ cfDomainsPagination.totalPages }} 页)
+            </el-button>
+          </div>
+          <div class="form-tip" v-else style="color: #E6A23C;">
+            该账号暂无托管域名，请手动输入完整域名
+          </div>
+          <div class="form-tip">
+            域名必须在 Cloudflare 上托管
           </div>
         </el-form-item>
         <el-form-item label="默认文件路径">
@@ -148,8 +267,9 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { r2Api } from '@/api/r2'
+import { cfAccountApi } from '@/api/cf_account'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Loading, Link } from '@element-plus/icons-vue'
 import R2CacheRuleManager from './R2CacheRuleManager.vue'
 
 const props = defineProps({
@@ -166,6 +286,8 @@ const showAddDialog = ref(false)
 const addLoading = ref(false)
 const addForm = ref({
   domain: '',
+  domain_prefix: '', // 子域名前缀
+  base_domain: '', // 基础域名
   default_file_path: '',
   note: '',
 })
@@ -181,6 +303,21 @@ const selectedDomain = ref(null)
 const showConfigLogsDialog = ref(false)
 const configLogs = ref([])
 
+// CF 托管域名列表相关
+const cfDomains = ref([])
+const loadingCfDomains = ref(false)
+const filteredCfDomains = ref([])
+const cfDomainSearchQuery = ref('')
+
+// CF 域名分页状态
+const cfDomainsPagination = ref({
+  page: 1,
+  perPage: 50,
+  totalPages: 0,
+  totalCount: 0,
+  hasMore: false
+})
+
 const formRules = {
   domain: [
     { required: true, message: '请输入域名', trigger: 'blur' },
@@ -195,6 +332,27 @@ onMounted(() => {
 watch(() => props.bucket.id, () => {
   if (props.bucket.id) {
     loadDomains()
+  }
+})
+
+// 监听 CF 账号变化，重新加载 CF 域名列表
+watch(() => props.bucket.cf_account_id, (newAccountId, oldAccountId) => {
+  // 当 CF 账号变化时，如果对话框打开，则重新加载域名列表
+  if (newAccountId !== oldAccountId && showAddDialog.value) {
+    console.log('CF 账号已变化，重新加载域名列表')
+    // 清空现有域名列表
+    cfDomains.value = []
+    filteredCfDomains.value = []
+    cfDomainSearchQuery.value = ''
+    cfDomainsPagination.value = {
+      page: 1,
+      perPage: 50,
+      totalPages: 0,
+      totalCount: 0,
+      hasMore: false
+    }
+    // 重新加载
+    loadCFAccountDomains()
   }
 })
 
@@ -217,14 +375,159 @@ const loadDomains = async () => {
   }
 }
 
+// 加载 CF 账号的托管域名列表
+const loadCFAccountDomains = async (isLoadMore = false) => {
+  if (loadingCfDomains.value) return
+  
+  // 从 bucket 中获取 cf_account_id
+  const cfAccountId = props.bucket?.cf_account_id
+  if (!cfAccountId) {
+    console.warn('存储桶没有关联的 CF 账号 ID')
+    return
+  }
+  
+  try {
+    loadingCfDomains.value = true
+    
+    const page = isLoadMore ? cfDomainsPagination.value.page + 1 : 1
+    
+    console.log('加载 CF 托管域名列表, cfAccountId:', cfAccountId, 'page:', page)
+    
+    const result = await cfAccountApi.getCFAccountZones(cfAccountId, {
+      page: page,
+      per_page: cfDomainsPagination.value.perPage
+    })
+    
+    console.log('CF 托管域名列表响应:', result)
+    
+    // 兼容旧格式（数组）和新格式（带分页信息的对象）
+    let zoneList = []
+    if (Array.isArray(result)) {
+      // 旧格式：直接返回数组
+      zoneList = result
+      cfDomainsPagination.value.page = 1
+      cfDomainsPagination.value.totalPages = 1
+      cfDomainsPagination.value.totalCount = result.length
+      cfDomainsPagination.value.hasMore = false
+    } else {
+      // 新格式：带分页信息的对象
+      zoneList = result.zones || []
+      cfDomainsPagination.value.page = result.page || page
+      cfDomainsPagination.value.totalPages = result.total_pages || 0
+      cfDomainsPagination.value.totalCount = result.total_count || 0
+      cfDomainsPagination.value.hasMore = cfDomainsPagination.value.page < cfDomainsPagination.value.totalPages
+    }
+    
+    // 提取域名名称
+    const newDomains = zoneList.map(zone => zone.name || zone)
+    
+    if (isLoadMore) {
+      // 追加到现有列表
+      cfDomains.value = [...cfDomains.value, ...newDomains]
+    } else {
+      // 替换列表
+      cfDomains.value = newDomains
+    }
+    
+    // 更新过滤列表
+    if (!cfDomainSearchQuery.value) {
+      filteredCfDomains.value = [...cfDomains.value]
+    } else {
+      // 重新应用搜索过滤
+      filterCfDomains(cfDomainSearchQuery.value)
+    }
+    
+    if (!isLoadMore && cfDomains.value.length > 0) {
+      const moreMsg = cfDomainsPagination.value.hasMore ? `，还有更多域名可加载` : ''
+      console.log(`已加载 ${cfDomains.value.length}/${cfDomainsPagination.value.totalCount} 个托管域名${moreMsg}`)
+    }
+  } catch (error) {
+    console.error('加载 CF 托管域名失败:', error)
+    if (!isLoadMore) {
+      cfDomains.value = []
+      filteredCfDomains.value = []
+    }
+  } finally {
+    loadingCfDomains.value = false
+  }
+}
+
+// 加载更多 CF 域名
+const loadMoreCfDomains = async () => {
+  if (!cfDomainsPagination.value.hasMore) {
+    return
+  }
+  await loadCFAccountDomains(true)
+}
+
+// 过滤 CF 域名
+const filterCfDomains = (query) => {
+  cfDomainSearchQuery.value = query
+  
+  if (!query) {
+    filteredCfDomains.value = [...cfDomains.value]
+    return
+  }
+  
+  const lowerQuery = query.toLowerCase()
+  filteredCfDomains.value = cfDomains.value.filter(domain => {
+    return domain.toLowerCase().includes(lowerQuery)
+  })
+  
+  console.log('域名搜索:', query, '结果数:', filteredCfDomains.value.length)
+}
+
+// 使用自定义域名
+const useCustomDomain = () => {
+  if (cfDomainSearchQuery.value) {
+    addForm.value.base_domain = cfDomainSearchQuery.value
+    cfDomainSearchQuery.value = ''
+    updateDomain()
+  }
+}
+
+// 更新完整域名（组合前缀和基础域名）
+const updateDomain = () => {
+  const prefix = addForm.value.domain_prefix?.trim()
+  const baseDomain = addForm.value.base_domain?.trim()
+  
+  if (!baseDomain) {
+    addForm.value.domain = ''
+    return
+  }
+  
+  if (prefix) {
+    // 有前缀：组合成 prefix.baseDomain
+    addForm.value.domain = `${prefix}.${baseDomain}`
+  } else {
+    // 无前缀：直接使用基础域名
+    addForm.value.domain = baseDomain
+  }
+  
+  console.log('更新完整域名:', addForm.value.domain)
+}
+
 const resetAddForm = () => {
   addForm.value = {
     domain: '',
+    domain_prefix: '',
+    base_domain: '',
     default_file_path: '',
     note: '',
   }
   // 清空文件列表
   fileList.value = []
+  // 清空 CF 域名列表
+  cfDomains.value = []
+  filteredCfDomains.value = []
+  cfDomainSearchQuery.value = ''
+  cfDomainsPagination.value = {
+    page: 1,
+    perPage: 50,
+    totalPages: 0,
+    totalCount: 0,
+    hasMore: false
+  }
   if (addFormRef.value) {
     addFormRef.value.clearValidate()
   }
@@ -430,5 +733,25 @@ const getFileName = (filePath) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 5px;
+  line-height: 1.4;
+}
+
+.is-loading {
+  animation: rotating 2s linear infinite;
+}
+
+@keyframes rotating {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 </style>

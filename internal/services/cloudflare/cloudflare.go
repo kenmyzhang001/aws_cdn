@@ -125,7 +125,8 @@ type ZonesResult struct {
 // page: 页码，从 1 开始
 // perPage: 每页数量，默认 20，最大 50
 // name: 可选的域名搜索参数，为空则获取所有域名
-func (s *CloudflareService) ListZones(page, perPage int, name string) (*ZonesResult, error) {
+// accountID: 可选的账户ID过滤参数，为空则获取所有账户的域名
+func (s *CloudflareService) ListZones(page, perPage int, name, accountID string) (*ZonesResult, error) {
 	log := logger.GetLogger()
 
 	// 参数校验
@@ -150,6 +151,9 @@ func (s *CloudflareService) ListZones(page, perPage int, name string) (*ZonesRes
 	if name != "" {
 		q.Add("name", name)
 	}
+	if accountID != "" {
+		q.Add("account.id", accountID)
+	}
 	req.URL.RawQuery = q.Encode()
 
 	// 设置认证头
@@ -158,10 +162,11 @@ func (s *CloudflareService) ListZones(page, perPage int, name string) (*ZonesRes
 	}
 
 	log.WithFields(map[string]interface{}{
-		"url":      req.URL.String(),
-		"page":     page,
-		"per_page": perPage,
-		"name":     name,
+		"url":        req.URL.String(),
+		"page":       page,
+		"per_page":   perPage,
+		"name":       name,
+		"account_id": accountID,
 	}).Info("请求 Cloudflare Zones 列表")
 
 	resp, err := s.client.Do(req)
