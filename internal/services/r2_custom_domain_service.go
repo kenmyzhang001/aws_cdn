@@ -127,6 +127,7 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 	customDomain.Status = "processing"
 	if err := s.db.Save(&customDomain).Error; err != nil {
 		log.WithError(err).Error("更新域名状态为 processing 失败")
+		return fmt.Errorf("更新域名状态为 processing 失败: %w", err)
 	}
 
 	log.WithFields(map[string]interface{}{
@@ -137,7 +138,9 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 	// 获取 CF 账号信息
 	cfAccount, err := s.cfAccountService.GetCFAccount(customDomain.R2Bucket.CFAccountID)
 	if err != nil {
-		s.updateDomainStatus(domainID, "failed", fmt.Sprintf("获取CF账号失败: %v", err))
+		if updateErr := s.updateDomainStatus(domainID, "failed", fmt.Sprintf("获取CF账号失败: %v", err)); updateErr != nil {
+			log.WithError(updateErr).Error("更新域名状态失败")
+		}
 		return err
 	}
 
@@ -145,7 +148,9 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 	r2APIToken := s.cfAccountService.GetR2APIToken(cfAccount)
 	if r2APIToken == "" {
 		err := fmt.Errorf("Cloudflare账号未配置 R2 API Token 或 API Token")
-		s.updateDomainStatus(domainID, "failed", err.Error())
+		if updateErr := s.updateDomainStatus(domainID, "failed", err.Error()); updateErr != nil {
+			log.WithError(updateErr).Error("更新域名状态失败")
+		}
 		return err
 	}
 
@@ -155,7 +160,9 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 	// 根据 CF 账号信息创建 CloudflareService
 	cloudflareSvc, err := s.createCloudflareService(cfAccount)
 	if err != nil {
-		s.updateDomainStatus(domainID, "failed", fmt.Sprintf("创建 CloudflareService 失败: %v", err))
+		if updateErr := s.updateDomainStatus(domainID, "failed", fmt.Sprintf("创建 CloudflareService 失败: %v", err)); updateErr != nil {
+			log.WithError(updateErr).Error("更新域名状态失败")
+		}
 		return fmt.Errorf("创建 CloudflareService 失败: %w", err)
 	}
 
@@ -186,7 +193,9 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 	// 添加自定义域名
 	domainIDStr, err := cloudflareSvc.AddCustomDomain(accountID, customDomain.R2Bucket.BucketName, customDomain.Domain, zoneID, true)
 	if err != nil {
-		s.updateDomainStatus(domainID, "failed", fmt.Sprintf("添加自定义域名失败: %v", err))
+		if updateErr := s.updateDomainStatus(domainID, "failed", fmt.Sprintf("添加自定义域名失败: %v", err)); updateErr != nil {
+			log.WithError(updateErr).Error("更新域名状态失败")
+		}
 		return fmt.Errorf("添加自定义域名失败: %w", err)
 	}
 
@@ -195,6 +204,10 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 		customDomain.ZoneID = zoneID
 		if err := s.db.Save(&customDomain).Error; err != nil {
 			log.WithError(err).Error("更新 ZoneID 失败")
+			if updateErr := s.updateDomainStatus(domainID, "failed", fmt.Sprintf("更新 ZoneID 失败: %v", err)); updateErr != nil {
+				log.WithError(updateErr).Error("更新域名状态失败")
+			}
+			return fmt.Errorf("更新 ZoneID 失败: %w", err)
 		}
 	}
 
@@ -202,11 +215,14 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 	s.configureCloudflareOptimizations(cloudflareSvc, zoneID, customDomain.Domain, customDomain.DefaultFilePath)
 
 	// 更新状态为 active
-	s.updateDomainStatus(domainID, "active", "")
+	if err := s.updateDomainStatus(domainID, "active", ""); err != nil {
+		log.WithError(err).Error("更新域名状态为 active 失败")
+		return fmt.Errorf("更新域名状态为 active 失败: %w", err)
+	}
 
 	log.WithFields(map[string]interface{}{
-		"domain_id":   customDomain.ID,
-		"domain":      customDomain.Domain,
+		"domain_id":            customDomain.ID,
+		"domain":               customDomain.Domain,
 		"cloudflare_domain_id": domainIDStr,
 	}).Info("自定义域名配置完成")
 
@@ -214,33 +230,39 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 }
 
 // updateDomainStatus 更新域名状态
-func (s *R2CustomDomainService) updateDomainStatus(domainID uint, status string, errorMsg string) {
+func (s *R2CustomDomainService) updateDomainStatus(domainID uint, status string, errorMsg string) error {
 	log := logger.GetLogger()
-	
+
 	updates := map[string]interface{}{
 		"status": status,
 	}
-	
+
 	if errorMsg != "" {
 		// 将错误信息追加到 note 字段
 		var domain models.R2CustomDomain
-		if err := s.db.First(&domain, domainID).Error; err == nil {
-			if domain.Note != "" {
-				updates["note"] = domain.Note + "\n错误: " + errorMsg
-			} else {
-				updates["note"] = "错误: " + errorMsg
-			}
+		if err := s.db.First(&domain, domainID).Error; err != nil {
+			log.WithError(err).WithField("domain_id", domainID).Error("获取域名记录失败")
+			return fmt.Errorf("获取域名记录失败: %w", err)
+		}
+
+		if domain.Note != "" {
+			updates["note"] = domain.Note + "\n错误: " + errorMsg
+		} else {
+			updates["note"] = "错误: " + errorMsg
 		}
 	}
-	
+
 	if err := s.db.Model(&models.R2CustomDomain{}).Where("id = ?", domainID).Updates(updates).Error; err != nil {
 		log.WithError(err).WithField("domain_id", domainID).Error("更新域名状态失败")
-	} else {
-		log.WithFields(map[string]interface{}{
-			"domain_id": domainID,
-			"status":    status,
-		}).Info("域名状态已更新")
+		return fmt.Errorf("更新域名状态失败: %w", err)
 	}
+
+	log.WithFields(map[string]interface{}{
+		"domain_id": domainID,
+		"status":    status,
+	}).Info("域名状态已更新")
+
+	return nil
 }
 
 // configureCloudflareOptimizations 配置 Cloudflare 优化规则
