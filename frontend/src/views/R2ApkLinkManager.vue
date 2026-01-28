@@ -83,7 +83,7 @@
                       :key="index"
                       class="url-item"
                     >
-                      <div class="domain-row">
+                      <!--div class="domain-row">
                         <span class="domain-label">域名：</span>
                         <el-tag type="primary" size="default" effect="plain">
                           {{ urlItem.domain }}
@@ -105,7 +105,7 @@
                         >
                           默认：{{ urlItem.defaultFilePath }}
                         </el-tag>
-                      </div>
+                      </div-->
                       <div class="url-row">
                         <span class="url-label">链接：</span>
                         <div class="url-input-wrapper">
@@ -260,10 +260,9 @@ const loadFileUrls = async (row) => {
       // 对文件路径进行正确编码
       const pathParts = row.file_path.split('/')
       const encodedParts = pathParts.map((part) => encodeURIComponent(part))
-      const encodedPath = encodedParts.join('/')
       return {
         domain: item.domain,
-        url: `https://${item.domain}/${encodedPath}`,
+        url: item.url,
         isDefault: item.is_default || false,
         defaultFilePath: item.default_file_path || '',
         copied: false,
