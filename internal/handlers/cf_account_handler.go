@@ -242,3 +242,157 @@ func (h *CFAccountHandler) GetCFAccountZones(c *gin.Context) {
 
 	c.JSON(http.StatusOK, result)
 }
+
+// SetZoneAPKSecurityRule 为域名设置 APK 放行规则（根域名及所有子域名）
+func (h *CFAccountHandler) SetZoneAPKSecurityRule(c *gin.Context) {
+	log := logger.GetLogger()
+
+	// 获取 CF 账号 ID
+	accountID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		log.WithError(err).WithField("id_param", c.Param("id")).Error("设置APK安全规则失败：无效的账号ID")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的账号 ID"})
+		return
+	}
+
+	// 获取请求参数
+	var req struct {
+		ZoneID     string `json:"zone_id" binding:"required"`
+		DomainName string `json:"domain_name" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.WithError(err).WithField("account_id", accountID).Error("设置APK安全规则失败：请求参数验证失败")
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 获取 CF 账号信息
+	account, err := h.service.GetCFAccount(uint(accountID))
+	if err != nil {
+		log.WithError(err).WithField("account_id", accountID).Error("获取CF账号失败")
+		c.JSON(http.StatusNotFound, gin.H{"error": "CF 账号不存在"})
+		return
+	}
+
+	// 使用 API Token 创建 Cloudflare 服务
+	cfg := &config.CloudflareConfig{
+		APIToken: account.APIToken,
+	}
+
+	cfService, err := cloudflare.NewCloudflareService(cfg)
+	if err != nil {
+		log.WithError(err).Error("创建 Cloudflare 服务失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建 Cloudflare 服务失败"})
+		return
+	}
+
+	log.WithFields(map[string]interface{}{
+		"account_id": accountID,
+		"zone_id":    req.ZoneID,
+		"domain":     req.DomainName,
+	}).Info("开始为域名设置 APK 放行规则")
+
+	// 存储规则创建结果
+	type RuleResult struct {
+		RuleName string `json:"rule_name"`
+		RuleID   string `json:"rule_id"`
+		Status   string `json:"status"`
+		Message  string `json:"message"`
+	}
+
+	results := []RuleResult{}
+
+	// 1. 创建 WAF VIP 下载规则（最高优先级，免检金牌）
+	vipRuleID, vipErr := cfService.CreateWAFVIPDownloadRule(req.ZoneID, req.DomainName)
+	if vipErr != nil {
+		log.WithError(vipErr).WithFields(map[string]interface{}{
+			"domain":  req.DomainName,
+			"zone_id": req.ZoneID,
+		}).Warn("创建 WAF VIP 下载规则失败")
+		results = append(results, RuleResult{
+			RuleName: "WAF VIP下载规则",
+			Status:   "failed",
+			Message:  vipErr.Error(),
+		})
+	} else if vipRuleID != "" {
+		log.WithFields(map[string]interface{}{
+			"domain":  req.DomainName,
+			"zone_id": req.ZoneID,
+			"rule_id": vipRuleID,
+		}).Info("WAF VIP 下载规则创建成功")
+		results = append(results, RuleResult{
+			RuleName: "WAF VIP下载规则",
+			RuleID:   vipRuleID,
+			Status:   "success",
+			Message:  "规则创建成功，APK/OBB下载将直接放行",
+		})
+	}
+
+	// 2. 创建 WAF 安全规则（威胁评分豁免）
+	wafRuleID, wafErr := cfService.CreateWAFSecurityRule(req.ZoneID, req.DomainName, []string{"apk"})
+	if wafErr != nil {
+		log.WithError(wafErr).WithFields(map[string]interface{}{
+			"domain":  req.DomainName,
+			"zone_id": req.ZoneID,
+		}).Warn("创建 WAF 安全规则失败")
+		results = append(results, RuleResult{
+			RuleName: "WAF安全规则",
+			Status:   "failed",
+			Message:  wafErr.Error(),
+		})
+	} else if wafRuleID != "" {
+		log.WithFields(map[string]interface{}{
+			"domain":  req.DomainName,
+			"zone_id": req.ZoneID,
+			"rule_id": wafRuleID,
+		}).Info("WAF 安全规则创建成功")
+		results = append(results, RuleResult{
+			RuleName: "WAF安全规则",
+			RuleID:   wafRuleID,
+			Status:   "success",
+			Message:  "规则创建成功，VPN和高频下载已豁免",
+		})
+	}
+
+	// 判断整体状态
+	successCount := 0
+	failedCount := 0
+	for _, r := range results {
+		if r.Status == "success" {
+			successCount++
+		} else {
+			failedCount++
+		}
+	}
+
+	var responseStatus int
+	var message string
+	if failedCount == 0 {
+		responseStatus = http.StatusOK
+		message = "所有安全规则创建成功"
+	} else if successCount > 0 {
+		responseStatus = http.StatusOK
+		message = "部分安全规则创建成功"
+	} else {
+		responseStatus = http.StatusInternalServerError
+		message = "所有安全规则创建失败"
+	}
+
+	log.WithFields(map[string]interface{}{
+		"account_id":    accountID,
+		"zone_id":       req.ZoneID,
+		"domain":        req.DomainName,
+		"success_count": successCount,
+		"failed_count":  failedCount,
+	}).Info("APK安全规则设置完成")
+
+	c.JSON(responseStatus, gin.H{
+		"message": message,
+		"results": results,
+		"stats": gin.H{
+			"success_count": successCount,
+			"failed_count":  failedCount,
+		},
+	})
+}
