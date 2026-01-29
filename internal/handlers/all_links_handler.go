@@ -33,15 +33,19 @@ func NewAllLinksHandler(
 
 // LinkItem 统一的链接项结构
 type LinkItem struct {
-	ID          uint   `json:"id"`
-	URL         string `json:"url"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Type        string `json:"type"` // download_package, custom_download_link, r2_apk_file
-	Status      string `json:"status,omitempty"`
-	FilePath    string `json:"file_path,omitempty"` // R2文件路径
-	Domain      string `json:"domain,omitempty"`    // R2域名
-	CreatedAt   string `json:"created_at"`
+	ID                   uint   `json:"id"`
+	URL                  string `json:"url"`
+	Name                 string `json:"name"`
+	Description          string `json:"description"`
+	Type                 string `json:"type"` // download_package, custom_download_link, r2_apk_file
+	Status               string `json:"status,omitempty"`
+	FilePath             string `json:"file_path,omitempty"` // R2文件路径
+	Domain               string `json:"domain,omitempty"`    // R2域名
+	GroupID              *uint  `json:"group_id,omitempty"`
+	GroupName            string `json:"group_name,omitempty"`
+	ProbeEnabled         bool   `json:"probe_enabled"`
+	ProbeIntervalMinutes int    `json:"probe_interval_minutes"`
+	CreatedAt            string `json:"created_at"`
 }
 
 // AllLinksResponse 所有链接的响应结构
@@ -67,14 +71,29 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 			if !strings.HasSuffix(strings.ToLower(pkg.DownloadURL), ".apk") {
 				continue
 			}
+
+			// 获取分组信息
+			probeEnabled := true // 默认启用探测
+			probeInterval := 10  // 默认10分钟
+			var groupName string
+			if pkg.Group != nil {
+				groupName = pkg.Group.Name
+				probeEnabled = pkg.Group.ProbeEnabled
+				probeInterval = pkg.Group.ProbeIntervalMinutes
+			}
+
 			item := LinkItem{
-				ID:          pkg.ID,
-				URL:         pkg.DownloadURL,
-				Name:        pkg.FileName,
-				Description: pkg.Note,
-				Type:        "download_package",
-				Status:      string(pkg.Status),
-				CreatedAt:   pkg.CreatedAt.Format("2006-01-02 15:04:05"),
+				ID:                   pkg.ID,
+				URL:                  pkg.DownloadURL,
+				Name:                 pkg.FileName,
+				Description:          pkg.Note,
+				Type:                 "download_package",
+				Status:               string(pkg.Status),
+				GroupID:              pkg.GroupID,
+				GroupName:            groupName,
+				ProbeEnabled:         probeEnabled,
+				ProbeIntervalMinutes: probeInterval,
+				CreatedAt:            pkg.CreatedAt.Format("2006-01-02 15:04:05"),
 			}
 			response.Links = append(response.Links, item)
 		}
@@ -86,31 +105,49 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 		log.WithError(err).Error("获取自定义下载链接列表失败")
 	} else {
 		for _, link := range customLinks {
+			// 获取分组信息
+			probeEnabled := true // 默认启用探测
+			probeInterval := 10  // 默认10分钟
+			var groupName string
+			if link.Group != nil {
+				groupName = link.Group.Name
+				probeEnabled = link.Group.ProbeEnabled
+				probeInterval = link.Group.ProbeIntervalMinutes
+			}
+
 			// 过滤掉没有 .apk 结尾的链接
 			if !strings.HasSuffix(strings.ToLower(link.URL), ".apk") {
 				if !strings.HasSuffix(strings.ToLower(link.ActualURL), ".apk") {
 					continue
 				} else {
 					item := LinkItem{
-						ID:          link.ID,
-						URL:         link.ActualURL,
-						Name:        link.Name,
-						Description: link.Description,
-						Type:        "custom_download_link",
-						Status:      string(link.Status),
-						CreatedAt:   link.CreatedAt.Format("2006-01-02 15:04:05"),
+						ID:                   link.ID,
+						URL:                  link.ActualURL,
+						Name:                 link.Name,
+						Description:          link.Description,
+						Type:                 "custom_download_link",
+						Status:               string(link.Status),
+						GroupID:              link.GroupID,
+						GroupName:            groupName,
+						ProbeEnabled:         probeEnabled,
+						ProbeIntervalMinutes: probeInterval,
+						CreatedAt:            link.CreatedAt.Format("2006-01-02 15:04:05"),
 					}
 					response.Links = append(response.Links, item)
 				}
 			}
 			item := LinkItem{
-				ID:          link.ID,
-				URL:         link.URL,
-				Name:        link.Name,
-				Description: link.Description,
-				Type:        "custom_download_link",
-				Status:      string(link.Status),
-				CreatedAt:   link.CreatedAt.Format("2006-01-02 15:04:05"),
+				ID:                   link.ID,
+				URL:                  link.URL,
+				Name:                 link.Name,
+				Description:          link.Description,
+				Type:                 "custom_download_link",
+				Status:               string(link.Status),
+				GroupID:              link.GroupID,
+				GroupName:            groupName,
+				ProbeEnabled:         probeEnabled,
+				ProbeIntervalMinutes: probeInterval,
+				CreatedAt:            link.CreatedAt.Format("2006-01-02 15:04:05"),
 			}
 			response.Links = append(response.Links, item)
 		}
@@ -152,16 +189,19 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 				encodedPath := strings.Join(encodedParts, "/")
 				fullURL := "https://" + domain.Domain + "/" + encodedPath
 
+				// R2文件没有分组信息，使用默认值
 				item := LinkItem{
-					ID:          file.ID,
-					URL:         fullURL,
-					Name:        file.FileName,
-					Description: file.Note,
-					Type:        "r2_apk_file",
-					Status:      file.Status,
-					FilePath:    file.FilePath,
-					Domain:      domain.Domain,
-					CreatedAt:   file.CreatedAt.Format("2006-01-02 15:04:05"),
+					ID:                   file.ID,
+					URL:                  fullURL,
+					Name:                 file.FileName,
+					Description:          file.Note,
+					Type:                 "r2_apk_file",
+					Status:               file.Status,
+					FilePath:             file.FilePath,
+					Domain:               domain.Domain,
+					ProbeEnabled:         true, // R2文件默认启用探测
+					ProbeIntervalMinutes: 10,   // R2文件默认10分钟间隔
+					CreatedAt:            file.CreatedAt.Format("2006-01-02 15:04:05"),
 				}
 				response.Links = append(response.Links, item)
 			}

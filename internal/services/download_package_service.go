@@ -637,7 +637,7 @@ func (s *DownloadPackageService) GetCloudFrontOriginPathInfo(pkg *models.Downloa
 func (s *DownloadPackageService) ListAllDownloadPackages() ([]models.DownloadPackage, error) {
 	var packages []models.DownloadPackage
 
-	if err := s.db.Preload("Domain").
+	if err := s.db.Preload("Domain").Preload("Group").
 		Where("deleted_at IS NULL").
 		Order("created_at DESC").
 		Find(&packages).Error; err != nil {
@@ -645,7 +645,7 @@ func (s *DownloadPackageService) ListAllDownloadPackages() ([]models.DownloadPac
 	}
 
 	var packages2 []models.DownloadPackage
-	if err := s.db3.Preload("Domain").
+	if err := s.db3.Preload("Domain").Preload("Group").
 		Where("deleted_at IS NULL").
 		Order("created_at DESC").
 		Find(&packages2).Error; err != nil {

@@ -429,9 +429,6 @@ func (s *SpeedProbeService) sendAlertsBatch(alerts []*models.SpeedAlertLog) erro
 			for idx, alert := range batch {
 				// 提取URL的域名部分
 				urlStr := alert.URL
-				if len(urlStr) > 60 {
-					urlStr = urlStr[:60] + "..."
-				}
 
 				// 简化告警信息，只保留关键信息
 				mergedMessage.WriteString(fmt.Sprintf("%d. %s\n", idx+1, urlStr))
