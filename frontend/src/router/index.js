@@ -6,6 +6,7 @@ import DownloadPackageList from '@/views/DownloadPackageList.vue'
 import AuditLogList from '@/views/AuditLogList.vue'
 import GroupList from '@/views/GroupList.vue'
 import CfAccountList from '@/views/CfAccountList.vue'
+import CfZoneList from '@/views/CfZoneList.vue'
 import R2BucketList from '@/views/R2BucketList.vue'
 import R2ApkLinkManager from '@/views/R2ApkLinkManager.vue'
 import CustomDownloadLinkList from '@/views/CustomDownloadLinkList.vue'
@@ -56,6 +57,11 @@ const routes = [
     path: '/cf-accounts',
     name: 'CfAccountList',
     component: CfAccountList,
+  },
+  {
+    path: '/cf-zones',
+    name: 'CfZoneList',
+    component: CfZoneList,
   },
   {
     path: '/r2-buckets',

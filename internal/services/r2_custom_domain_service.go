@@ -293,8 +293,8 @@ func (s *R2CustomDomainService) ConfigureCustomDomainAsync(domainID uint) error 
 		configLog.info("更新ZoneID", "Zone ID 已保存到数据库", "")
 	}
 
-	// 自动创建各种规则和优化配置
-	s.configureCloudflareOptimizations(cloudflareSvc, zoneID, customDomain.Domain, customDomain.DefaultFilePath, configLog)
+	// 自动创建各种规则和优化配置（使用根域名，这样规则会覆盖所有子域名）
+	s.configureCloudflareOptimizations(cloudflareSvc, zoneID, rootDomain, customDomain.DefaultFilePath, configLog)
 
 	// 保存配置日志
 	s.saveConfigLogs(domainID, configLog)

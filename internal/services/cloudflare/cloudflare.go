@@ -1141,9 +1141,9 @@ func (s *CloudflareService) ConfigureCORS(accountID, bucketName string, corsConf
 func (s *CloudflareService) CreateCORSTransformRule(zoneID, domain, allowOrigin string) (string, error) {
 	log := logger.GetLogger()
 
-	// 构建匹配表达式
-	expression := fmt.Sprintf(`(http.host eq "%s")`, domain)
-	description := fmt.Sprintf("Add CORS headers for R2 domain %s", domain)
+	// 构建匹配表达式：覆盖主域名和所有子域名
+	expression := fmt.Sprintf(`(http.host eq "%s" or http.host ends_with ".%s")`, domain, domain)
+	description := fmt.Sprintf("Add CORS headers for R2 domain %s及所有子域名", domain)
 
 	// 构建响应头设置 - 按照 Cloudflare API 规范
 	headers := map[string]interface{}{
@@ -1570,9 +1570,10 @@ func (s *CloudflareService) CreateWAFSecurityRule(zoneID, domain string, fileExt
 	}
 
 	// 构建完整的匹配表达式
-	// (cf.threat_score le 50) and (http.host eq "domain") and (http.request.uri.path.extension eq "apk")
-	expression := fmt.Sprintf(`(cf.threat_score le 50) and (http.host eq "%s") and (%s)`, domain, extensionExpr)
-	description := fmt.Sprintf("VPN白名单+IDM高频下载豁免: %s (%s)", domain, strings.Join(fileExtensions, ", "))
+	// (cf.threat_score le 50) and (http.host eq "domain" or http.host ends_with ".domain") and (http.request.uri.path.extension eq "apk")
+	// 覆盖主域名和所有子域名
+	expression := fmt.Sprintf(`(cf.threat_score le 50) and (http.host eq "%s" or http.host ends_with ".%s") and (%s)`, domain, domain, extensionExpr)
+	description := fmt.Sprintf("VPN白名单+IDM高频下载豁免: %s及所有子域名 (%s)", domain, strings.Join(fileExtensions, ", "))
 
 	// 构建 WAF 规则
 	rule := map[string]interface{}{
@@ -1662,16 +1663,17 @@ func (s *CloudflareService) CreateWAFVIPDownloadRule(zoneID, domain string) (str
 
 	// 构建匹配表达式：.apk 或 .obb 或 /download/ 路径
 	// 这是最宽松的规则，只要是下载相关的，统统放行！
+	// 覆盖主域名和所有子域名
 	expression := fmt.Sprintf(
-		`(http.host eq "%s") and (`+
+		`(http.host eq "%s" or http.host ends_with ".%s") and (`+
 			`http.request.uri.path.extension eq "apk" or `+
 			`http.request.uri.path.extension eq "obb" or `+
 			`http.request.uri.path contains "/download/"`+
 			`)`,
-		domain,
+		domain, domain,
 	)
 
-	description := fmt.Sprintf("00_Allow_APK_Download_VIP: %s - 免检金牌，最高优先级，跳过所有防火墙", domain)
+	description := fmt.Sprintf("00_Allow_APK_Download_VIP: %s及所有子域名 - 免检金牌，最高优先级，跳过所有防火墙", domain)
 
 	// 构建 WAF 规则
 	// action: skip - 跳过所有防火墙检查
@@ -2121,7 +2123,8 @@ func (s *CloudflareService) CreatePageRule(zoneID, domain string, enableCaching 
 		return "", fmt.Errorf("enableCaching 必须为 true 才能创建缓存优化规则")
 	}
 
-	// 构建 Page Rule 目标 URL（匹配所有路径）
+	// 构建 Page Rule 目标 URL（匹配主域名和所有子域名的所有路径）
+	// 使用通配符匹配：*.domain/* 会匹配所有子域名，*domain/* 会匹配主域名和子域名
 	targetURL := fmt.Sprintf("*%s/*", domain)
 
 	// 构建 Page Rule 动作
@@ -3068,8 +3071,8 @@ func (s *CloudflareService) CreateDefaultFileRedirect(zoneID, domain, defaultFil
 		defaultFilePath = "/" + defaultFilePath
 	}
 
-	// 构建规则表达式：只匹配根路径访问
-	expression := fmt.Sprintf(`(http.host eq "%s" and http.request.uri.path eq "/")`, domain)
+	// 构建规则表达式：只匹配根路径访问，覆盖主域名和所有子域名
+	expression := fmt.Sprintf(`((http.host eq "%s" or http.host ends_with ".%s") and http.request.uri.path eq "/")`, domain, domain)
 
 	// 获取或创建 URL Redirect Ruleset
 	rulesetID, err := s.getOrCreateURLRedirectRuleset(zoneID)
@@ -3100,7 +3103,7 @@ func (s *CloudflareService) CreateDefaultFileRedirect(zoneID, domain, defaultFil
 					"preserve_query_string": true,
 				},
 			},
-			"description": fmt.Sprintf("默认文件重定向: %s -> %s", domain, defaultFilePath),
+			"description": fmt.Sprintf("默认文件重定向: %s及所有子域名 -> %s", domain, defaultFilePath),
 			"enabled":     true,
 		}
 
@@ -3132,7 +3135,7 @@ func (s *CloudflareService) CreateDefaultFileRedirect(zoneID, domain, defaultFil
 				"preserve_query_string": true,
 			},
 		},
-		"description": fmt.Sprintf("默认文件重定向: %s -> %s", domain, defaultFilePath),
+		"description": fmt.Sprintf("默认文件重定向: %s及所有子域名 -> %s", domain, defaultFilePath),
 		"enabled":     true,
 	}
 

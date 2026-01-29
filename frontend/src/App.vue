@@ -24,7 +24,10 @@
               <span>CF 账号管理</span>
           </el-menu-item>
 
-
+          <el-menu-item index="/cf-zones">
+              <el-icon><Globe /></el-icon>
+              <span>CF 域名管理</span>
+          </el-menu-item>
 
           <!-- AWS-CDN 一级菜单 -->
           <el-sub-menu index="aws-cdn">
@@ -85,7 +88,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box, Setting } from '@element-plus/icons-vue'
+import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box, Setting, Globe } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)
