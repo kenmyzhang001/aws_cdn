@@ -283,7 +283,7 @@ export default {
         zone._settingRule = false
 
         // 显示结果对话框
-        ruleSetResult.value = res.data
+        ruleSetResult.value = res
         showResultDialog.value = true
 
         ElMessage.success('APK 安全规则设置完成')
