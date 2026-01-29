@@ -1142,7 +1142,7 @@ func (s *CloudflareService) CreateCORSTransformRule(zoneID, domain, allowOrigin 
 	log := logger.GetLogger()
 
 	// 构建匹配表达式：覆盖主域名和所有子域名
-	expression := fmt.Sprintf(`(http.host eq "%s" or http.host ends_with ".%s")`, domain, domain)
+	expression := fmt.Sprintf(`(http.host eq "%s" or http.host contains ".%s")`, domain, domain)
 	description := fmt.Sprintf("Add CORS headers for R2 domain %s及所有子域名", domain)
 
 	// 构建响应头设置 - 按照 Cloudflare API 规范
@@ -1570,9 +1570,9 @@ func (s *CloudflareService) CreateWAFSecurityRule(zoneID, domain string, fileExt
 	}
 
 	// 构建完整的匹配表达式
-	// (cf.threat_score le 50) and (http.host eq "domain" or http.host ends_with ".domain") and (http.request.uri.path.extension eq "apk")
+	// (cf.threat_score le 50) and (http.host eq "domain" or http.host contains ".domain") and (http.request.uri.path.extension eq "apk")
 	// 覆盖主域名和所有子域名
-	expression := fmt.Sprintf(`(cf.threat_score le 50) and (http.host eq "%s" or http.host ends_with ".%s") and (%s)`, domain, domain, extensionExpr)
+	expression := fmt.Sprintf(`(cf.threat_score le 50) and (http.host eq "%s" or http.host contains ".%s") and (%s)`, domain, domain, extensionExpr)
 	description := fmt.Sprintf("VPN白名单+IDM高频下载豁免: %s及所有子域名 (%s)", domain, strings.Join(fileExtensions, ", "))
 
 	// 构建 WAF 规则
@@ -1665,7 +1665,7 @@ func (s *CloudflareService) CreateWAFVIPDownloadRule(zoneID, domain string) (str
 	// 这是最宽松的规则，只要是下载相关的，统统放行！
 	// 覆盖主域名和所有子域名
 	expression := fmt.Sprintf(
-		`(http.host eq "%s" or http.host ends_with ".%s") and (`+
+		`(http.host eq "%s" or http.host contains ".%s") and (`+
 			`http.request.uri.path.extension eq "apk" or `+
 			`http.request.uri.path.extension eq "obb" or `+
 			`http.request.uri.path contains "/download/"`+
@@ -3072,7 +3072,7 @@ func (s *CloudflareService) CreateDefaultFileRedirect(zoneID, domain, defaultFil
 	}
 
 	// 构建规则表达式：只匹配根路径访问，覆盖主域名和所有子域名
-	expression := fmt.Sprintf(`((http.host eq "%s" or http.host ends_with ".%s") and http.request.uri.path eq "/")`, domain, domain)
+	expression := fmt.Sprintf(`((http.host eq "%s" or http.host contains ".%s") and http.request.uri.path eq "/")`, domain, domain)
 
 	// 获取或创建 URL Redirect Ruleset
 	rulesetID, err := s.getOrCreateURLRedirectRuleset(zoneID)
