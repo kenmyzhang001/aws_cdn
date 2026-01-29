@@ -25,7 +25,7 @@
           </el-menu-item>
 
           <el-menu-item index="/cf-zones">
-              <el-icon><Globe /></el-icon>
+              <el-icon><Grid /></el-icon>
               <span>CF 域名管理</span>
           </el-menu-item>
 
@@ -88,7 +88,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box, Setting, Globe } from '@element-plus/icons-vue'
+import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box, Setting, Grid } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)
