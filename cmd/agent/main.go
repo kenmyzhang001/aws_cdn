@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -24,13 +25,17 @@ type Config struct {
 
 // LinkItem 链接项
 type LinkItem struct {
-	ID          uint   `json:"id"`
-	URL         string `json:"url"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Type        string `json:"type"`
-	Status      string `json:"status"`
-	CreatedAt   string `json:"created_at"`
+	ID                   uint   `json:"id"`
+	URL                  string `json:"url"`
+	Name                 string `json:"name"`
+	Description          string `json:"description"`
+	Type                 string `json:"type"`
+	Status               string `json:"status"`
+	GroupID              *uint  `json:"group_id,omitempty"`
+	GroupName            string `json:"group_name,omitempty"`
+	ProbeEnabled         bool   `json:"probe_enabled"`
+	ProbeIntervalMinutes int    `json:"probe_interval_minutes"`
+	CreatedAt            string `json:"created_at"`
 }
 
 // AllLinksResponse 所有链接的响应
@@ -53,6 +58,73 @@ type ProbeResult struct {
 // BatchReportRequest 批量上报请求
 type BatchReportRequest struct {
 	Results []ProbeResult `json:"results"`
+}
+
+// ProbeHistory 探测历史记录（存储在内存中）
+type ProbeHistory struct {
+	LastProbeTime map[string]time.Time // key: URL, value: 上次探测时间
+	mu            sync.RWMutex
+}
+
+var probeHistory = &ProbeHistory{
+	LastProbeTime: make(map[string]time.Time),
+}
+
+const probeHistoryFile = "probe_history.json"
+
+// 加载探测历史
+func (h *ProbeHistory) Load() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	data, err := os.ReadFile(probeHistoryFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("📝 探测历史文件不存在，将创建新文件")
+			return nil
+		}
+		return fmt.Errorf("读取探测历史失败: %w", err)
+	}
+
+	var historyData map[string]string
+	if err := json.Unmarshal(data, &historyData); err != nil {
+		return fmt.Errorf("解析探测历史失败: %w", err)
+	}
+
+	for url, timeStr := range historyData {
+		t, err := time.Parse(time.RFC3339, timeStr)
+		if err != nil {
+			log.Printf("⚠️  解析时间失败 (URL: %s): %v", url, err)
+			continue
+		}
+		h.LastProbeTime[url] = t
+	}
+
+	log.Printf("📝 加载探测历史: %d 条记录", len(h.LastProbeTime))
+	return nil
+}
+
+// 保存探测历史
+func (h *ProbeHistory) Save() error {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	historyData := make(map[string]string)
+	for url, t := range h.LastProbeTime {
+		historyData[url] = t.Format(time.RFC3339)
+	}
+
+	data, err := json.MarshalIndent(historyData, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化探测历史失败: %w", err)
+	}
+
+	if err := os.WriteFile(probeHistoryFile, data, 0644); err != nil {
+		return fmt.Errorf("保存探测历史失败: %w", err)
+	}
+
+	log.Printf("💾 保存探测历史: %d 条记录", len(h.LastProbeTime))
+	return nil
 }
 
 func main() {
@@ -82,6 +154,11 @@ func main() {
 	log.Printf("   速度阈值: %.2f KB/s", config.SpeedThreshold)
 	log.Printf("   并发数量: %d", config.Concurrency)
 
+	// 加载探测历史
+	if err := probeHistory.Load(); err != nil {
+		log.Printf("⚠️  加载探测历史失败: %v", err)
+	}
+
 	// 立即执行一次
 	log.Println("⏰ 开始首次探测...")
 	runProbe(&config)
@@ -109,18 +186,68 @@ func runProbe(config *Config) {
 
 	log.Printf("📋 获取到 %d 个链接", links.Total)
 
-	// 2. 收集所有URL（去重）
-	urlMap := make(map[string]bool)
-	var urls []string
+	// 2. 根据分组设置过滤和收集URL
+	type urlInfo struct {
+		url      string
+		interval time.Duration
+	}
+
+	urlMap := make(map[string]urlInfo) // key: URL, value: urlInfo
+	now := time.Now()
+
+	skippedDisabled := 0
+	skippedInterval := 0
 
 	for _, link := range links.Links {
-		if link.URL != "" && !urlMap[link.URL] {
-			urlMap[link.URL] = true
-			urls = append(urls, link.URL)
+		if link.URL == "" {
+			continue
+		}
+
+		// 检查是否已存在该URL
+		if _, exists := urlMap[link.URL]; exists {
+			continue
+		}
+
+		// 检查是否启用探测
+		if !link.ProbeEnabled {
+			log.Printf("⏭️  跳过（探测已禁用）: %s (分组: %s)", link.URL, link.GroupName)
+			skippedDisabled++
+			continue
+		}
+
+		// 检查探测间隔
+		probeInterval := time.Duration(link.ProbeIntervalMinutes) * time.Minute
+		probeHistory.mu.RLock()
+		lastProbeTime, hasHistory := probeHistory.LastProbeTime[link.URL]
+		probeHistory.mu.RUnlock()
+
+		if hasHistory {
+			timeSinceLastProbe := now.Sub(lastProbeTime)
+			if timeSinceLastProbe < probeInterval {
+				remainingTime := probeInterval - timeSinceLastProbe
+				log.Printf("⏳ 跳过（未到探测间隔）: %s (分组: %s, 间隔: %d分钟, 距上次: %.1f分钟, 还需: %.1f分钟)",
+					link.URL, link.GroupName, link.ProbeIntervalMinutes,
+					timeSinceLastProbe.Minutes(), remainingTime.Minutes())
+				skippedInterval++
+				continue
+			}
+		}
+
+		// 添加到探测列表
+		urlMap[link.URL] = urlInfo{
+			url:      link.URL,
+			interval: probeInterval,
 		}
 	}
 
-	log.Printf("🔍 去重后需要探测 %d 个URL", len(urls))
+	// 提取URL列表
+	var urls []string
+	for _, info := range urlMap {
+		urls = append(urls, info.url)
+	}
+
+	log.Printf("🔍 过滤后需要探测 %d 个URL（跳过：禁用 %d 个，未到间隔 %d 个）",
+		len(urls), skippedDisabled, skippedInterval)
 
 	// 3. 并发探测所有URL
 	results := make([]ProbeResult, 0, len(urls))
@@ -161,6 +288,11 @@ func runProbe(config *Config) {
 			results = append(results, result)
 			resultsMutex.Unlock()
 
+			// 更新探测历史
+			probeHistory.mu.Lock()
+			probeHistory.LastProbeTime[targetURL] = time.Now()
+			probeHistory.mu.Unlock()
+
 			// 更新统计
 			statsMutex.Lock()
 			if result.Status == "success" {
@@ -186,7 +318,12 @@ func runProbe(config *Config) {
 		log.Printf("✅ 上报成功")
 	}
 
-	// 5. 输出统计
+	// 5. 保存探测历史
+	if err := probeHistory.Save(); err != nil {
+		log.Printf("⚠️  保存探测历史失败: %v", err)
+	}
+
+	// 6. 输出统计
 	elapsed := time.Since(startTime)
 	log.Printf("📊 本次探测完成")
 	log.Printf("   总耗时: %v", elapsed)

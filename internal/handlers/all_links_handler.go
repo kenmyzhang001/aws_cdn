@@ -74,7 +74,7 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 
 			// 获取分组信息
 			probeEnabled := true // 默认启用探测
-			probeInterval := 10  // 默认10分钟
+			probeInterval := 60  // 默认60分钟
 			var groupName string
 			if pkg.Group != nil {
 				groupName = pkg.Group.Name
@@ -107,7 +107,7 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 		for _, link := range customLinks {
 			// 获取分组信息
 			probeEnabled := true // 默认启用探测
-			probeInterval := 10  // 默认10分钟
+			probeInterval := 60  // 默认60分钟
 			var groupName string
 			if link.Group != nil {
 				groupName = link.Group.Name
@@ -200,7 +200,7 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 					FilePath:             file.FilePath,
 					Domain:               domain.Domain,
 					ProbeEnabled:         true, // R2文件默认启用探测
-					ProbeIntervalMinutes: 10,   // R2文件默认10分钟间隔
+					ProbeIntervalMinutes: 60,   // R2文件默认10分钟间隔
 					CreatedAt:            file.CreatedAt.Format("2006-01-02 15:04:05"),
 				}
 				response.Links = append(response.Links, item)
