@@ -8,7 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -60,73 +60,6 @@ type BatchReportRequest struct {
 	Results []ProbeResult `json:"results"`
 }
 
-// ProbeHistory 探测历史记录（存储在内存中）
-type ProbeHistory struct {
-	LastProbeTime map[string]time.Time // key: URL, value: 上次探测时间
-	mu            sync.RWMutex
-}
-
-var probeHistory = &ProbeHistory{
-	LastProbeTime: make(map[string]time.Time),
-}
-
-const probeHistoryFile = "probe_history.json"
-
-// 加载探测历史
-func (h *ProbeHistory) Load() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	data, err := os.ReadFile(probeHistoryFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Printf("📝 探测历史文件不存在，将创建新文件")
-			return nil
-		}
-		return fmt.Errorf("读取探测历史失败: %w", err)
-	}
-
-	var historyData map[string]string
-	if err := json.Unmarshal(data, &historyData); err != nil {
-		return fmt.Errorf("解析探测历史失败: %w", err)
-	}
-
-	for url, timeStr := range historyData {
-		t, err := time.Parse(time.RFC3339, timeStr)
-		if err != nil {
-			log.Printf("⚠️  解析时间失败 (URL: %s): %v", url, err)
-			continue
-		}
-		h.LastProbeTime[url] = t
-	}
-
-	log.Printf("📝 加载探测历史: %d 条记录", len(h.LastProbeTime))
-	return nil
-}
-
-// 保存探测历史
-func (h *ProbeHistory) Save() error {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	historyData := make(map[string]string)
-	for url, t := range h.LastProbeTime {
-		historyData[url] = t.Format(time.RFC3339)
-	}
-
-	data, err := json.MarshalIndent(historyData, "", "  ")
-	if err != nil {
-		return fmt.Errorf("序列化探测历史失败: %w", err)
-	}
-
-	if err := os.WriteFile(probeHistoryFile, data, 0644); err != nil {
-		return fmt.Errorf("保存探测历史失败: %w", err)
-	}
-
-	log.Printf("💾 保存探测历史: %d 条记录", len(h.LastProbeTime))
-	return nil
-}
-
 func main() {
 	// 解析命令行参数
 	serverURL := flag.String("server", "http://16.163.99.99:8080", "服务器地址")
@@ -153,11 +86,6 @@ func main() {
 	log.Printf("   最大文件大小: %d MB", config.MaxFileSize/(1024*1024))
 	log.Printf("   速度阈值: %.2f KB/s", config.SpeedThreshold)
 	log.Printf("   并发数量: %d", config.Concurrency)
-
-	// 加载探测历史
-	if err := probeHistory.Load(); err != nil {
-		log.Printf("⚠️  加载探测历史失败: %v", err)
-	}
 
 	// 立即执行一次
 	log.Println("⏰ 开始首次探测...")
@@ -186,68 +114,21 @@ func runProbe(config *Config) {
 
 	log.Printf("📋 获取到 %d 个链接", links.Total)
 
-	// 2. 根据分组设置过滤和收集URL
-	type urlInfo struct {
-		url      string
-		interval time.Duration
-	}
-
-	urlMap := make(map[string]urlInfo) // key: URL, value: urlInfo
-	now := time.Now()
-
-	skippedDisabled := 0
-	skippedInterval := 0
-
+	// 2. 提取所有需要探测的URL（去重）
+	urlSet := make(map[string]bool)
 	for _, link := range links.Links {
-		if link.URL == "" {
-			continue
-		}
-
-		// 检查是否已存在该URL
-		if _, exists := urlMap[link.URL]; exists {
-			continue
-		}
-
-		// 检查是否启用探测
-		if !link.ProbeEnabled {
-			log.Printf("⏭️  跳过（探测已禁用）: %s (分组: %s)", link.URL, link.GroupName)
-			skippedDisabled++
-			continue
-		}
-
-		// 检查探测间隔
-		probeInterval := time.Duration(link.ProbeIntervalMinutes) * time.Minute
-		probeHistory.mu.RLock()
-		lastProbeTime, hasHistory := probeHistory.LastProbeTime[link.URL]
-		probeHistory.mu.RUnlock()
-
-		if hasHistory {
-			timeSinceLastProbe := now.Sub(lastProbeTime)
-			if timeSinceLastProbe < probeInterval {
-				remainingTime := probeInterval - timeSinceLastProbe
-				log.Printf("⏳ 跳过（未到探测间隔）: %s (分组: %s, 间隔: %d分钟, 距上次: %.1f分钟, 还需: %.1f分钟)",
-					link.URL, link.GroupName, link.ProbeIntervalMinutes,
-					timeSinceLastProbe.Minutes(), remainingTime.Minutes())
-				skippedInterval++
-				continue
-			}
-		}
-
-		// 添加到探测列表
-		urlMap[link.URL] = urlInfo{
-			url:      link.URL,
-			interval: probeInterval,
+		if link.URL != "" {
+			urlSet[link.URL] = true
 		}
 	}
 
-	// 提取URL列表
-	var urls []string
-	for _, info := range urlMap {
-		urls = append(urls, info.url)
+	// 转换为数组
+	urls := make([]string, 0, len(urlSet))
+	for url := range urlSet {
+		urls = append(urls, url)
 	}
 
-	log.Printf("🔍 过滤后需要探测 %d 个URL（跳过：禁用 %d 个，未到间隔 %d 个）",
-		len(urls), skippedDisabled, skippedInterval)
+	log.Printf("🔍 需要探测 %d 个URL", len(urls))
 
 	// 3. 并发探测所有URL
 	results := make([]ProbeResult, 0, len(urls))
@@ -288,11 +169,6 @@ func runProbe(config *Config) {
 			results = append(results, result)
 			resultsMutex.Unlock()
 
-			// 更新探测历史
-			probeHistory.mu.Lock()
-			probeHistory.LastProbeTime[targetURL] = time.Now()
-			probeHistory.mu.Unlock()
-
 			// 更新统计
 			statsMutex.Lock()
 			if result.Status == "success" {
@@ -318,12 +194,7 @@ func runProbe(config *Config) {
 		log.Printf("✅ 上报成功")
 	}
 
-	// 5. 保存探测历史
-	if err := probeHistory.Save(); err != nil {
-		log.Printf("⚠️  保存探测历史失败: %v", err)
-	}
-
-	// 6. 输出统计
+	// 5. 输出统计
 	elapsed := time.Since(startTime)
 	log.Printf("📊 本次探测完成")
 	log.Printf("   总耗时: %v", elapsed)
@@ -388,6 +259,77 @@ func probeURL(url string, config *Config) ProbeResult {
 	}
 }
 
+// probeRedirectTarget 探测重定向目标URL是否可下载
+func probeRedirectTarget(url string, config *Config) ProbeResult {
+	result := ProbeResult{
+		URL:       url,
+		UserAgent: "SpeedProbeAgent/1.0",
+		Status:    "failed",
+	}
+
+	// 不跟随重定向的客户端
+	client := &http.Client{
+		Timeout: config.TimeoutDuration,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		result.ErrorMessage = fmt.Sprintf("创建请求失败: %v", err)
+		return result
+	}
+	req.Header.Set("User-Agent", result.UserAgent)
+	req.Header.Set("Range", "bytes=0-1023")
+
+	startTime := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		result.ErrorMessage = fmt.Sprintf("请求失败: %v", err)
+		result.Status = "timeout"
+		return result
+	}
+	defer resp.Body.Close()
+
+	contentType := resp.Header.Get("Content-Type")
+	contentDisposition := resp.Header.Get("Content-Disposition")
+
+	// 判断是否为有效的下载链接
+	isValid := false
+	if resp.StatusCode == http.StatusPartialContent {
+		isValid = true
+	} else if resp.StatusCode == http.StatusOK {
+		if strings.Contains(strings.ToLower(contentDisposition), ".apk") {
+			isValid = true
+		} else if strings.Contains(strings.ToLower(contentType), "application/vnd.android.package-archive") {
+			isValid = true
+		}
+	}
+
+	if !isValid {
+		result.ErrorMessage = fmt.Sprintf("重定向目标不满足下载条件: 状态码=%d", resp.StatusCode)
+		return result
+	}
+
+	// 计算速度评分
+	downloadTime := time.Since(startTime)
+	downloadTimeMs := downloadTime.Milliseconds()
+	speedKbps := 10000.0 / float64(downloadTimeMs)
+	if speedKbps > 10000.0 {
+		speedKbps = 10000.0
+	}
+	if speedKbps < 100.0 {
+		speedKbps = 100.0
+	}
+
+	result.DownloadTimeMs = &downloadTimeMs
+	result.SpeedKbps = speedKbps
+	result.Status = "success"
+
+	return result
+}
+
 // probeURLOnce 执行单次URL探测
 func probeURLOnce(url string, config *Config) ProbeResult {
 	result := ProbeResult{
@@ -396,23 +338,29 @@ func probeURLOnce(url string, config *Config) ProbeResult {
 		Status:    "failed",
 	}
 
-	// 创建HTTP客户端
+	// 创建HTTP客户端，允许跟随重定向
 	client := &http.Client{
 		Timeout: config.TimeoutDuration,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("重定向次数过多")
+			}
+			return nil
+		},
 	}
 
 	// 记录开始时间
 	startTime := time.Now()
 
-	// 发起请求（使用 Range 头只请求前30KB）
-	const maxDownloadSize = 30 * 1024 // 100KB
+	// 发起请求（使用 Range 头只请求前1KB）
+	const maxDownloadSize = 1 * 1024 // 1KB
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("创建请求失败: %v", err)
 		return result
 	}
 	req.Header.Set("User-Agent", result.UserAgent)
-	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", maxDownloadSize-1)) // 请求前100KB
+	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", maxDownloadSize-1))
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -422,8 +370,37 @@ func probeURLOnce(url string, config *Config) ProbeResult {
 	}
 	defer resp.Body.Close()
 
-	// 检查HTTP状态码（206 Partial Content 或 200 OK 都可以）
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+	// 获取响应头信息
+	contentType := resp.Header.Get("Content-Type")
+	contentDisposition := resp.Header.Get("Content-Disposition")
+
+	// 判断是否为有效的下载链接（满足以下任一条件即可）：
+	// 1. 状态码为 206 (Partial Content)
+	// 2. Content-Disposition 包含 .apk 文件名
+	// 3. Content-Type 为 application/vnd.android.package-archive
+	// 4. 如果是重定向状态码，检查最终重定向后的URL是否可下载
+	isValid := false
+
+	if resp.StatusCode == http.StatusPartialContent {
+		isValid = true
+	} else if strings.Contains(strings.ToLower(contentDisposition), ".apk") {
+		isValid = true
+	} else if strings.Contains(strings.ToLower(contentType), "application/vnd.android.package-archive") {
+		isValid = true
+	} else if resp.StatusCode == http.StatusTemporaryRedirect ||
+		resp.StatusCode == http.StatusMovedPermanently ||
+		resp.StatusCode == http.StatusFound {
+		// 处理重定向情况
+		location := resp.Header.Get("Location")
+		if location == "" {
+			result.ErrorMessage = "重定向但未找到Location头"
+			return result
+		}
+
+		// 对重定向后的URL进行探测
+		redirectResult := probeRedirectTarget(location, config)
+		return redirectResult
+	} else if resp.StatusCode != http.StatusOK {
 		result.ErrorMessage = fmt.Sprintf("HTTP %d", resp.StatusCode)
 		return result
 	}
@@ -456,8 +433,8 @@ func probeURLOnce(url string, config *Config) ProbeResult {
 	result.DownloadTimeMs = &downloadTimeMs
 	result.SpeedKbps = speedKbps
 
-	// 判断是否成功（基于速度阈值）
-	if speedKbps >= config.SpeedThreshold {
+	// 判断是否成功（基于速度阈值或有效性检查）
+	if isValid || speedKbps >= config.SpeedThreshold {
 		result.Status = "success"
 	} else {
 		result.Status = "failed"
