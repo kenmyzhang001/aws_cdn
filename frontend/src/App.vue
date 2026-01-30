@@ -71,6 +71,12 @@
             <span>自定义下载链接</span>
           </el-menu-item>
 
+          <!-- 重点探测链接管理 -->
+          <el-menu-item index="/focus-probe-links">
+            <el-icon><Star /></el-icon>
+            <span>重点探测链接</span>
+          </el-menu-item>
+
           <!-- 审计日志 -->
           <el-menu-item index="/audit-logs">
             <el-icon><Document /></el-icon>
@@ -88,7 +94,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box, Setting, Grid } from '@element-plus/icons-vue'
+import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box, Setting, Grid, Star } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)
