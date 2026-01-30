@@ -11,6 +11,10 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	TimeWindowMinutes = 60
+)
+
 type SpeedProbeService struct {
 	db                   *gorm.DB
 	db2                  *gorm.DB // 第二个数据库连接
@@ -622,11 +626,21 @@ func (s *SpeedProbeService) CleanOldResults(keepMinutes int) error {
 		return fmt.Errorf("清理旧探测结果失败: %w", result.Error)
 	}
 
+	s.db2.Where("created_at < ?", cutoffTime).Delete(&models.SpeedProbeResult{})
+	if result.Error != nil {
+		log.WithError(result.Error).Error("清理旧探测结果失败")
+	}
+
 	cutoffTime = time.Now().Add(-time.Duration(keepMinutes-10) * time.Minute)
 	result = s.db.Where("created_at < ?", cutoffTime).Delete(&models.SpeedAlertLog{})
 	if result.Error != nil {
 		log.WithError(result.Error).Error("清理旧告警记录失败")
 		return fmt.Errorf("清理旧告警记录失败: %w", result.Error)
+	}
+
+	s.db2.Where("created_at < ?", cutoffTime).Delete(&models.SpeedAlertLog{})
+	if result.Error != nil {
+		log.WithError(result.Error).Error("清理旧告警记录失败")
 	}
 
 	log.WithFields(map[string]interface{}{
