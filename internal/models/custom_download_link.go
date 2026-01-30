@@ -21,6 +21,8 @@ type CustomDownloadLink struct {
 	ActualURL   string                   `json:"actual_url" gorm:"type:varchar(1000);default:'"` // 真实下载链接URL（处理301/302重定向后）
 	Name        string                   `json:"name" gorm:"type:varchar(255);default:''"`       // 链接名称
 	Description string                   `json:"description" gorm:"type:text"`                   // 链接描述
+	GroupID     *uint                    `json:"group_id" gorm:"index"`                          // 所属分组ID
+	Group       *Group                   `json:"group,omitempty" gorm:"foreignKey:GroupID"`      // 分组关联
 	Status      CustomDownloadLinkStatus `json:"status" gorm:"default:'active'"`                 // 状态
 	ClickCount  uint                     `json:"click_count" gorm:"default:0"`                   // 点击次数
 	CreatedAt   time.Time                `json:"created_at"`

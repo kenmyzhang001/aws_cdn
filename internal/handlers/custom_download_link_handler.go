@@ -46,6 +46,7 @@ func (h *CustomDownloadLinkHandler) CreateCustomDownloadLink(c *gin.Context) {
 		URL:         req.URL,
 		Name:        req.Name,
 		Description: req.Description,
+		GroupID:     req.GroupID,
 		Status:      status,
 	}
 
@@ -74,7 +75,7 @@ func (h *CustomDownloadLinkHandler) BatchCreateCustomDownloadLinks(c *gin.Contex
 		return
 	}
 
-	links, err := h.service.BatchCreateCustomDownloadLinks(req.URLs)
+	links, err := h.service.BatchCreateCustomDownloadLinks(req.URLs, req.GroupID)
 	if err != nil {
 		log.WithError(err).Error("批量创建自定义下载链接操作失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -281,6 +282,8 @@ type CustomDownloadLinkResponse struct {
 	URL         string `json:"url"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	GroupID     *uint  `json:"group_id"`
+	GroupName   string `json:"group_name,omitempty"`
 	Status      string `json:"status"`
 	ClickCount  uint   `json:"click_count"`
 	CreatedAt   string `json:"created_at"`
@@ -294,10 +297,15 @@ func (h *CustomDownloadLinkHandler) toResponse(link *models.CustomDownloadLink) 
 		URL:         link.URL,
 		Name:        link.Name,
 		Description: link.Description,
+		GroupID:     link.GroupID,
 		Status:      string(link.Status),
 		ClickCount:  link.ClickCount,
 		CreatedAt:   link.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:   link.UpdatedAt.Format(time.RFC3339),
+	}
+
+	if link.Group != nil {
+		resp.GroupName = link.Group.Name
 	}
 
 	return resp

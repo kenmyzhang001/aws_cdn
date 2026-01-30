@@ -30,7 +30,7 @@ func (s *CustomDownloadLinkService) CreateCustomDownloadLink(link *models.Custom
 
 // BatchCreateCustomDownloadLinks 批量创建自定义下载链接
 // urls: 链接列表，支持换行符或逗号分隔
-func (s *CustomDownloadLinkService) BatchCreateCustomDownloadLinks(urlsText string) ([]models.CustomDownloadLink, error) {
+func (s *CustomDownloadLinkService) BatchCreateCustomDownloadLinks(urlsText string, groupID *uint) ([]models.CustomDownloadLink, error) {
 	// 解析链接（支持换行符和逗号分隔）
 	urls := parseURLs(urlsText)
 	if len(urls) == 0 {
@@ -40,8 +40,9 @@ func (s *CustomDownloadLinkService) BatchCreateCustomDownloadLinks(urlsText stri
 	links := make([]models.CustomDownloadLink, 0, len(urls))
 	for _, url := range urls {
 		link := models.CustomDownloadLink{
-			URL:    url,
-			Status: models.CustomDownloadLinkStatusActive,
+			URL:     url,
+			GroupID: groupID,
+			Status:  models.CustomDownloadLinkStatusActive,
 		}
 		links = append(links, link)
 	}
