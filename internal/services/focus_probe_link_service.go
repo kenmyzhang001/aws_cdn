@@ -236,7 +236,7 @@ func (s *FocusProbeLinkService) AddFromDownloadPackage(packageID uint, url, name
 		LinkID:               &packageID,
 		URL:                  url,
 		Name:                 name,
-		ProbeIntervalMinutes: 10, // 默认10分钟
+		ProbeIntervalMinutes: 30, // 默认30分钟
 		Enabled:              true,
 	}
 	return s.CreateFocusProbeLink(link)
@@ -249,7 +249,7 @@ func (s *FocusProbeLinkService) AddFromCustomDownloadLink(linkID uint, url, name
 		LinkID:               &linkID,
 		URL:                  url,
 		Name:                 name,
-		ProbeIntervalMinutes: 10, // 默认10分钟
+		ProbeIntervalMinutes: 30, // 默认30分钟
 		Enabled:              true,
 	}
 	return s.CreateFocusProbeLink(link)
@@ -262,7 +262,7 @@ func (s *FocusProbeLinkService) AddFromR2File(url, name, description string) err
 		URL:                  url,
 		Name:                 name,
 		Description:          description,
-		ProbeIntervalMinutes: 10, // 默认10分钟
+		ProbeIntervalMinutes: 30, // 默认30分钟
 		Enabled:              true,
 	}
 	return s.CreateFocusProbeLink(link)

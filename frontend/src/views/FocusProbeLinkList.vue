@@ -349,7 +349,7 @@ const showAddDialog = ref(false)
 const showEditDialog = ref(false)
 const showBatchIntervalDialog = ref(false)
 const batchIntervalAll = ref(false)
-const batchIntervalMinutes = ref(10)
+const batchIntervalMinutes = ref(30)
 
 // 表单数据
 const linkForm = reactive({
@@ -357,7 +357,7 @@ const linkForm = reactive({
   url: '',
   name: '',
   description: '',
-  probe_interval_minutes: 10,
+  probe_interval_minutes: 30,
   enabled: true
 })
 
@@ -367,7 +367,7 @@ const editForm = reactive({
   url: '',
   name: '',
   description: '',
-  probe_interval_minutes: 10,
+  probe_interval_minutes: 30,
   enabled: true
 })
 
@@ -453,7 +453,7 @@ const openAddDialog = () => {
     url: '',
     name: '',
     description: '',
-    probe_interval_minutes: 10,
+    probe_interval_minutes: 30,
     enabled: true
   })
   showAddDialog.value = true
@@ -476,14 +476,14 @@ const openEditDialog = (row) => {
 // 打开批量设置间隔对话框
 const openBatchIntervalDialog = () => {
   batchIntervalAll.value = false
-  batchIntervalMinutes.value = 10
+  batchIntervalMinutes.value = 30
   showBatchIntervalDialog.value = true
 }
 
 // 打开统一设置间隔对话框
 const openBatchIntervalDialogAll = () => {
   batchIntervalAll.value = true
-  batchIntervalMinutes.value = 10
+  batchIntervalMinutes.value = 30
   showBatchIntervalDialog.value = true
 }
 

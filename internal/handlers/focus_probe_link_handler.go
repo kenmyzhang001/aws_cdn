@@ -99,7 +99,7 @@ func (h *FocusProbeLinkHandler) CreateFocusProbeLink(c *gin.Context) {
 
 	// 设置默认值
 	if req.ProbeIntervalMinutes == 0 {
-		req.ProbeIntervalMinutes = 10
+		req.ProbeIntervalMinutes = 30
 	}
 
 	link := &models.FocusProbeLink{

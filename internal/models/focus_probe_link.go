@@ -23,7 +23,7 @@ type FocusProbeLink struct {
 	URL                 string         `json:"url" gorm:"type:varchar(1000);not null;uniqueIndex:idx_url"`     // 探测的URL
 	Name                string         `json:"name" gorm:"type:varchar(255)"`                                   // 链接名称
 	Description         string         `json:"description" gorm:"type:text"`                                    // 链接描述
-	ProbeIntervalMinutes int           `json:"probe_interval_minutes" gorm:"default:10"`                        // 探测间隔（分钟）
+	ProbeIntervalMinutes int           `json:"probe_interval_minutes" gorm:"default:30"`                        // 探测间隔（分钟）
 	Enabled             bool           `json:"enabled" gorm:"default:true;index:idx_enabled"`                   // 是否启用
 	LastProbeTime       *time.Time     `json:"last_probe_time"`                                                 // 最后探测时间
 	LastProbeStatus     string         `json:"last_probe_status" gorm:"type:varchar(20)"`                       // 最后探测状态
