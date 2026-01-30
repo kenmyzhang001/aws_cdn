@@ -125,6 +125,14 @@
                                 </el-icon>
                                 {{ urlItem.copied ? '已复制' : '复制' }}
                               </el-button>
+                              <el-button
+                                @click="addToFocusProbe(urlItem.url, row.file_name)"
+                                type="warning"
+                                style="margin-left: 8px"
+                              >
+                                <el-icon><Star /></el-icon>
+                                重点探测
+                              </el-button>
                             </template>
                           </el-input>
                         </div>
@@ -193,6 +201,7 @@ import { ref, computed, onMounted } from 'vue'
 import { r2Api } from '@/api/r2'
 import { ElMessage } from 'element-plus'
 import { Search, Refresh, Document, DocumentCopy, Check, Star } from '@element-plus/icons-vue'
+import { addFromR2File } from '@/api/focus_probe_link'
 
 const loading = ref(false)
 const bucketList = ref([])
@@ -425,6 +434,20 @@ const copyAllUrls = async (row) => {
       ElMessage.error('复制失败，请手动复制')
     }
     document.body.removeChild(textArea)
+  }
+}
+
+// 添加到重点探测
+const addToFocusProbe = async (url, fileName) => {
+  try {
+    await addFromR2File(url, fileName, `R2文件: ${fileName}`)
+    ElMessage.success('已添加到重点探测链接')
+  } catch (error) {
+    if (error.response?.data?.error?.includes('已存在')) {
+      ElMessage.warning('该链接已存在于重点探测中')
+    } else {
+      ElMessage.error('添加失败: ' + (error.response?.data?.error || error.message))
+    }
   }
 }
 

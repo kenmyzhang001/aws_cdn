@@ -171,8 +171,23 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 		}
 	}
 
+	// 根据 URL 去重，只保留第一个出现的
+	uniqueLinks := make([]LinkItem, 0, len(response.Links))
+	seenURLs := make(map[string]bool)
+
+	for _, link := range response.Links {
+		if !seenURLs[link.URL] {
+			seenURLs[link.URL] = true
+			uniqueLinks = append(uniqueLinks, link)
+		}
+	}
+
+	response.Links = uniqueLinks
+
 	// 计算总数
 	response.Total = len(response.Links)
+
+	log.WithField("total", response.Total).Info("获取所有链接成功")
 
 	c.JSON(http.StatusOK, response)
 }

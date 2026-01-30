@@ -11,6 +11,7 @@ import R2BucketList from '@/views/R2BucketList.vue'
 import R2ApkLinkManager from '@/views/R2ApkLinkManager.vue'
 import CustomDownloadLinkList from '@/views/CustomDownloadLinkList.vue'
 import CfWorkerList from '@/views/CfWorkerList.vue'
+import FocusProbeLinkList from '@/views/FocusProbeLinkList.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -82,6 +83,11 @@ const routes = [
     path: '/cf-workers',
     name: 'CfWorkerList',
     component: CfWorkerList,
+  },
+  {
+    path: '/focus-probe-links',
+    name: 'FocusProbeLinkList',
+    component: FocusProbeLinkList,
   },
 ]
 

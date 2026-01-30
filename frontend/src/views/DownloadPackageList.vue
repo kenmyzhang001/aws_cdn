@@ -417,7 +417,7 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="下载URL"  width="250" >
+            <el-table-column label="下载URL"  width="280" >
               <template #default="{ row }">
                 <div v-if="row.download_url" style="display: flex; align-items: center; gap: 8px;">
                   <el-link
@@ -435,6 +435,15 @@
                     @click="copyDownloadUrl(row)"
                     title="复制链接"
                   />
+                  <el-button
+                    size="small"
+                    type="warning"
+                    circle
+                    @click="addToFocusProbe(row)"
+                    title="添加到重点探测"
+                  >
+                    <el-icon><Star /></el-icon>
+                  </el-button>
                 </div>
                 <span v-else style="color: #909399">-</span>
               </template>
@@ -604,12 +613,13 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Document, CopyDocument, Search, Edit } from '@element-plus/icons-vue'
+import { Plus, Document, CopyDocument, Search, Edit, Star } from '@element-plus/icons-vue'
 import request from '@/api/request'
 import { domainApi } from '@/api/domain'
 import { downloadPackageApi } from '@/api/download_package'
 import { groupApi } from '@/api/group'
 import { uploadFile } from '@/utils/upload'
+import { addFromDownloadPackage } from '@/api/focus_probe_link'
 
 const loading = ref(false)
 const domainList = ref([]) // 域名列表，只包含基本域名信息
@@ -1556,6 +1566,20 @@ const saveNote = async () => {
     // 错误已在拦截器中处理
   } finally {
     noteLoading.value = false
+  }
+}
+
+// 添加到重点探测
+const addToFocusProbe = async (row) => {
+  try {
+    await addFromDownloadPackage(row.id, row.download_url, row.file_name)
+    ElMessage.success('已添加到重点探测链接')
+  } catch (error) {
+    if (error.response?.data?.error?.includes('已存在')) {
+      ElMessage.warning('该链接已存在于重点探测中')
+    } else {
+      ElMessage.error('添加失败: ' + (error.response?.data?.error || error.message))
+    }
   }
 }
 

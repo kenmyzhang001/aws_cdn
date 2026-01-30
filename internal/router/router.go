@@ -85,6 +85,9 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	// 初始化 Worker 服务
 	cfWorkerService := services.NewCFWorkerService(db)
 
+	// 初始化重点探测链接服务
+	focusProbeLinkService := services.NewFocusProbeLinkService(db)
+
 	// 初始化处理器
 	groupHandler := handlers.NewGroupHandler(groupService)
 	domainHandler := handlers.NewDomainHandler(domainService)
@@ -99,6 +102,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	allLinksHandler := handlers.NewAllLinksHandler(downloadPackageService, customDownloadLinkService, r2CustomDomainService, r2FileService)
 	speedProbeHandler := handlers.NewSpeedProbeHandler(speedProbeService)
 	cfWorkerHandler := handlers.NewCFWorkerHandler(cfWorkerService)
+	focusProbeLinkHandler := handlers.NewFocusProbeLinkHandler(focusProbeLinkService)
 
 	// API 路由
 	api := r.Group("/api/v1")
@@ -273,6 +277,25 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			cfWorkers.POST("", cfWorkerHandler.CreateWorker)
 			cfWorkers.PUT("/:id", cfWorkerHandler.UpdateWorker)
 			cfWorkers.DELETE("/:id", cfWorkerHandler.DeleteWorker)
+		}
+
+		// 重点探测链接管理
+		focusProbeLinks := protected.Group("/focus-probe-links")
+		{
+			focusProbeLinks.GET("", focusProbeLinkHandler.GetFocusProbeLinks)
+			focusProbeLinks.GET("/statistics", focusProbeLinkHandler.GetStatistics)
+			focusProbeLinks.GET("/export", focusProbeLinkHandler.ExportLinks)
+			focusProbeLinks.GET("/check-url", focusProbeLinkHandler.CheckIfURLExists)
+			focusProbeLinks.GET("/:id", focusProbeLinkHandler.GetFocusProbeLinkByID)
+			focusProbeLinks.POST("", focusProbeLinkHandler.CreateFocusProbeLink)
+			focusProbeLinks.PUT("/:id", focusProbeLinkHandler.UpdateFocusProbeLink)
+			focusProbeLinks.DELETE("/:id", focusProbeLinkHandler.DeleteFocusProbeLink)
+			focusProbeLinks.POST("/batch-delete", focusProbeLinkHandler.BatchDeleteFocusProbeLinks)
+			focusProbeLinks.POST("/batch-update-interval", focusProbeLinkHandler.BatchUpdateProbeInterval)
+			focusProbeLinks.POST("/:id/toggle-enabled", focusProbeLinkHandler.ToggleEnabled)
+			focusProbeLinks.POST("/from-download-package", focusProbeLinkHandler.AddFromDownloadPackage)
+			focusProbeLinks.POST("/from-custom-link", focusProbeLinkHandler.AddFromCustomDownloadLink)
+			focusProbeLinks.POST("/from-r2-file", focusProbeLinkHandler.AddFromR2File)
 		}
 	}
 

@@ -116,13 +116,17 @@
               {{ formatDate(row.created_at) }}
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right">
+          <el-table-column label="操作" width="280" fixed="right">
             <template #default="{ row }">
               <el-button size="small" type="primary" @click="openEditDialog(row)">
                 编辑
               </el-button>
               <el-button size="small" type="success" @click="handleClick(row)">
                 访问
+              </el-button>
+              <el-button size="small" type="warning" @click="addToFocusProbe(row)">
+                <el-icon><Star /></el-icon>
+                重点探测
               </el-button>
               <el-button size="small" type="danger" @click="handleDelete(row)">
                 删除
@@ -264,7 +268,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Plus, Search, Delete, CopyDocument } from '@element-plus/icons-vue';
+import { Plus, Search, Delete, CopyDocument, Star } from '@element-plus/icons-vue';
 import {
   getCustomDownloadLinks,
   createCustomDownloadLink,
@@ -275,6 +279,7 @@ import {
   incrementClickCount
 } from '@/api/custom_download_link';
 import { groupApi } from '@/api/group';
+import { addFromCustomDownloadLink } from '@/api/focus_probe_link';
 
 // 数据
 const loading = ref(false);
@@ -597,6 +602,20 @@ const formatDate = (dateString) => {
     hour: '2-digit',
     minute: '2-digit'
   });
+};
+
+// 添加到重点探测
+const addToFocusProbe = async (row) => {
+  try {
+    await addFromCustomDownloadLink(row.id, row.url, row.name || '自定义链接')
+    ElMessage.success('已添加到重点探测链接')
+  } catch (error) {
+    if (error.response?.data?.error?.includes('已存在')) {
+      ElMessage.warning('该链接已存在于重点探测中')
+    } else {
+      ElMessage.error('添加失败: ' + (error.response?.data?.error || error.message))
+    }
+  }
 };
 
 // 组件挂载时加载数据
