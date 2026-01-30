@@ -8,9 +8,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Config Agent配置
@@ -57,6 +60,32 @@ type BatchReportRequest struct {
 }
 
 func main() {
+	// 确保 logs 目录存在
+	if err := os.MkdirAll("logs", 0755); err != nil {
+		fmt.Printf("创建 logs 目录失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 配置日志输出到文件，支持自动切割
+	logFile := &lumberjack.Logger{
+		Filename:   "logs/agent.log", // 日志文件路径
+		MaxSize:    50,               // 每个日志文件最大50MB
+		MaxBackups: 10,               // 最多保留10个旧日志文件
+		MaxAge:     30,               // 日志文件最多保留30天
+		Compress:   true,             // 是否压缩旧日志文件
+		LocalTime:  true,             // 使用本地时间
+	}
+
+	// 同时输出到文件和控制台（方便调试）
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(multiWriter)
+	// 设置日志格式：日期 时间 文件名:行号
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
+	log.Println("========== Agent 服务启动 ==========")
+	log.Printf("日志文件配置 - 路径: %s, 最大大小: %dMB, 最多保留: %d个文件",
+		logFile.Filename, logFile.MaxSize, logFile.MaxBackups)
+
 	// 解析命令行参数
 	serverURL := flag.String("server", "http://16.163.99.99:8080", "服务器地址")
 	interval := flag.Duration("interval", 30*time.Minute, "探测间隔")
