@@ -261,7 +261,7 @@ func probeRedirectTarget(url string, traceID string) (float64, error) {
 	}
 
 	// 计算速度评分
-	speedKbps := 1000000.0 / float64(requestDuration.Milliseconds())
+	speedKbps := 10000.0 / float64(requestDuration.Milliseconds())
 	if speedKbps > 10000.0 {
 		speedKbps = 10000.0
 	}
@@ -375,7 +375,7 @@ func probeURL(url string, traceID string) (float64, error) {
 		// 基于响应时间计算一个估算速度值（响应越快，速度越高）
 		// 假设响应时间越短，服务器性能越好，给予更高的速度评分
 		// 速度范围：100ms以内=10000KB/s, 500ms=2000KB/s, 1000ms=1000KB/s
-		speedKbps := 1000000.0 / float64(requestDuration.Milliseconds())
+		speedKbps := 10000.0 / float64(requestDuration.Milliseconds())
 		if speedKbps > 10000.0 {
 			speedKbps = 10000.0 // 设置上限
 		}
