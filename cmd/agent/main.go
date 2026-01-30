@@ -25,17 +25,13 @@ type Config struct {
 
 // LinkItem 链接项
 type LinkItem struct {
-	ID                   uint   `json:"id"`
-	URL                  string `json:"url"`
-	Name                 string `json:"name"`
-	Description          string `json:"description"`
-	Type                 string `json:"type"`
-	Status               string `json:"status"`
-	GroupID              *uint  `json:"group_id,omitempty"`
-	GroupName            string `json:"group_name,omitempty"`
-	ProbeEnabled         bool   `json:"probe_enabled"`
-	ProbeIntervalMinutes int    `json:"probe_interval_minutes"`
-	CreatedAt            string `json:"created_at"`
+	ID          uint   `json:"id"`
+	URL         string `json:"url"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+	Status      string `json:"status"`
+	CreatedAt   string `json:"created_at"`
 }
 
 // AllLinksResponse 所有链接的响应
@@ -63,7 +59,7 @@ type BatchReportRequest struct {
 func main() {
 	// 解析命令行参数
 	serverURL := flag.String("server", "http://16.163.99.99:8080", "服务器地址")
-	interval := flag.Duration("interval", 10*time.Minute, "探测间隔")
+	interval := flag.Duration("interval", 30*time.Minute, "探测间隔")
 	timeout := flag.Duration("timeout", 60*time.Second, "单次探测超时时间")
 	maxSize := flag.Int64("max-size", 10*1024*1024, "最大下载文件大小（字节）")
 	speedThreshold := flag.Float64("speed-threshold", 10.0, "速度阈值（KB/s）")
@@ -275,13 +271,14 @@ func probeRedirectTarget(url string, config *Config) ProbeResult {
 		},
 	}
 
+	const downloadSize = 1 * 1024 // 1KB
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("创建请求失败: %v", err)
 		return result
 	}
 	req.Header.Set("User-Agent", result.UserAgent)
-	req.Header.Set("Range", "bytes=0-1023")
+	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", downloadSize-1))
 
 	startTime := time.Now()
 	resp, err := client.Do(req)
@@ -312,17 +309,29 @@ func probeRedirectTarget(url string, config *Config) ProbeResult {
 		return result
 	}
 
-	// 计算速度评分
-	downloadTime := time.Since(startTime)
-	downloadTimeMs := downloadTime.Milliseconds()
-	speedKbps := 10000.0 / float64(downloadTimeMs)
-	if speedKbps > 10000.0 {
-		speedKbps = 10000.0
-	}
-	if speedKbps < 100.0 {
-		speedKbps = 100.0
+	// 读取实际下载的数据
+	totalSize := int64(0)
+	buffer := make([]byte, 32*1024) // 32KB buffer
+	for {
+		n, err := resp.Body.Read(buffer)
+		if n > 0 {
+			totalSize += int64(n)
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			result.ErrorMessage = fmt.Sprintf("读取失败: %v", err)
+			return result
+		}
 	}
 
+	// 计算速度（基于实际下载的字节数）
+	downloadTime := time.Since(startTime)
+	downloadTimeMs := downloadTime.Milliseconds()
+	speedKbps := float64(totalSize) / 1024.0 / downloadTime.Seconds()
+
+	result.FileSize = &totalSize
 	result.DownloadTimeMs = &downloadTimeMs
 	result.SpeedKbps = speedKbps
 	result.Status = "success"
