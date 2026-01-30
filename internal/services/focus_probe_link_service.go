@@ -335,3 +335,19 @@ func (s *FocusProbeLinkService) ExportLinks() ([]string, error) {
 
 	return urls, nil
 }
+
+// GetProbeIntervalForURL 获取URL的探测间隔（分钟）
+// 如果URL在FocusProbeLink中存在，返回其设置的间隔；否则返回默认的30分钟
+func (s *FocusProbeLinkService) GetProbeIntervalForURL(url string) (int, error) {
+	var link models.FocusProbeLink
+	err := s.db.Where("url = ?", url).First(&link).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// 如果不存在，返回默认的30分钟
+			return 30, nil
+		}
+		return 0, err
+	}
+
+	return link.ProbeIntervalMinutes, nil
+}

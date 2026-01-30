@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,6 +16,8 @@ type AllLinksHandler struct {
 	customDownloadLinkService *services.CustomDownloadLinkService
 	r2CustomDomainService     *services.R2CustomDomainService
 	r2FileService             *services.R2FileService
+	focusProbeLinkService     *services.FocusProbeLinkService
+	speedProbeService         *services.SpeedProbeService
 }
 
 func NewAllLinksHandler(
@@ -22,12 +25,16 @@ func NewAllLinksHandler(
 	customDownloadLinkService *services.CustomDownloadLinkService,
 	r2CustomDomainService *services.R2CustomDomainService,
 	r2FileService *services.R2FileService,
+	focusProbeLinkService *services.FocusProbeLinkService,
+	speedProbeService *services.SpeedProbeService,
 ) *AllLinksHandler {
 	return &AllLinksHandler{
 		downloadPackageService:    downloadPackageService,
 		customDownloadLinkService: customDownloadLinkService,
 		r2CustomDomainService:     r2CustomDomainService,
 		r2FileService:             r2FileService,
+		focusProbeLinkService:     focusProbeLinkService,
+		speedProbeService:         speedProbeService,
 	}
 }
 
@@ -184,10 +191,81 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 
 	response.Links = uniqueLinks
 
+	// 过滤掉在探测间隔内已有探测记录的链接（并发处理，最多50并发）
+	type filterResult struct {
+		link     LinkItem
+		included bool // 是否应该包含在结果中
+	}
+
+	resultChan := make(chan filterResult, len(response.Links))
+	var wg sync.WaitGroup
+
+	// 创建信号量 channel 来控制并发数（最多50个）
+	const maxConcurrency = 50
+	semaphore := make(chan struct{}, maxConcurrency)
+
+	// 并发处理每个链接
+	for _, link := range response.Links {
+		wg.Add(1)
+		go func(l LinkItem) {
+			defer wg.Done()
+
+			// 获取信号量（限制并发数）
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }() // 释放信号量
+
+			// 获取该链接的探测间隔
+			intervalMinutes, err := h.focusProbeLinkService.GetProbeIntervalForURL(l.URL)
+			if err != nil {
+				log.WithError(err).WithField("url", l.URL).Warn("获取探测间隔失败，使用默认30分钟")
+				intervalMinutes = 30
+			}
+
+			// 检查是否在指定时间间隔内有探测记录
+			hasRecent, err := h.speedProbeService.HasRecentProbeResult(l.URL, intervalMinutes)
+			if err != nil {
+				log.WithError(err).WithField("url", l.URL).Warn("检查探测记录失败，保留该链接")
+				resultChan <- filterResult{link: l, included: true}
+				return
+			}
+
+			// 如果在时间间隔内没有探测记录，才返回该链接
+			if !hasRecent {
+				resultChan <- filterResult{link: l, included: true}
+			} else {
+				log.WithFields(map[string]interface{}{
+					"url":              l.URL,
+					"interval_minutes": intervalMinutes,
+				}).Debug("链接在探测间隔内已有探测记录，已过滤")
+				resultChan <- filterResult{link: l, included: false}
+			}
+		}(link)
+	}
+
+	// 等待所有 goroutine 完成
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// 收集结果
+	filteredLinks := make([]LinkItem, 0, len(response.Links))
+	for result := range resultChan {
+		if result.included {
+			filteredLinks = append(filteredLinks, result.link)
+		}
+	}
+
+	response.Links = filteredLinks
+
 	// 计算总数
 	response.Total = len(response.Links)
 
-	log.WithField("total", response.Total).Info("获取所有链接成功")
+	log.WithFields(map[string]interface{}{
+		"total":         response.Total,
+		"before_filter": len(uniqueLinks),
+		"filtered_out":  len(uniqueLinks) - response.Total,
+	}).Info("获取所有链接成功")
 
 	c.JSON(http.StatusOK, response)
 }

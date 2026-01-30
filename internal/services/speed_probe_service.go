@@ -636,3 +636,19 @@ func (s *SpeedProbeService) CleanOldResults(keepMinutes int) error {
 
 	return nil
 }
+
+// HasRecentProbeResult 检查URL在指定时间间隔内是否有探测记录
+func (s *SpeedProbeService) HasRecentProbeResult(url string, intervalMinutes int) (bool, error) {
+	var count int64
+	cutoffTime := time.Now().Add(-time.Duration(intervalMinutes) * time.Minute)
+
+	err := s.db.Model(&models.SpeedProbeResult{}).
+		Where("url = ? AND created_at >= ?", url, cutoffTime).
+		Count(&count).Error
+
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
