@@ -198,11 +198,13 @@ func runProbe(config *Config) {
 			statsMutex.Lock()
 			if result.Status == "success" {
 				successCount++
-				log.Printf("   ✓ 成功 | 速度: %.2f KB/s | 耗时: %d ms",
+				log.Printf("   [%d/%d] 探测: %s ✓ 成功 | 速度: %.2f KB/s | 耗时: %d ms",
+					currentIndex, len(urls), targetURL,
 					result.SpeedKbps, *result.DownloadTimeMs)
 			} else {
 				failedCount++
-				log.Printf("   ✗ 失败 | 原因: %s", result.ErrorMessage)
+				log.Printf("   [%d/%d] 探测: %s ✗ 失败 | 原因: %s",
+					currentIndex, len(urls), targetURL, result.ErrorMessage)
 			}
 			statsMutex.Unlock()
 		}(url)
@@ -254,23 +256,23 @@ func fetchAllLinks(serverURL string) (*AllLinksResponse, error) {
 
 // probeURL 探测单个URL的下载速度（支持重试）
 func probeURL(url string, config *Config) ProbeResult {
-	const maxRetries = 3
+	const maxAttempts = 3 // 总共尝试3次（首次 + 重试1次）
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		result := probeURLOnce(url, config)
 
-		// 如果成功或非超时错误，直接返回
-		if result.Status == "success" || result.Status != "timeout" {
+		// 如果成功，直接返回
+		if result.Status == "success" {
 			return result
 		}
 
-		// 超时且还有重试机会
-		if attempt < maxRetries {
-			log.Printf("   ⚠️  超时，%d秒后重试 (%d/%d)", 2, attempt, maxRetries)
+		// 失败且还有重试机会
+		if attempt < maxAttempts {
+			log.Printf("   ⚠️  探测失败，%d秒后重试 (%d/%d)，失败原因: %s", 2, attempt, maxAttempts, result.ErrorMessage)
 			time.Sleep(2 * time.Second)
 		} else {
 			// 最后一次重试也失败了
-			result.ErrorMessage = fmt.Sprintf("请求超时(已重试%d次): %s", maxRetries, result.ErrorMessage)
+			result.ErrorMessage = fmt.Sprintf("探测失败(已重试%d次): %s", maxAttempts-1, result.ErrorMessage)
 			return result
 		}
 	}
