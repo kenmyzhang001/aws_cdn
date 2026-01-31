@@ -18,6 +18,7 @@
             v-model="searchForm.cf_account_id"
             clearable
             placeholder="请选择 CF 账号"
+            style="width: 300px"
             @change="loadWorkers"
           >
             <el-option
