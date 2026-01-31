@@ -183,18 +183,20 @@
     </el-card>
 
     <!-- 新增域名对话框 -->
-    <el-dialog v-model="showTransferDialog" title="新增域名" width="500px">
-      <el-form :model="transferForm" label-width="100px">
-        <el-form-item label="域名" required>
-          <el-input v-model="transferForm.domain_name" placeholder="例如: example.com" />
-        </el-form-item>
+    <el-dialog v-model="showTransferDialog" title="新增域名" width="600px">
+      <el-form :model="transferForm" label-width="120px">
         <el-form-item label="DNS提供商" required>
           <el-select v-model="transferForm.dns_provider" disabled style="width: 100%">
             <el-option label="Cloudflare" value="cloudflare" />
           </el-select>
         </el-form-item>
-        <el-form-item label="CF 账号">
-          <el-select v-model="transferForm.cf_account_id" placeholder="请选择 CF 账号（可选）" clearable style="width: 100%">
+        <el-form-item label="CF 账号" required>
+          <el-select 
+            v-model="transferForm.cf_account_id" 
+            placeholder="请选择 CF 账号" 
+            style="width: 100%"
+            @change="handleCFAccountChange"
+          >
             <el-option
               v-for="account in cfAccountList"
               :key="account.id"
@@ -205,6 +207,47 @@
           <div style="font-size: 12px; color: #909399; margin-top: 5px">
             选择 CF 账号用于域名管理操作
           </div>
+        </el-form-item>
+        <el-form-item label="根域名" required>
+          <el-select 
+            v-model="transferForm.zone_id" 
+            placeholder="请先选择 CF 账号"
+            :disabled="!transferForm.cf_account_id"
+            :loading="loadingZones"
+            filterable
+            style="width: 100%"
+            @change="handleZoneChange"
+          >
+            <el-option
+              v-for="zone in zoneList"
+              :key="zone.id"
+              :label="zone.name"
+              :value="zone.id"
+            >
+              <span>{{ zone.name }}</span>
+              <span style="float: right; color: #8492a6; font-size: 12px">{{ zone.status }}</span>
+            </el-option>
+          </el-select>
+          <div style="font-size: 12px; color: #909399; margin-top: 5px">
+            从 CF 账号下选择一个根域名
+          </div>
+        </el-form-item>
+        <el-form-item label="子域名前缀">
+          <el-input 
+            v-model="transferForm.subdomain_prefix" 
+            placeholder="留空则使用根域名，例如：dl、cdn" 
+            :disabled="!transferForm.zone_id"
+          >
+            <template #append v-if="selectedZoneName">
+              .{{ selectedZoneName }}
+            </template>
+          </el-input>
+          <div style="font-size: 12px; color: #909399; margin-top: 5px">
+            留空则使用根域名，填写则创建子域名（如 dl.example.com）
+          </div>
+        </el-form-item>
+        <el-form-item label="最终域名">
+          <el-input :value="finalDomainName" disabled />
         </el-form-item>
         <el-form-item label="分组">
           <el-select v-model="transferForm.group_id" placeholder="请选择分组（不选则使用默认分组）" clearable style="width: 100%">
@@ -218,7 +261,7 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showTransferDialog = false">取消</el-button>
+        <el-button @click="closeTransferDialog">取消</el-button>
         <el-button type="primary" @click="handleTransfer" :loading="transferLoading">
           确认新增
         </el-button>
@@ -360,7 +403,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { domainApi } from '@/api/domain'
 import { groupApi } from '@/api/group'
 import { cfAccountApi } from '@/api/cf_account'
@@ -383,11 +426,30 @@ let searchTimer = null
 const showTransferDialog = ref(false)
 const transferLoading = ref(false)
 const cfAccountList = ref([])
+const zoneList = ref([])
+const loadingZones = ref(false)
 const transferForm = ref({
-  domain_name: '',
   dns_provider: 'cloudflare', // 默认选择 Cloudflare
   cf_account_id: null,
+  zone_id: null,
+  subdomain_prefix: '',
   group_id: null,
+})
+
+// 选中的 Zone 名称
+const selectedZoneName = computed(() => {
+  if (!transferForm.value.zone_id) return ''
+  const zone = zoneList.value.find(z => z.id === transferForm.value.zone_id)
+  return zone ? zone.name : ''
+})
+
+// 最终域名
+const finalDomainName = computed(() => {
+  if (!selectedZoneName.value) return ''
+  if (!transferForm.value.subdomain_prefix || !transferForm.value.subdomain_prefix.trim()) {
+    return selectedZoneName.value
+  }
+  return `${transferForm.value.subdomain_prefix.trim()}.${selectedZoneName.value}`
 })
 
 const showNSDialog = ref(false)
@@ -428,6 +490,58 @@ const loadCFAccounts = async () => {
   } catch (error) {
     console.error('加载 CF 账号列表失败', error)
   }
+}
+
+// 当 CF 账号改变时，加载该账号下的 Zones
+const handleCFAccountChange = async (accountId) => {
+  if (!accountId) {
+    zoneList.value = []
+    transferForm.value.zone_id = null
+    transferForm.value.subdomain_prefix = ''
+    return
+  }
+  
+  loadingZones.value = true
+  try {
+    const res = await cfAccountApi.getCFAccountZones(accountId, { per_page: 100 })
+    console.log('API 返回数据:', res)
+    console.log('zones 数据:', res.zones)
+    zoneList.value = res.zones || []
+    console.log('zoneList.value:', zoneList.value)
+    // 清空之前选择的 Zone
+    transferForm.value.zone_id = null
+    transferForm.value.subdomain_prefix = ''
+    
+    if (zoneList.value.length === 0) {
+      ElMessage.warning('该 CF 账号下没有域名')
+    } else {
+      ElMessage.success(`成功加载 ${zoneList.value.length} 个域名`)
+    }
+  } catch (error) {
+    console.error('加载域名列表失败:', error)
+    ElMessage.error('加载域名列表失败: ' + (error.message || '未知错误'))
+    zoneList.value = []
+  } finally {
+    loadingZones.value = false
+  }
+}
+
+// 当 Zone 改变时，清空子域名前缀
+const handleZoneChange = () => {
+  transferForm.value.subdomain_prefix = ''
+}
+
+// 关闭新增域名对话框
+const closeTransferDialog = () => {
+  showTransferDialog.value = false
+  transferForm.value = {
+    dns_provider: 'cloudflare',
+    cf_account_id: null,
+    zone_id: null,
+    subdomain_prefix: '',
+    group_id: null,
+  }
+  zoneList.value = []
 }
 
 const loadGroups = async () => {
@@ -514,25 +628,32 @@ const handleUsageFilterChange = () => {
 }
 
 const handleTransfer = async () => {
-  if (!transferForm.value.domain_name) {
-    ElMessage.warning('请填写域名')
+  // 验证必填字段
+  if (!transferForm.value.cf_account_id) {
+    ElMessage.warning('请选择 CF 账号')
+    return
+  }
+  if (!transferForm.value.zone_id) {
+    ElMessage.warning('请选择根域名')
     return
   }
 
   transferLoading.value = true
   try {
-    const data = { ...transferForm.value }
-    // 移除空值字段
-    if (!data.group_id) {
-      delete data.group_id
+    const data = {
+      domain_name: finalDomainName.value,
+      dns_provider: transferForm.value.dns_provider,
+      cf_account_id: transferForm.value.cf_account_id,
     }
-    if (!data.cf_account_id) {
-      delete data.cf_account_id
+    
+    // 添加可选字段
+    if (transferForm.value.group_id) {
+      data.group_id = transferForm.value.group_id
     }
+    
     await domainApi.transferDomain(data)
     ElMessage.success('域名转入请求已提交')
-    showTransferDialog.value = false
-    transferForm.value = { domain_name: '', dns_provider: 'cloudflare', cf_account_id: null, group_id: null }
+    closeTransferDialog()
     loadGroups()
     loadDomains()
   } catch (error) {
