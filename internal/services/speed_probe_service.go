@@ -424,6 +424,7 @@ func (s *SpeedProbeService) sendAlertsBatch(alerts []*models.SpeedAlertLog) erro
 			"batch":         batchNum,
 			"total_batches": totalBatches,
 			"batch_size":    len(batch),
+			"alerts":        batch,
 		}).Info("发送告警批次")
 
 		// 合并批次中的所有告警为一条消息

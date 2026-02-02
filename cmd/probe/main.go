@@ -76,7 +76,7 @@ func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
 	// 一次性查询所有URL的探测结果
 	err := db.Where("url IN ? AND created_at > ? AND speed_kbps != 0",
 		urls,
-		time.Now().Add(-time.Minute*35)).
+		time.Now().Add(-time.Minute*30)).
 		Order("speed_kbps DESC").
 		Find(&results).Error
 
