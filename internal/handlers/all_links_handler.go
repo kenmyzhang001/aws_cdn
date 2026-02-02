@@ -65,28 +65,28 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 	response.Links = []LinkItem{}
 
 	// 1. 获取所有下载包
-	downloadPackages, err := h.downloadPackageService.ListAllDownloadPackages()
-	if err != nil {
-		log.WithError(err).Error("获取下载包列表失败")
-	} else {
-		for _, pkg := range downloadPackages {
-			// 过滤掉没有 .apk 结尾的链接
-			if !strings.HasSuffix(strings.ToLower(pkg.DownloadURL), ".apk") {
-				continue
-			}
-
-			item := LinkItem{
-				ID:          pkg.ID,
-				URL:         pkg.DownloadURL,
-				Name:        pkg.FileName,
-				Description: pkg.Note,
-				Type:        "download_package",
-				Status:      string(pkg.Status),
-				CreatedAt:   pkg.CreatedAt.Format("2006-01-02 15:04:05"),
-			}
-			response.Links = append(response.Links, item)
-		}
-	}
+	//downloadPackages, err := h.downloadPackageService.ListAllDownloadPackages()
+	//if err != nil {
+	//	log.WithError(err).Error("获取下载包列表失败")
+	//} else {
+	//	//for _, pkg := range downloadPackages {
+	//	//	// 过滤掉没有 .apk 结尾的链接
+	//	//	if !strings.HasSuffix(strings.ToLower(pkg.DownloadURL), ".apk") {
+	//	//		continue
+	//	//	}
+	//	//
+	//	//	item := LinkItem{
+	//	//		ID:          pkg.ID,
+	//	//		URL:         pkg.DownloadURL,
+	//	//		Name:        pkg.FileName,
+	//	//		Description: pkg.Note,
+	//	//		Type:        "download_package",
+	//	//		Status:      string(pkg.Status),
+	//	//		CreatedAt:   pkg.CreatedAt.Format("2006-01-02 15:04:05"),
+	//	//	}
+	//	//	response.Links = append(response.Links, item)
+	//	//}
+	//}
 
 	// 2. 获取所有自定义下载链接
 	customLinks, err := h.customDownloadLinkService.ListAllCustomDownloadLinks()
