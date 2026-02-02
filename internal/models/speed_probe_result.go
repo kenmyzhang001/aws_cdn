@@ -13,7 +13,7 @@ const (
 	SpeedProbeStatusTimeout SpeedProbeStatus = "timeout" // 超时
 )
 
-const ThresholdSpeedKbps = 10.0
+const ThresholdSpeedKbps = 0.1
 
 // SpeedProbeResult 速度探测结果模型
 type SpeedProbeResult struct {
