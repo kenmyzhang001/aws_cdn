@@ -88,11 +88,11 @@ func main() {
 
 	// 解析命令行参数
 	serverURL := flag.String("server", "http://16.163.99.99:8080", "服务器地址")
-	interval := flag.Duration("interval", 30*time.Minute, "探测间隔")
+	interval := flag.Duration("interval", 10*time.Minute, "探测间隔")
 	timeout := flag.Duration("timeout", 60*time.Second, "单次探测超时时间")
 	maxSize := flag.Int64("max-size", 10*1024*1024, "最大下载文件大小（字节）")
 	speedThreshold := flag.Float64("speed-threshold", 10.0, "速度阈值（KB/s）")
-	concurrency := flag.Int("concurrency", 50, "并发探测数量")
+	concurrency := flag.Int("concurrency", 1, "并发探测数量")
 	flag.Parse()
 
 	config := Config{
@@ -357,6 +357,9 @@ func probeRedirectTarget(url string, config *Config) ProbeResult {
 		}
 	}
 
+	// 打印响应体长度
+	log.Printf("   📦 重定向目标响应体长度: %d 字节 (%.2f KB)", totalSize, float64(totalSize)/1024.0)
+
 	// 计算速度（基于实际下载的字节数）
 	downloadTime := time.Since(startTime)
 	downloadTimeMs := downloadTime.Milliseconds()
@@ -463,6 +466,9 @@ func probeURLOnce(url string, config *Config) ProbeResult {
 			return result
 		}
 	}
+
+	// 打印响应体长度
+	log.Printf("   📦 响应体长度: %d 字节 (%.2f KB)", totalSize, float64(totalSize)/1024.0)
 
 	// 计算耗时和速度
 	downloadTime := time.Since(startTime)
