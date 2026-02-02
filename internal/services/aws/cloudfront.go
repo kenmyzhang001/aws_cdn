@@ -201,6 +201,7 @@ func (s *CloudFrontService) CreateDistributionWithPath(domainName string, certif
 					"domain_name": domainName,
 					"origin":      s3Origin,
 					"origin_path": originPath,
+					"errStr":      errStr,
 				}).Warn("CNAME 已存在，尝试查找已存在的 CloudFront 分发")
 			}
 
@@ -537,6 +538,7 @@ func (s *CloudFrontService) CreateDistributionForLargeFileDownload(domainName st
 					"domain_name": domainName,
 					"origin":      s3Origin,
 					"origin_path": originPath,
+					"errStr":      errStr,
 				}).Warn("CNAME 已存在，尝试查找已存在的 CloudFront 分发")
 			}
 
