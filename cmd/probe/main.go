@@ -192,7 +192,7 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 // probeRedirectTarget 探测重定向目标URL是否可下载
 // 不再跟随重定向，直接检查目标URL的响应
 func probeRedirectTarget(url string, traceID string) (float64, error) {
-	log.Printf("[TraceID: %s] probeRedirectTarget 开始探测重定向目标 - URL: %s, urls: %v", traceID, url, urls)
+	log.Printf("[TraceID: %s] probeRedirectTarget 开始探测重定向目标 - URL: %s", traceID, url)
 	overallStart := time.Now()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
