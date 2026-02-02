@@ -460,13 +460,13 @@ func realTimeProbe(urls []string, traceID string) []string {
 	// 提取URL列表（保持原始顺序）
 	var sortedURLs []string
 	for idx, result := range results {
-		log.Printf("[TraceID: %s] 实时探测结果（按原始顺序）#%d: URL: %s, 速度: %.2f KB/s",
+		log.Printf("[TraceID: %s] 实时探测结果（按原始顺序）#%d: URL: %s, 速度: %.2f KB/s, urls: %v",
 			traceID, idx+1, result.url, result.speed)
 		sortedURLs = append(sortedURLs, result.url)
 	}
 
-	log.Printf("[TraceID: %s] realTimeProbe 结束 - 返回URLs数量: %d, 总耗时: %v",
-		traceID, len(sortedURLs), time.Since(startTime))
+	log.Printf("[TraceID: %s] realTimeProbe 结束 - 返回URLs数量: %d, 总耗时: %v, urls: %v",
+		traceID, len(sortedURLs), time.Since(startTime), urls)
 	return sortedURLs
 }
 
