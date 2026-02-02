@@ -159,7 +159,8 @@ func (s *SpeedProbeService) CheckAndPrepareAlertForURL(url string, timeWindowMin
 	// 查询该URL在时间窗口内的所有探测结果，按IP分组
 	var results []models.SpeedProbeResult
 	if err := s.db.Where("url = ? AND created_at >= ? AND created_at <= ?",
-		url, windowStart, windowEnd).
+		url, windowStart, windowEnd).Order("created_at DESC").
+		Limit(5).
 		Find(&results).Error; err != nil {
 		log.WithError(err).Error("查询探测结果失败")
 		return nil, fmt.Errorf("查询探测结果失败: %w", err)
