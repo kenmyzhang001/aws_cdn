@@ -211,10 +211,12 @@
         <el-form-item label="根域名" required>
           <el-select 
             v-model="transferForm.zone_id" 
-            placeholder="请先选择 CF 账号"
+            placeholder="请先选择 CF 账号，然后输入域名搜索"
             :disabled="!transferForm.cf_account_id"
             :loading="loadingZones"
             filterable
+            remote
+            :remote-method="searchZones"
             style="width: 100%"
             @change="handleZoneChange"
           >
@@ -229,7 +231,7 @@
             </el-option>
           </el-select>
           <div style="font-size: 12px; color: #909399; margin-top: 5px">
-            从 CF 账号下选择一个根域名
+            从 CF 账号下选择一个根域名（支持输入域名进行搜索）
           </div>
         </el-form-item>
         <el-form-item label="子域名前缀">
@@ -503,7 +505,7 @@ const handleCFAccountChange = async (accountId) => {
   
   loadingZones.value = true
   try {
-    const res = await cfAccountApi.getCFAccountZones(accountId, { per_page: 100 })
+    const res = await cfAccountApi.getCFAccountZones(accountId, { per_page: 50 })
     console.log('API 返回数据:', res)
     console.log('zones 数据:', res.zones)
     zoneList.value = res.zones || []
@@ -513,13 +515,38 @@ const handleCFAccountChange = async (accountId) => {
     transferForm.value.subdomain_prefix = ''
     
     if (zoneList.value.length === 0) {
-      ElMessage.warning('该 CF 账号下没有域名')
+      ElMessage.warning('该 CF 账号下没有域名，请先在 Cloudflare 中添加域名')
     } else {
-      ElMessage.success(`成功加载 ${zoneList.value.length} 个域名`)
+      ElMessage.success(`成功加载 ${zoneList.value.length} 个域名，支持搜索筛选`)
     }
   } catch (error) {
     console.error('加载域名列表失败:', error)
     ElMessage.error('加载域名列表失败: ' + (error.message || '未知错误'))
+    zoneList.value = []
+  } finally {
+    loadingZones.value = false
+  }
+}
+
+// 搜索域名（远程搜索）
+const searchZones = async (query) => {
+  if (!transferForm.value.cf_account_id) {
+    return
+  }
+  
+  loadingZones.value = true
+  try {
+    const params = { per_page: 50 }
+    // 如果有搜索关键字，添加 name 参数
+    if (query && query.trim()) {
+      params.name = query.trim()
+    }
+    
+    const res = await cfAccountApi.getCFAccountZones(transferForm.value.cf_account_id, params)
+    zoneList.value = res.zones || []
+  } catch (error) {
+    console.error('搜索域名失败:', error)
+    // 搜索失败时不显示错误提示，保持用户体验
     zoneList.value = []
   } finally {
     loadingZones.value = false
