@@ -236,7 +236,7 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 				log.WithFields(map[string]interface{}{
 					"url":              l.URL,
 					"interval_minutes": intervalMinutes,
-				}).Debug("链接在探测间隔内已有探测记录，已过滤")
+				}).Info("链接在探测间隔内已有探测记录，已过滤")
 				resultChan <- filterResult{link: l, included: false}
 			}
 		}(link)
