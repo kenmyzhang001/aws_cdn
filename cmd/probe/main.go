@@ -81,17 +81,17 @@ func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
 		Find(&results).Error
 
 	queryDuration := time.Since(queryStartTime)
-	log.Printf("[TraceID: %s] 数据库查询完成 - 耗时: %v, 结果数量: %d", traceID, queryDuration, len(results))
+	log.Printf("[TraceID: %s] 数据库查询完成 - 耗时: %v, 结果数量: %d, urls: %v", traceID, queryDuration, len(results), urls)
 
 	if err != nil {
-		log.Printf("[TraceID: %s] 查询探测结果失败 - 错误: %v, 耗时: %v", traceID, err, time.Since(startTime))
+		log.Printf("[TraceID: %s] 查询探测结果失败 - 错误: %v, 耗时: %v, urls: %v", traceID, err, time.Since(startTime), urls)
 		return []string{}
 	}
 
 	if len(results) == 0 {
-		log.Printf("[TraceID: %s] 数据库无结果，切换到实时探测模式", traceID)
+		log.Printf("[TraceID: %s] 数据库无结果，切换到实时探测模式, urls: %v", traceID, urls)
 		probeResults := realTimeProbe(urls, traceID)
-		log.Printf("[TraceID: %s] probeURLs 结束（实时探测） - 结果数量: %d, 总耗时: %v", traceID, len(probeResults), time.Since(startTime))
+		log.Printf("[TraceID: %s] probeURLs 结束（实时探测） - 结果数量: %d, 总耗时: %v, urls: %v", traceID, len(probeResults), time.Since(startTime), urls)
 		return probeResults
 	}
 
@@ -103,30 +103,30 @@ func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
 			urlMap[result.URL] = result
 		}
 	}
-	log.Printf("[TraceID: %s] 去重后唯一URL数量: %d", traceID, len(urlMap))
+	log.Printf("[TraceID: %s] 去重后唯一URL数量: %d, urls: %v", traceID, len(urlMap), urls)
 
 	// 按原始urls顺序返回可用的URL
 	var availableURLs []string
 	for _, url := range urls {
 		if result, exists := urlMap[url]; exists {
-			log.Printf("[TraceID: %s] 匹配到URL: %s, 速度: %.2f KB/s, 记录时间: %v",
+			log.Printf("[TraceID: %s] 匹配到URL: %s, 速度: %.2f KB/s, 记录时间: %v, urls: %v",
 				traceID, result.URL, result.SpeedKbps, result.CreatedAt.Format("2006-01-02 15:04:05"))
 			availableURLs = append(availableURLs, result.URL)
 		} else {
-			log.Printf("[TraceID: %s] 未匹配到URL: %s", traceID, url)
+			log.Printf("[TraceID: %s] 未匹配到URL: %s, urls: %v", traceID, url, urls)
 		}
 	}
 
-	log.Printf("[TraceID: %s] probeURLs 结束 - 返回URLs数量: %d, 总耗时: %v", traceID, len(availableURLs), time.Since(startTime))
+	log.Printf("[TraceID: %s] probeURLs 结束 - 返回URLs数量: %d, 总耗时: %v, urls: %v", traceID, len(availableURLs), time.Since(startTime), urls)
 	return availableURLs
 }
 
 func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
-	log.Printf("[TraceID: %s] probeURLsByType 开始 - URLs数量: %d, URLs: %v", traceID, len(urls), urls)
+	log.Printf("[TraceID: %s] probeURLsByType 开始 - URLs数量: %d, urls: %v", traceID, len(urls), urls)
 	startTime := time.Now()
 
 	if len(urls) == 0 {
-		log.Printf("[TraceID: %s] probeURLsByType 结束 - URLs为空，耗时: %v", traceID, time.Since(startTime))
+		log.Printf("[TraceID: %s] probeURLsByType 结束 - URLs为空，耗时: %v, urls: %v", traceID, time.Since(startTime), urls)
 		return []string{}
 	}
 
@@ -141,17 +141,17 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 		Find(&results).Error
 
 	queryDuration := time.Since(queryStartTime)
-	log.Printf("[TraceID: %s] 数据库查询完成（按类型） - 耗时: %v, 结果数量: %d", traceID, queryDuration, len(results))
+	log.Printf("[TraceID: %s] 数据库查询完成（按类型） - 耗时: %v, 结果数量: %d, urls: %v", traceID, queryDuration, len(results), urls)
 
 	if err != nil {
-		log.Printf("[TraceID: %s] 查询探测结果失败（按类型） - 错误: %v, 耗时: %v", traceID, err, time.Since(startTime))
+		log.Printf("[TraceID: %s] 查询探测结果失败（按类型） - 错误: %v, 耗时: %v, urls: %v", traceID, err, time.Since(startTime), urls)
 		return []string{}
 	}
 
 	if len(results) == 0 {
-		log.Printf("[TraceID: %s] 数据库无结果（按类型），切换到实时探测模式", traceID)
+		log.Printf("[TraceID: %s] 数据库无结果（按类型），切换到实时探测模式, urls: %v", traceID, urls)
 		probeResults := realTimeProbe(urls, traceID)
-		log.Printf("[TraceID: %s] probeURLsByType 结束（实时探测） - 结果数量: %d, 总耗时: %v", traceID, len(probeResults), time.Since(startTime))
+		log.Printf("[TraceID: %s] probeURLsByType 结束（实时探测） - 结果数量: %d, 总耗时: %v, urls: %v", traceID, len(probeResults), time.Since(startTime), urls)
 		return probeResults
 	}
 
@@ -163,7 +163,7 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 			urlMap[result.URL] = result
 		}
 	}
-	log.Printf("[TraceID: %s] 去重后唯一URL数量: %d", traceID, len(urlMap))
+	log.Printf("[TraceID: %s] 去重后唯一URL数量: %d, urls: %v", traceID, len(urlMap), urls)
 
 	// 将结果转换为数组，按speed_kbps倒序排序
 	var sortedResults []SpeedProbeResult
@@ -175,24 +175,24 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 		return sortedResults[i].SpeedKbps > sortedResults[j].SpeedKbps
 	})
 
-	log.Printf("[TraceID: %s] 按速度排序完成", traceID)
+	log.Printf("[TraceID: %s] 按速度排序完成, urls: %v", traceID, urls)
 
 	// 返回按速度排序的URL列表
 	var availableURLs []string
 	for idx, result := range sortedResults {
-		log.Printf("[TraceID: %s] 排序结果 #%d: URL: %s, 速度: %.2f KB/s, 记录时间: %v",
+		log.Printf("[TraceID: %s] 排序结果 #%d: URL: %s, 速度: %.2f KB/s, 记录时间: %v, urls: %v",
 			traceID, idx+1, result.URL, result.SpeedKbps, result.CreatedAt.Format("2006-01-02 15:04:05"))
 		availableURLs = append(availableURLs, result.URL)
 	}
 
-	log.Printf("[TraceID: %s] probeURLsByType 结束 - 返回URLs数量: %d, 总耗时: %v", traceID, len(availableURLs), time.Since(startTime))
+	log.Printf("[TraceID: %s] probeURLsByType 结束 - 返回URLs数量: %d, 总耗时: %v, urls: %v", traceID, len(availableURLs), time.Since(startTime), urls)
 	return availableURLs
 }
 
 // probeRedirectTarget 探测重定向目标URL是否可下载
 // 不再跟随重定向，直接检查目标URL的响应
 func probeRedirectTarget(url string, traceID string) (float64, error) {
-	log.Printf("[TraceID: %s] probeRedirectTarget 开始探测重定向目标 - URL: %s", traceID, url)
+	log.Printf("[TraceID: %s] probeRedirectTarget 开始探测重定向目标 - URL: %s, urls: %v", traceID, url, urls)
 	overallStart := time.Now()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -200,7 +200,7 @@ func probeRedirectTarget(url string, traceID string) (float64, error) {
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		log.Printf("[TraceID: %s] probeRedirectTarget 失败 - URL: %s, 错误: 创建请求失败 - %v",
+		log.Printf("[TraceID: %s] probeRedirectTarget 失败 - URL: %s, 错误: 创建请求失败 - %v, urls: %v",
 			traceID, url, err)
 		return 0, fmt.Errorf("创建请求失败: %w", err)
 	}
