@@ -353,6 +353,11 @@ func (s *SpeedProbeService) CheckAndAlertAll(timeWindowMinutes int) error {
 	errorCount := 0
 
 	for _, url := range urls {
+		if err := s.db.Where("url = ?", url).First(&models.CustomDownloadLink{}).Error; err != nil {
+			log.WithError(err).WithField("url", url).Error("查询自定义下载链接失败，跳过")
+			continue
+		}
+
 		alert, err := s.CheckAndPrepareAlertForURL(url, timeWindowMinutes)
 		if err != nil {
 			log.WithError(err).WithField("url", url).Error("检查URL失败")
