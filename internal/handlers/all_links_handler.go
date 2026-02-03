@@ -180,6 +180,11 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 		}
 	}
 
+	if c.Query("debug") == "true" {
+		c.JSON(http.StatusOK, response)
+		return
+	}
+
 	// 根据 URL 去重，只保留第一个出现的
 	uniqueLinks := make([]LinkItem, 0, len(response.Links))
 	seenURLs := make(map[string]bool)
