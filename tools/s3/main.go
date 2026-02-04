@@ -56,7 +56,7 @@ func main() {
 	// 目标S3配置
 	dstAccessKey := flag.String("dst-access-key", "", "目标AWS Access Key ID")
 	dstSecretKey := flag.String("dst-secret-key", "", "目标AWS Secret Access Key")
-	dstRegion := flag.String("dst-region", "us-east-1", "目标AWS Region")
+	dstRegion := flag.String("dst-region", "ap-southeast-1", "目标AWS Region")
 	dstBucket := flag.String("dst-bucket", "", "目标S3桶名称")
 	dstPrefix := flag.String("dst-prefix", "", "目标S3对象前缀（可选，用于添加前缀）")
 
@@ -107,6 +107,13 @@ func main() {
 	if *dryRun {
 		log.Printf("模式: 试运行（不实际迁移文件）")
 	}
+
+	// 验证权限
+	log.Printf("\n正在验证权限...")
+	if err := migrator.VerifyPermissions(); err != nil {
+		log.Fatalf("权限验证失败: %v\n\n请检查:\n1. AWS凭证是否正确\n2. IAM权限是否配置正确（参考 iam-policy-source.json 和 iam-policy-target.json）\n3. 桶名称是否正确\n4. 桶所在区域是否正确", err)
+	}
+	log.Printf("✓ 权限验证通过\n")
 
 	// 执行迁移
 	if *dryRun {
@@ -161,6 +168,43 @@ func NewS3Migrator(srcConfig, dstConfig S3Config) (*S3Migrator, error) {
 	}, nil
 }
 
+// VerifyPermissions 验证源和目标桶的权限
+func (m *S3Migrator) VerifyPermissions() error {
+	// 验证源桶权限
+	log.Printf("  检查源桶访问权限...")
+	_, err := m.sourceClient.HeadBucket(&s3.HeadBucketInput{
+		Bucket: aws.String(m.sourceBucket),
+	})
+	if err != nil {
+		return fmt.Errorf("无法访问源桶 '%s': %w\n    可能原因:\n    - Access Key ID 或 Secret Key 错误\n    - 桶名称不存在或拼写错误\n    - 没有 s3:ListBucket 权限\n    - 区域设置不正确", m.sourceBucket, err)
+	}
+	log.Printf("    ✓ 源桶可访问")
+
+	// 测试源桶列表权限
+	log.Printf("  检查源桶列表权限...")
+	listInput := &s3.ListObjectsV2Input{
+		Bucket:  aws.String(m.sourceBucket),
+		MaxKeys: aws.Int64(1), // 只列出1个对象进行测试
+	}
+	_, err = m.sourceClient.ListObjectsV2(listInput)
+	if err != nil {
+		return fmt.Errorf("无法列出源桶对象: %w\n    需要的权限: s3:ListBucket", err)
+	}
+	log.Printf("    ✓ 源桶列表权限正常")
+
+	// 验证目标桶权限
+	log.Printf("  检查目标桶访问权限...")
+	_, err = m.targetClient.HeadBucket(&s3.HeadBucketInput{
+		Bucket: aws.String(m.targetBucket),
+	})
+	if err != nil {
+		return fmt.Errorf("无法访问目标桶 '%s': %w\n    可能原因:\n    - Access Key ID 或 Secret Key 错误\n    - 桶名称不存在或拼写错误\n    - 没有 s3:ListBucket 权限\n    - 区域设置不正确", m.targetBucket, err)
+	}
+	log.Printf("    ✓ 目标桶可访问")
+
+	return nil
+}
+
 // ListFiles 列出源桶中的文件
 func (m *S3Migrator) ListFiles(prefix string) error {
 	log.Printf("列出源桶中的文件...")
@@ -194,11 +238,6 @@ func (m *S3Migrator) ListFiles(prefix string) error {
 
 // Migrate 执行迁移
 func (m *S3Migrator) Migrate(srcPrefix, dstPrefix string, workers int) error {
-	// 检查目标桶是否存在
-	if err := m.checkTargetBucket(); err != nil {
-		return fmt.Errorf("检查目标桶失败: %w", err)
-	}
-
 	// 列出源桶中的所有对象
 	objects, err := m.listAllObjects(srcPrefix)
 	if err != nil {
