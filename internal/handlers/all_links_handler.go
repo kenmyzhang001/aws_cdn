@@ -229,7 +229,7 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 			}
 
 			// 检查是否在指定时间间隔内有探测记录
-			hasRecent, err := h.speedProbeService.HasRecentProbeResult(l.URL, intervalMinutes)
+			hasRecent, err := h.speedProbeService.HasRecentProbeResult(l.URL, intervalMinutes, c.Request.UserAgent())
 			if err != nil {
 				log.WithError(err).WithField("url", l.URL).Warn("检查探测记录失败，保留该链接")
 				resultChan <- filterResult{link: l, included: true}

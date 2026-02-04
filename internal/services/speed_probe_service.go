@@ -659,12 +659,12 @@ func (s *SpeedProbeService) CleanOldResults(keepMinutes int) error {
 }
 
 // HasRecentProbeResult 检查URL在指定时间间隔内是否有探测记录
-func (s *SpeedProbeService) HasRecentProbeResult(url string, intervalMinutes int) (bool, error) {
+func (s *SpeedProbeService) HasRecentProbeResult(url string, intervalMinutes int, userAgent string) (bool, error) {
 	var count int64
 	cutoffTime := time.Now().Add(-time.Duration(intervalMinutes) * time.Minute)
 
 	err := s.db.Model(&models.SpeedProbeResult{}).
-		Where("url = ? AND created_at >= ?", url, cutoffTime).
+		Where("url = ? AND created_at >= ? AND user_agent = ?", url, cutoffTime, userAgent).
 		Count(&count).Error
 
 	if err != nil {
