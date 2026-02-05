@@ -520,8 +520,9 @@ func (s *DomainService) GetDomainByName(domainName string) (*models.Domain, erro
 // DomainWithUsage 带使用状态的域名信息
 type DomainWithUsage struct {
 	models.Domain
-	UsedByRedirect        bool `json:"used_by_redirect"`         // 是否被重定向使用
-	UsedByDownloadPackage bool `json:"used_by_download_package"` // 是否被下载包使用
+	UsedByRedirect        bool   `json:"used_by_redirect"`         // 是否被重定向使用
+	UsedByDownloadPackage bool   `json:"used_by_download_package"` // 是否被下载包使用
+	CloudflareAccount     string `json:"cloudflare_account"`       // CF账号邮箱（用于显示）
 }
 
 // CheckDomainUsage 检查域名的使用情况
@@ -611,8 +612,13 @@ func (s *DomainService) ListDomains(page, pageSize int, groupID *uint, search *s
 		var mu sync.Mutex
 
 		for i := range domains {
+			cfAccount := ""
+			if domains[i].CFAccount != nil {
+				cfAccount = domains[i].CFAccount.Email
+			}
 			result[i] = DomainWithUsage{
-				Domain: domains[i],
+				Domain:            domains[i],
+				CloudflareAccount: cfAccount,
 			}
 
 			wg.Add(1)
@@ -660,8 +666,13 @@ func (s *DomainService) ListDomains(page, pageSize int, groupID *uint, search *s
 	} else {
 		// 页面大小较大时，只初始化结果，不查询状态
 		for i := range domains {
+			cfAccount := ""
+			if domains[i].CFAccount != nil {
+				cfAccount = domains[i].CFAccount.Email
+			}
 			result[i] = DomainWithUsage{
-				Domain: domains[i],
+				Domain:            domains[i],
+				CloudflareAccount: cfAccount,
 			}
 		}
 	}
@@ -671,7 +682,7 @@ func (s *DomainService) ListDomains(page, pageSize int, groupID *uint, search *s
 
 // ListDomainsForSelect 列出域名用于下拉选择框（轻量级，不查询证书状态）
 func (s *DomainService) ListDomainsForSelect(dnsProvider string) ([]DomainWithUsage, error) {
-	query := s.db.Model(&models.Domain{}).Where("deleted_at IS NULL")
+	query := s.db.Model(&models.Domain{}).Preload("CFAccount").Where("deleted_at IS NULL")
 
 	// 如果指定了DNS提供商，则过滤
 	if dnsProvider != "" {
@@ -716,10 +727,15 @@ func (s *DomainService) ListDomainsForSelect(dnsProvider string) ([]DomainWithUs
 	// 转换为带使用状态的域名列表（不查询证书状态）
 	result := make([]DomainWithUsage, len(domains))
 	for i := range domains {
+		cfAccount := ""
+		if domains[i].CFAccount != nil {
+			cfAccount = domains[i].CFAccount.Email
+		}
 		result[i] = DomainWithUsage{
 			Domain:                domains[i],
 			UsedByRedirect:        redirectMap[domains[i].DomainName],
 			UsedByDownloadPackage: downloadPackageMap[domains[i].DomainName],
+			CloudflareAccount:     cfAccount,
 		}
 	}
 

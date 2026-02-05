@@ -57,6 +57,14 @@
               <span class="domain-name">{{ row.domain_name }}</span>
             </template>
           </el-table-column>
+          <el-table-column prop="cloudflare_account" label="CF账号" width="200">
+            <template #default="{ row }">
+              <span v-if="row.cloudflare_account" style="font-size: 12px; color: #606266;">
+                {{ row.cloudflare_account }}
+              </span>
+              <span v-else style="color: #909399; font-size: 12px;">-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="文件数量" width="120">
             <template #default="{ row }">
               <el-tag size="small">{{ row.file_count || 0 }} 个文件</el-tag>
@@ -276,6 +284,19 @@
           <el-descriptions-item label="域名">{{ currentDomain.domain_name }}</el-descriptions-item>
           <el-descriptions-item label="文件数量">
             <el-tag size="small">{{ currentDomain.file_count || 0 }} 个文件</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="CloudFlare账号" v-if="currentDomain.cloudflare_account">
+            <span style="font-size: 12px; color: #606266;">
+              {{ currentDomain.cloudflare_account }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="DNS提供商" v-if="currentDomain.dns_provider">
+            <el-tag 
+              size="small" 
+              :type="currentDomain.dns_provider === 'cloudflare' ? 'warning' : 'primary'"
+            >
+              {{ currentDomain.dns_provider === 'cloudflare' ? 'Cloudflare' : 'AWS Route53' }}
+            </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="域名状态" v-if="currentDomain.domain_status">
             <el-tag :type="getDomainStatusType(currentDomain.domain_status)" size="small">
@@ -731,9 +752,10 @@ const loadDomains = async () => {
     })
     const allPackages = packageResponse.data || []
 
-    // 2. 获取所有相关域名的备注信息
+    // 2. 获取所有相关域名的备注和CF账号信息
     const domainIds = [...new Set(allPackages.map(pkg => pkg.domain_id).filter(id => id))]
     const domainNotesMap = {}
+    const domainCFAccountMap = {}
     if (domainIds.length > 0) {
       try {
         const domainResponse = await domainApi.getDomainList({ page: 1, page_size: 1000 })
@@ -741,10 +763,11 @@ const loadDomains = async () => {
         domains.forEach(domain => {
           if (domainIds.includes(domain.id)) {
             domainNotesMap[domain.id] = domain.note || ''
+            domainCFAccountMap[domain.id] = domain.cloudflare_account || ''
           }
         })
       } catch (error) {
-        console.error('获取域名备注失败:', error)
+        console.error('获取域名信息失败:', error)
       }
     }
 
@@ -764,6 +787,7 @@ const loadDomains = async () => {
           file_count: 0,
           status: null, // 将使用最新下载包的状态
           note: domainNotesMap[pkg.domain_id] || '', // 添加备注
+          cloudflare_account: domainCFAccountMap[pkg.domain_id] || '', // 添加CF账号
         }
       }
       
@@ -828,6 +852,8 @@ const viewDomainDetails = async (domain) => {
       domain_name: domainInfo.domain_name,
       domain_status: packageDetail?.domain_status || domainInfo.status,
       certificate_status: domainInfo.certificate_status,
+      dns_provider: domainInfo.dns_provider,
+      cloudflare_account: domainInfo.cf_account?.email || '',
       file_count: packages.length,
       files: packages,
       cloudfront_id: packages.length > 0 ? packages[0].cloudfront_id : null,
