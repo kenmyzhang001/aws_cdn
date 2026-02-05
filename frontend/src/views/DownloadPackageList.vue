@@ -22,8 +22,8 @@
         </div>
       </template>
 
-      <!-- 搜索框 -->
-      <div style="margin-bottom: 20px">
+      <!-- 搜索框和筛选条件 -->
+      <div style="margin-bottom: 20px; display: flex; gap: 15px; align-items: center;">
         <el-input
           v-model="searchKeyword"
           placeholder="搜索域名..."
@@ -36,6 +36,21 @@
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
+        <el-select
+          v-model="cfAccountFilter"
+          placeholder="CF账号"
+          clearable
+          style="width: 200px"
+          @change="handleCFAccountFilterChange"
+        >
+          <el-option label="全部" :value="null" />
+          <el-option
+            v-for="account in cfAccountList"
+            :key="account.id"
+            :label="account.email"
+            :value="account.id"
+          />
+        </el-select>
       </div>
 
       <!-- 分组Tab -->
@@ -639,6 +654,7 @@ import request from '@/api/request'
 import { domainApi } from '@/api/domain'
 import { downloadPackageApi } from '@/api/download_package'
 import { groupApi } from '@/api/group'
+import { cfAccountApi } from '@/api/cf_account'
 import { uploadFile } from '@/utils/upload'
 import { addFromDownloadPackage } from '@/api/focus_probe_link'
 
@@ -659,6 +675,8 @@ const currentDomain = ref(null)
 const activeGroupId = ref(null)
 const groups = ref([])
 const searchKeyword = ref('')
+const cfAccountFilter = ref(null) // CF账号过滤
+const cfAccountList = ref([]) // CF账号列表
 let searchTimer = null
 
 // 添加下载域名
@@ -746,6 +764,9 @@ const loadDomains = async () => {
     }
     if (searchKeyword.value && searchKeyword.value.trim()) {
       packageParams.search = searchKeyword.value.trim()
+    }
+    if (cfAccountFilter.value) {
+      packageParams.cf_account_id = cfAccountFilter.value
     }
     const packageResponse = await request.get('/download-packages', {
       params: packageParams,
@@ -1540,6 +1561,11 @@ const handleSearch = () => {
   }, 300)
 }
 
+const handleCFAccountFilterChange = () => {
+  currentPage.value = 1 // 筛选时重置到第一页
+  loadDomains()
+}
+
 // 处理分页大小变化
 const handleSizeChange = (newSize) => {
   pageSize.value = newSize
@@ -1609,10 +1635,21 @@ const addToFocusProbe = async (row) => {
   }
 }
 
+// 加载 CF 账号列表
+const loadCFAccounts = async () => {
+  try {
+    const res = await cfAccountApi.getCFAccountList()
+    cfAccountList.value = res || []
+  } catch (error) {
+    console.error('加载 CF 账号列表失败', error)
+  }
+}
+
 onMounted(() => {
   loadGroups()
   loadDomains()
   loadAvailableDomains()
+  loadCFAccounts()
   // 每30秒刷新一次状态
   setInterval(() => {
     loadDomains()

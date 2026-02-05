@@ -26,6 +26,21 @@
           </template>
         </el-input>
         <el-select
+          v-model="cfAccountFilter"
+          placeholder="CF账号"
+          clearable
+          style="width: 200px"
+          @change="handleCFAccountFilterChange"
+        >
+          <el-option label="全部" :value="null" />
+          <el-option
+            v-for="account in cfAccountList"
+            :key="account.id"
+            :label="account.email"
+            :value="account.id"
+          />
+        </el-select>
+        <el-select
           v-model="usageFilter"
           placeholder="使用状态"
           clearable
@@ -422,6 +437,7 @@ const totalAll = ref(0)
 const activeGroupId = ref(null)
 const groups = ref([])
 const searchKeyword = ref('')
+const cfAccountFilter = ref(null) // CF账号过滤
 const usageFilter = ref(null) // null: 全部, 'used': 已使用, 'unused': 未使用
 let searchTimer = null
 
@@ -624,6 +640,9 @@ const loadDomains = async () => {
     if (searchKeyword.value && searchKeyword.value.trim()) {
       params.search = searchKeyword.value.trim()
     }
+    if (cfAccountFilter.value) {
+      params.cf_account_id = cfAccountFilter.value
+    }
     if (usageFilter.value) {
       params.used_status = usageFilter.value
     }
@@ -647,6 +666,11 @@ const handleSearch = () => {
     currentPage.value = 1 // 搜索时重置到第一页
     loadDomains()
   }, 300)
+}
+
+const handleCFAccountFilterChange = () => {
+  currentPage.value = 1 // 筛选时重置到第一页
+  loadDomains()
 }
 
 const handleUsageFilterChange = () => {
