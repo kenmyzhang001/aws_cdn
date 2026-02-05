@@ -19,7 +19,7 @@ type ACMService struct {
 
 func NewACMService(cfg *config.AWSConfig) (*ACMService, error) {
 	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(cfg.Region),
+		Region: aws.String("us-east-1"),
 		Credentials: credentials.NewStaticCredentials(
 			cfg.AccessKeyID,
 			cfg.SecretAccessKey,
