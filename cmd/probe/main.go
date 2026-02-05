@@ -76,7 +76,7 @@ func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
 	// 一次性查询所有URL的探测结果
 	err := db.Where("url IN ? AND created_at > ? AND speed_kbps != 0",
 		urls,
-		time.Now().Add(-time.Minute*30)).
+		time.Now().Add(-time.Minute*60)).
 		Order("speed_kbps DESC").
 		Find(&results).Error
 
@@ -105,12 +105,39 @@ func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
 	}
 	log.Printf("[TraceID: %s] 去重后唯一URL数量: %d, urls: %v", traceID, len(urlMap), urls)
 
+	// 检查10分钟内是否有speed_kbps=0的记录，标记为不可用
+	unavailableCheckStart := time.Now()
+	var unavailableURLs []string
+	err = db.Select("DISTINCT url").
+		Where("url IN ? AND created_at > ? AND speed_kbps = 0",
+			urls,
+			time.Now().Add(-time.Minute*60)).
+		Find(&unavailableURLs).Error
+
+	if err != nil {
+		log.Printf("[TraceID: %s] 查询不可用URL失败 - 错误: %v", traceID, err)
+	}
+
+	// 构建不可用URL的map，便于快速查找
+	unavailableMap := make(map[string]bool)
+	for _, url := range unavailableURLs {
+		unavailableMap[url] = true
+	}
+	log.Printf("[TraceID: %s] 10分钟内不可用URL数量: %d, 检查耗时: %v, 不可用URLs: %v",
+		traceID, len(unavailableURLs), time.Since(unavailableCheckStart), unavailableURLs)
+
 	// 按原始urls顺序返回可用的URL
 	var availableURLs []string
 	for _, url := range urls {
+		// 如果在10分钟内有speed_kbps=0的记录，跳过
+		if unavailableMap[url] {
+			log.Printf("[TraceID: %s] 跳过URL（10分钟内不可用）: %s, urls: %v", traceID, url, urls)
+			continue
+		}
+
 		if result, exists := urlMap[url]; exists {
 			log.Printf("[TraceID: %s] 匹配到URL: %s, 速度: %.2f KB/s, 记录时间: %v, urls: %v",
-				traceID, result.URL, result.SpeedKbps, result.CreatedAt.Format("2006-01-02 15:04:05"))
+				traceID, result.URL, result.SpeedKbps, result.CreatedAt.Format("2006-01-02 15:04:05"), urls)
 			availableURLs = append(availableURLs, result.URL)
 		} else {
 			log.Printf("[TraceID: %s] 未匹配到URL: %s, urls: %v", traceID, url, urls)
@@ -165,9 +192,35 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 	}
 	log.Printf("[TraceID: %s] 去重后唯一URL数量: %d, urls: %v", traceID, len(urlMap), urls)
 
-	// 将结果转换为数组，按speed_kbps倒序排序
+	// 检查60分钟内是否有speed_kbps=0的记录，标记为不可用
+	unavailableCheckStart := time.Now()
+	var unavailableURLs []string
+	err = db.Select("DISTINCT url").
+		Where("url IN ? AND created_at > ? AND speed_kbps = 0",
+			urls,
+			time.Now().Add(-time.Minute*60)).
+		Find(&unavailableURLs).Error
+
+	if err != nil {
+		log.Printf("[TraceID: %s] 查询不可用URL失败（按类型） - 错误: %v", traceID, err)
+	}
+
+	// 构建不可用URL的map，便于快速查找
+	unavailableMap := make(map[string]bool)
+	for _, url := range unavailableURLs {
+		unavailableMap[url] = true
+	}
+	log.Printf("[TraceID: %s] 60分钟内不可用URL数量（按类型）: %d, 检查耗时: %v, 不可用URLs: %v",
+		traceID, len(unavailableURLs), time.Since(unavailableCheckStart), unavailableURLs)
+
+	// 将结果转换为数组，过滤掉不可用的URL，按speed_kbps倒序排序
 	var sortedResults []SpeedProbeResult
 	for _, result := range urlMap {
+		// 如果在60分钟内有speed_kbps=0的记录，跳过
+		if unavailableMap[result.URL] {
+			log.Printf("[TraceID: %s] 跳过URL（60分钟内不可用，按类型）: %s, urls: %v", traceID, result.URL, urls)
+			continue
+		}
 		sortedResults = append(sortedResults, result)
 	}
 
@@ -175,13 +228,13 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 		return sortedResults[i].SpeedKbps > sortedResults[j].SpeedKbps
 	})
 
-	log.Printf("[TraceID: %s] 按速度排序完成, urls: %v", traceID, urls)
+	log.Printf("[TraceID: %s] 按速度排序完成（过滤后）, 结果数量: %d, urls: %v", traceID, len(sortedResults), urls)
 
 	// 返回按速度排序的URL列表
 	var availableURLs []string
 	for idx, result := range sortedResults {
 		log.Printf("[TraceID: %s] 排序结果 #%d: URL: %s, 速度: %.2f KB/s, 记录时间: %v, urls: %v",
-			traceID, idx+1, result.URL, result.SpeedKbps, result.CreatedAt.Format("2006-01-02 15:04:05"))
+			traceID, idx+1, result.URL, result.SpeedKbps, result.CreatedAt.Format("2006-01-02 15:04:05"), urls)
 		availableURLs = append(availableURLs, result.URL)
 	}
 
@@ -200,7 +253,7 @@ func probeRedirectTarget(url string, traceID string) (float64, error) {
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		log.Printf("[TraceID: %s] probeRedirectTarget 失败 - URL: %s, 错误: 创建请求失败 - %v, urls: %v",
+		log.Printf("[TraceID: %s] probeRedirectTarget 失败 - URL: %s, 错误: 创建请求失败 - %v",
 			traceID, url, err)
 		return 0, fmt.Errorf("创建请求失败: %w", err)
 	}
@@ -460,7 +513,7 @@ func realTimeProbe(urls []string, traceID string) []string {
 	// 提取URL列表（保持原始顺序）
 	var sortedURLs []string
 	for idx, result := range results {
-		log.Printf("[TraceID: %s] 实时探测结果（按原始顺序）#%d: URL: %s, 速度: %.2f KB/s, urls: %v",
+		log.Printf("[TraceID: %s] 实时探测结果（按原始顺序）#%d: URL: %s, 速度: %.2f KB/s",
 			traceID, idx+1, result.url, result.speed)
 		sortedURLs = append(sortedURLs, result.url)
 	}
