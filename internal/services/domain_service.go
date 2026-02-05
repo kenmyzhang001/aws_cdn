@@ -550,7 +550,7 @@ func (s *DomainService) CheckDomainUsage(domainName string) (usedByRedirect bool
 
 // ListDomains 列出所有域名，支持按分组筛选和搜索
 // usedStatus: nil 表示全部, "used" 表示已使用, "unused" 表示未使用
-func (s *DomainService) ListDomains(page, pageSize int, groupID *uint, search *string, usedStatus *string) ([]DomainWithUsage, int64, error) {
+func (s *DomainService) ListDomains(page, pageSize int, groupID *uint, search *string, cfAccountID *uint, usedStatus *string) ([]DomainWithUsage, int64, error) {
 	var domains []models.Domain
 	var total int64
 
@@ -568,6 +568,11 @@ func (s *DomainService) ListDomains(page, pageSize int, groupID *uint, search *s
 	if search != nil && *search != "" {
 		searchPattern := "%" + *search + "%"
 		query = query.Where("domains.domain_name LIKE ?", searchPattern)
+	}
+
+	// CF账号筛选
+	if cfAccountID != nil {
+		query = query.Where("domains.cf_account_id = ?", *cfAccountID)
 	}
 
 	// 使用状态筛选：使用子查询检查域名是否被使用

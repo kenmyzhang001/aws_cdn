@@ -657,26 +657,32 @@ func (s *DownloadPackageService) ListAllDownloadPackages() ([]models.DownloadPac
 }
 
 // ListDownloadPackages 列出所有下载包，支持按分组筛选和搜索
-func (s *DownloadPackageService) ListDownloadPackages(page, pageSize int, groupID *uint, search *string) ([]models.DownloadPackage, int64, error) {
+func (s *DownloadPackageService) ListDownloadPackages(page, pageSize int, groupID *uint, search *string, cfAccountID *uint) ([]models.DownloadPackage, int64, error) {
 	var packages []models.DownloadPackage
 	var total int64
 
 	offset := (page - 1) * pageSize
 
-	query := s.db.Model(&models.DownloadPackage{}).Where("deleted_at IS NULL")
+	query := s.db.Model(&models.DownloadPackage{}).Where("download_packages.deleted_at IS NULL")
 	if groupID != nil {
-		query = query.Where("group_id = ?", *groupID)
+		query = query.Where("download_packages.group_id = ?", *groupID)
 	}
 	if search != nil && *search != "" {
 		searchPattern := "%" + *search + "%"
-		query = query.Where("domain_name LIKE ?", searchPattern)
+		query = query.Where("download_packages.domain_name LIKE ?", searchPattern)
+	}
+	
+	// CF账号筛选：需要通过域名表关联
+	if cfAccountID != nil {
+		query = query.Joins("LEFT JOIN domains ON download_packages.domain_id = domains.id").
+			Where("domains.cf_account_id = ?", *cfAccountID)
 	}
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := query.Preload("Domain").Offset(offset).Limit(pageSize).Order("created_at DESC").Find(&packages).Error; err != nil {
+	if err := query.Preload("Domain").Offset(offset).Limit(pageSize).Order("download_packages.created_at DESC").Find(&packages).Error; err != nil {
 		return nil, 0, err
 	}
 

@@ -313,7 +313,15 @@ func (h *DownloadPackageHandler) ListDownloadPackages(c *gin.Context) {
 		search = &searchStr
 	}
 
-	packages, total, err := h.service.ListDownloadPackages(page, pageSize, groupID, search)
+	var cfAccountID *uint
+	if cfAccountIDStr := c.Query("cf_account_id"); cfAccountIDStr != "" && cfAccountIDStr != "0" {
+		if id, err := strconv.ParseUint(cfAccountIDStr, 10, 32); err == nil {
+			cfID := uint(id)
+			cfAccountID = &cfID
+		}
+	}
+
+	packages, total, err := h.service.ListDownloadPackages(page, pageSize, groupID, search, cfAccountID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

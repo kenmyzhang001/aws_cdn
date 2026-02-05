@@ -111,6 +111,14 @@ func (h *DomainHandler) ListDomains(c *gin.Context) {
 		search = &searchStr
 	}
 
+	var cfAccountID *uint
+	if cfAccountIDStr := c.Query("cf_account_id"); cfAccountIDStr != "" && cfAccountIDStr != "0" {
+		if id, err := strconv.ParseUint(cfAccountIDStr, 10, 32); err == nil {
+			cfID := uint(id)
+			cfAccountID = &cfID
+		}
+	}
+
 	var usedStatus *string
 	if usedStatusStr := c.Query("used_status"); usedStatusStr != "" {
 		// 只接受 "used" 或 "unused"
@@ -119,14 +127,15 @@ func (h *DomainHandler) ListDomains(c *gin.Context) {
 		}
 	}
 
-	domains, total, err := h.service.ListDomains(page, pageSize, groupID, search, usedStatus)
+	domains, total, err := h.service.ListDomains(page, pageSize, groupID, search, cfAccountID, usedStatus)
 	if err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
-			"page":        page,
-			"page_size":   pageSize,
-			"group_id":    groupID,
-			"search":      search,
-			"used_status": usedStatus,
+			"page":          page,
+			"page_size":     pageSize,
+			"group_id":      groupID,
+			"search":        search,
+			"cf_account_id": cfAccountID,
+			"used_status":   usedStatus,
 		}).Error("列出域名失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
