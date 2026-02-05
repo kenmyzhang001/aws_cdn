@@ -268,12 +268,23 @@ func (s *SpeedProbeService) CheckAndPrepareAlertForURL(url string, timeWindowMin
 		"threshold":   s.failureRateThreshold,
 	}).Info("URL探测结果分析完成")
 
-	// 如果未达标IP超过一半，准备告警
-	if failedIPRate > 0.7 { // 超过70%
+	// 如果平均速度小于1 KB/s，准备告警
+	shouldAlert := false
+	if globalAvgSpeed != nil && *globalAvgSpeed < 1.0 {
+		shouldAlert = true
+		log.WithFields(map[string]interface{}{
+			"url":       url,
+			"avg_speed": *globalAvgSpeed,
+		}).Warn("检测到平均速度小于1 KB/s，准备生成告警")
+	} else if failedIPRate > 0.7 { // 超过70%
+		shouldAlert = true
 		log.WithFields(map[string]interface{}{
 			"url":         url,
 			"failed_rate": failedIPRate,
-		}).Warn("检测到超过一半的IP未达标，准备生成告警")
+		}).Warn("检测到超过70%的IP未达标，准备生成告警")
+	}
+
+	if shouldAlert {
 
 		// 检查是否已经发送过告警（避免重复告警）
 		var existingAlert models.SpeedAlertLog
