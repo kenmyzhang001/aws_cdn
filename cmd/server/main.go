@@ -91,7 +91,7 @@ func main() {
 		// 添加速度探测告警检查任务（每30分钟检查一次，检查最近30分钟的数据）
 		schedulerService.AddTask("速度探测告警检查", func() error {
 			return speedProbeService.CheckAndAlertAll(services.TimeWindowMinutes)
-		}, 30*time.Minute)
+		}, 10*time.Minute)
 		log.Info("定时任务已启用：速度探测告警检查（每30分钟执行一次）")
 	} else {
 		log.Info("定时任务已禁用：速度探测告警检查")
