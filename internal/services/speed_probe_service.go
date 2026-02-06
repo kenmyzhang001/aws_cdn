@@ -160,7 +160,6 @@ func (s *SpeedProbeService) CheckAndPrepareAlertForURL(url string, timeWindowMin
 	var results []models.SpeedProbeResult
 	if err := s.db.Where("url = ? AND created_at >= ? AND created_at <= ?",
 		url, windowStart, windowEnd).Order("created_at DESC").
-		Limit(5).
 		Find(&results).Error; err != nil {
 		log.WithError(err).Error("查询探测结果失败")
 		return nil, fmt.Errorf("查询探测结果失败: %w", err)
@@ -183,6 +182,7 @@ func (s *SpeedProbeService) CheckAndPrepareAlertForURL(url string, timeWindowMin
 		TotalSpeed   float64
 		SuccessCount int
 		IsFailed     bool // 该IP对该URL的探测是否被判定为失败
+		UserAgent    string
 	}
 
 	ipStatsMap := make(map[string]*IPStats)
@@ -201,6 +201,7 @@ func (s *SpeedProbeService) CheckAndPrepareAlertForURL(url string, timeWindowMin
 			result.Status == models.SpeedProbeStatusTimeout ||
 			result.SpeedKbps < s.speedThreshold
 
+		stats.UserAgent = result.UserAgent
 		if isFailed {
 			stats.FailedProbes++
 		} else {
@@ -239,7 +240,7 @@ func (s *SpeedProbeService) CheckAndPrepareAlertForURL(url string, timeWindowMin
 		if failRate >= s.failureRateThreshold {
 			stats.IsFailed = true
 			failedIPs++
-			detail.Status = "未达标"
+			detail.Status = "未达标, user-agent: " + stats.UserAgent
 		} else {
 			successIPs++
 			detail.Status = "达标"
@@ -549,11 +550,11 @@ func (s *SpeedProbeService) buildAlertMessageForURL(alert *models.SpeedAlertLog,
 	for i := 0; i < displayCount; i++ {
 		detail := ipDetails[i]
 		status := "✅"
-		if detail.Status == "未达标" {
+		if strings.Contains(detail.Status, "未达标") {
 			status = "❌"
 		}
-		message += fmt.Sprintf("%s IP: %s | 探测%d次 | 失败率%.1f%% | 平均%.1fKB/s\n",
-			status, detail.IP, detail.Probes, detail.FailedRate, detail.AvgSpeed)
+		message += fmt.Sprintf("%s IP: %s | 探测%d次 | 失败率%.1f%% | 平均%.1fKB/s | Status: %s\n",
+			status, detail.IP, detail.Probes, detail.FailedRate, detail.AvgSpeed, detail.Status)
 	}
 
 	if len(ipDetails) > 10 {
