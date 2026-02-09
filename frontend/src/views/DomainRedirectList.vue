@@ -141,12 +141,12 @@
             clearable
           />
         </el-form-item>
-        <el-form-item label="保留路径与参数">
+        <!--el-form-item label="保留路径与参数">
           <el-switch v-model="form.preserve_path" />
           <span style="margin-left: 8px; color: #909399; font-size: 12px">
             开启后，访问 /path?q=1 会重定向到 目标域名/path?q=1
           </span>
-        </el-form-item>
+        </el-form-item-->
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
