@@ -55,8 +55,9 @@ func (s *DomainRedirectService) Get(id uint) (*models.DomainRedirect, error) {
 	return &dr, nil
 }
 
-// Create 创建：在 CF 创建 302 规则并落库
+// Create 创建：在 CF 创建 302 规则并落库，并尝试为源主机名创建 DNS 记录
 func (s *DomainRedirectService) Create(cfAccountID uint, zoneID, sourceDomain, targetDomain string, preservePath bool) (*models.DomainRedirect, error) {
+	log := logger.GetLogger()
 	// 唯一性：同一主域名只能有一条
 	var exist models.DomainRedirect
 	if err := s.db.Where("source_domain = ?", sourceDomain).First(&exist).Error; err == nil {
@@ -73,6 +74,19 @@ func (s *DomainRedirectService) Create(cfAccountID uint, zoneID, sourceDomain, t
 		return nil, fmt.Errorf("在 Cloudflare 创建重定向规则失败: %w", err)
 	}
 
+	// 确保源主机名有 DNS 记录，否则无法解析、302 不会触发
+	zoneName, zoneErr := cfSvc.GetZoneByID(zoneID)
+	if zoneErr == nil {
+		if dnsErr := cfSvc.EnsureRedirectSourceDNS(zoneID, zoneName, sourceDomain); dnsErr != nil {
+			log.WithError(dnsErr).WithFields(map[string]interface{}{
+				"zone_id":       zoneID,
+				"source_domain": sourceDomain,
+			}).Warn("为源主机名创建 DNS 记录失败，请到 Cloudflare 手动添加 A/CNAME 记录")
+		}
+	} else {
+		log.WithError(zoneErr).WithField("zone_id", zoneID).Warn("获取 Zone 名称失败，跳过自动创建 DNS")
+	}
+
 	dr := &models.DomainRedirect{
 		CFAccountID:  cfAccountID,
 		ZoneID:       zoneID,
@@ -85,7 +99,6 @@ func (s *DomainRedirectService) Create(cfAccountID uint, zoneID, sourceDomain, t
 	if err := s.db.Create(dr).Error; err != nil {
 		return nil, fmt.Errorf("保存记录失败: %w", err)
 	}
-	log := logger.GetLogger()
 	log.WithFields(map[string]interface{}{
 		"id":      dr.ID,
 		"source":  sourceDomain,
