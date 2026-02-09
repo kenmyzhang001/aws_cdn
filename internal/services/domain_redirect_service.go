@@ -96,7 +96,8 @@ func (s *DomainRedirectService) Create(cfAccountID uint, zoneID, sourceDomain, t
 		CFRuleID:     ruleID,
 		Status:       "active",
 	}
-	if err := s.db.Create(dr).Error; err != nil {
+	// 显式 Select 包含 PreservePath，否则 GORM 会跳过零值(false)，导致 DB 使用 default 1
+	if err := s.db.Select("CFAccountID", "ZoneID", "SourceDomain", "TargetDomain", "PreservePath", "CFRuleID", "Status").Create(dr).Error; err != nil {
 		return nil, fmt.Errorf("保存记录失败: %w", err)
 	}
 	log.WithFields(map[string]interface{}{
@@ -130,7 +131,11 @@ func (s *DomainRedirectService) Update(id uint, targetDomain string, preservePat
 			return nil, fmt.Errorf("更新 Cloudflare 规则失败: %w", err)
 		}
 	}
-	if err := s.db.Save(dr).Error; err != nil {
+	// 显式 Select 包含 PreservePath，否则 GORM 会跳过零值(false)，更新不生效
+	if err := s.db.Model(dr).Select("TargetDomain", "PreservePath").Updates(map[string]interface{}{
+		"target_domain": dr.TargetDomain,
+		"preserve_path": dr.PreservePath,
+	}).Error; err != nil {
 		return nil, fmt.Errorf("保存失败: %w", err)
 	}
 	return dr, nil
