@@ -291,6 +291,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			domainRedirects.POST("", domainRedirectHandler.Create)
 			domainRedirects.PUT("/:id", domainRedirectHandler.Update)
 			domainRedirects.DELETE("/:id", domainRedirectHandler.Delete)
+			domainRedirects.POST("/:id/ensure-dns", domainRedirectHandler.EnsureDNS)
 		}
 
 		// 重点探测链接管理

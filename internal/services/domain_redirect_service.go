@@ -11,7 +11,7 @@ import (
 )
 
 type DomainRedirectService struct {
-	db              *gorm.DB
+	db               *gorm.DB
 	cfAccountService *CFAccountService
 }
 
@@ -139,6 +139,23 @@ func (s *DomainRedirectService) Update(id uint, targetDomain string, preservePat
 		return nil, fmt.Errorf("保存失败: %w", err)
 	}
 	return dr, nil
+}
+
+// EnsureDNS 为已有重定向的源主机名创建/补建 DNS 记录（A 或 CNAME），解决「无法解析主机」。
+func (s *DomainRedirectService) EnsureDNS(id uint) error {
+	dr, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	cfSvc, err := s.getCFService(dr.CFAccountID)
+	if err != nil {
+		return err
+	}
+	zoneName, err := cfSvc.GetZoneByID(dr.ZoneID)
+	if err != nil {
+		return fmt.Errorf("获取 Zone 名称失败: %w", err)
+	}
+	return cfSvc.EnsureRedirectSourceDNS(dr.ZoneID, zoneName, dr.SourceDomain)
 }
 
 // Delete 删除：删除 CF 规则并软删除记录

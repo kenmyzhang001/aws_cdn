@@ -62,8 +62,11 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
+            <el-button type="success" link size="small" @click="handleEnsureDns(row)">
+              创建 DNS
+            </el-button>
             <el-button type="primary" link size="small" @click="openEditDialog(row)">
               编辑
             </el-button>
@@ -332,6 +335,16 @@ export default {
       }
     }
 
+    const handleEnsureDns = async (row) => {
+      try {
+        await domainRedirectApi.ensureDns(row.id)
+        ElMessage.success('DNS 记录已创建，稍等片刻后访问 ' + row.source_domain + ' 应可解析')
+        fetchList()
+      } catch (e) {
+        // 错误已由 request 拦截器展示，可提示检查 Token 权限（Zone DNS Edit）
+      }
+    }
+
     const handleDelete = async (row) => {
       try {
         await ElMessageBox.confirm(
@@ -359,6 +372,7 @@ export default {
       fetchList,
       openCreateDialog,
       openEditDialog,
+      handleEnsureDns,
       handleDelete,
       dialogVisible,
       editId,

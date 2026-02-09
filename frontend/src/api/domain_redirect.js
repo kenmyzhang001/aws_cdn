@@ -19,5 +19,9 @@ export const domainRedirectApi = {
 
   delete(id) {
     return request.delete(`/domain-redirects/${id}`)
+  },
+
+  ensureDns(id) {
+    return request.post(`/domain-redirects/${id}/ensure-dns`)
   }
 }

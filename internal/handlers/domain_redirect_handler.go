@@ -106,6 +106,22 @@ func (h *DomainRedirectHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, dr)
 }
 
+// EnsureDNS 为源主机名创建/补建 DNS 记录（解决「无法解析主机」）
+func (h *DomainRedirectHandler) EnsureDNS(c *gin.Context) {
+	log := logger.GetLogger()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 ID"})
+		return
+	}
+	if err := h.service.EnsureDNS(uint(id)); err != nil {
+		log.WithError(err).WithField("id", id).Error("创建 DNS 记录失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "DNS 记录已创建"})
+}
+
 // Delete 删除
 func (h *DomainRedirectHandler) Delete(c *gin.Context) {
 	log := logger.GetLogger()

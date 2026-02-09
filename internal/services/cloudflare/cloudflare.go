@@ -172,7 +172,7 @@ func (s *CloudflareService) EnsureRedirectSourceDNS(zoneID, zoneName, sourceDoma
 		log.WithFields(map[string]interface{}{"zone_id": zoneID, "name": zoneName}).Info("已创建根域名 A 记录")
 		return nil
 	}
-	// 子域名：CNAME 到根域名，走代理
+	// 子域名：创建 A 记录（与根域名一致，占位 192.0.2.1，代理开启后由 CF 响应）
 	suffix := "." + zoneName
 	if !strings.HasSuffix(sourceDomain, suffix) {
 		return fmt.Errorf("sourceDomain %s 不属于 zone %s", sourceDomain, zoneName)
@@ -182,16 +182,16 @@ func (s *CloudflareService) EnsureRedirectSourceDNS(zoneID, zoneName, sourceDoma
 	if recordName == "" {
 		return nil
 	}
-	err := s.CreateCNAMERecord(zoneID, recordName, zoneName, true)
+	err := s.CreateARecord(zoneID, recordName, "192.0.2.1", true)
 	if err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
-			"zone_id": zoneID, "name": recordName, "content": zoneName,
-		}).Warn("创建子域名 CNAME 记录失败（可能已存在）")
+			"zone_id": zoneID, "name": recordName, "content": "192.0.2.1",
+		}).Warn("创建子域名 A 记录失败（可能已存在）")
 		return err
 	}
 	log.WithFields(map[string]interface{}{
-		"zone_id": zoneID, "name": recordName, "content": zoneName,
-	}).Info("已创建子域名 CNAME 记录")
+		"zone_id": zoneID, "name": recordName, "content": "192.0.2.1",
+	}).Info("已创建子域名 A 记录")
 	return nil
 }
 
