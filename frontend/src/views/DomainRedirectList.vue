@@ -116,8 +116,16 @@
               <span style="color: #909399; margin-left: 8px; font-size: 12px">{{ z.id }}</span>
             </el-option>
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="!editId" label="子域名前缀">
+          <el-input
+            v-model="form.subdomain_prefix"
+            placeholder="留空=根域名，或输入 www、app、dl 等"
+            clearable
+            style="width: 100%"
+          />
           <div v-if="form.zone_id" style="margin-top: 4px; font-size: 12px; color: #909399">
-            主域名将使用：{{ zoneNameById(form.zone_id) }}
+            实际源地址：{{ computedSourceHost }}
           </div>
         </el-form-item>
         <el-form-item v-if="editId" label="主域名">
@@ -171,9 +179,18 @@ export default {
     const form = ref({
       cf_account_id: null,
       zone_id: '',
+      subdomain_prefix: '',
       source_domain: '',
       target_domain: '',
-      preserve_path: true
+      preserve_path: false
+    })
+
+    // 新增时显示的实际源主机名（根域名 或 前缀.根域名）
+    const computedSourceHost = computed(() => {
+      const zoneName = zoneNameById(form.value.zone_id)
+      if (!zoneName) return '-'
+      const prefix = (form.value.subdomain_prefix || '').trim()
+      return prefix ? `${prefix}.${zoneName}` : zoneName
     })
 
     const zoneList = ref([])
@@ -208,6 +225,7 @@ export default {
 
     const onCfAccountChange = async () => {
       form.value.zone_id = ''
+      form.value.subdomain_prefix = ''
       form.value.source_domain = ''
       zoneList.value = []
       if (!form.value.cf_account_id) return
@@ -227,9 +245,10 @@ export default {
       form.value = {
         cf_account_id: cfAccountList.value.length === 1 ? cfAccountList.value[0].id : null,
         zone_id: '',
+        subdomain_prefix: '',
         source_domain: '',
         target_domain: '',
-        preserve_path: true
+        preserve_path: false
       }
       zoneList.value = []
       if (form.value.cf_account_id) onCfAccountChange()
@@ -282,11 +301,13 @@ export default {
         ElMessage.warning('请选择主域名（源）')
         return
       }
-      const sourceDomain = zoneNameById(form.value.zone_id)
-      if (!sourceDomain) {
+      const zoneName = zoneNameById(form.value.zone_id)
+      if (!zoneName) {
         ElMessage.warning('无法解析主域名')
         return
       }
+      const prefix = (form.value.subdomain_prefix || '').trim()
+      const sourceDomain = prefix ? `${prefix}.${zoneName}` : zoneName
       if (!form.value.target_domain?.trim()) {
         ElMessage.warning('请填写目标域名')
         return

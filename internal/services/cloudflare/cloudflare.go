@@ -112,6 +112,89 @@ func (s *CloudflareService) GetZoneID(domainName string) (string, error) {
 	return result.Result[0].ID, nil
 }
 
+// GetZoneByID 根据 Zone ID 获取 Zone 名称
+func (s *CloudflareService) GetZoneByID(zoneID string) (string, error) {
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s", zoneID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("获取 Zone 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+	if !result.Success {
+		return "", fmt.Errorf("获取 Zone 失败")
+	}
+	return result.Result.Name, nil
+}
+
+// EnsureRedirectSourceDNS 确保 302 重定向的源主机名有 DNS 记录，流量能到达 CF 后规则才会生效。
+// zoneName 为该 Zone 的根域名（如 dzfoq.com），sourceDomain 为源主机名（如 test.dzfoq.com 或 dzfoq.com）。
+func (s *CloudflareService) EnsureRedirectSourceDNS(zoneID, zoneName, sourceDomain string) error {
+	log := logger.GetLogger()
+	zoneName = strings.TrimSuffix(strings.ToLower(zoneName), ".")
+	sourceDomain = strings.TrimSuffix(strings.ToLower(sourceDomain), ".")
+	if zoneName == "" || sourceDomain == "" {
+		return fmt.Errorf("zoneName 或 sourceDomain 为空")
+	}
+	// 根域名：创建 A 记录 @ -> 192.0.2.1（占位，代理开启后由 CF 响应）
+	if sourceDomain == zoneName {
+		err := s.CreateARecord(zoneID, zoneName, "192.0.2.1", true)
+		if err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{
+				"zone_id": zoneID, "zone_name": zoneName,
+			}).Warn("创建根域名 A 记录失败（可能已存在）")
+			return err
+		}
+		log.WithFields(map[string]interface{}{"zone_id": zoneID, "name": zoneName}).Info("已创建根域名 A 记录")
+		return nil
+	}
+	// 子域名：CNAME 到根域名，走代理
+	suffix := "." + zoneName
+	if !strings.HasSuffix(sourceDomain, suffix) {
+		return fmt.Errorf("sourceDomain %s 不属于 zone %s", sourceDomain, zoneName)
+	}
+	recordName := strings.TrimSuffix(sourceDomain, suffix)
+	recordName = strings.TrimSuffix(recordName, ".")
+	if recordName == "" {
+		return nil
+	}
+	err := s.CreateCNAMERecord(zoneID, recordName, zoneName, true)
+	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"zone_id": zoneID, "name": recordName, "content": zoneName,
+		}).Warn("创建子域名 CNAME 记录失败（可能已存在）")
+		return err
+	}
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID, "name": recordName, "content": zoneName,
+	}).Info("已创建子域名 CNAME 记录")
+	return nil
+}
+
 // ZonesResult 域名列表返回结果
 type ZonesResult struct {
 	Zones      []map[string]interface{} `json:"zones"`
@@ -440,6 +523,56 @@ func (s *CloudflareService) CreateCNAMERecord(zoneID, name, value string, proxie
 		"record_content": result.Result.Content,
 	}).Info("CNAME记录创建成功")
 
+	return nil
+}
+
+// CreateARecord 创建 A 记录（用于根域名等）
+func (s *CloudflareService) CreateARecord(zoneID, name, content string, proxied bool) error {
+	name = strings.TrimSuffix(name, ".")
+	payload := map[string]interface{}{
+		"type":    "A",
+		"name":    name,
+		"content": content,
+		"ttl":     300,
+		"proxied": proxied,
+	}
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化请求失败: %w", err)
+	}
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records", zoneID)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Errors []struct {
+				Message string `json:"message"`
+			} `json:"errors"`
+		}
+		_ = json.Unmarshal(body, &errResp)
+		msg := ""
+		if len(errResp.Errors) > 0 {
+			msg = errResp.Errors[0].Message
+			if strings.Contains(msg, "already exists") {
+				return nil // 已存在视为成功
+			}
+		}
+		return fmt.Errorf("创建 A 记录失败 (状态码: %d): %s", resp.StatusCode, msg)
+	}
 	return nil
 }
 
@@ -3272,7 +3405,7 @@ func (s *CloudflareService) getOrCreateURLRedirectRuleset(zoneID string) (string
 func (s *CloudflareService) CreateDomainRedirectRule(zoneID, sourceDomain, targetDomain string, preservePath bool) (string, error) {
 	log := logger.GetLogger()
 
-	// 规范目标域名：去掉协议与尾部斜杠
+	// 规范目标：去掉协议与尾部斜杠（保留 path 和 query）
 	targetDomain = strings.TrimPrefix(targetDomain, "https://")
 	targetDomain = strings.TrimPrefix(targetDomain, "http://")
 	targetDomain = strings.TrimSuffix(targetDomain, "/")
@@ -3290,16 +3423,19 @@ func (s *CloudflareService) CreateDomainRedirectRule(zoneID, sourceDomain, targe
 		return "", fmt.Errorf("查找现有规则失败: %w", err)
 	}
 
-	var targetURLExpr string
+	var targetURLParam map[string]interface{}
 	if preservePath {
-		targetURLExpr = fmt.Sprintf(`concat("https://", "%s", http.request.uri.path)`, targetDomain)
+		targetURLExpr := fmt.Sprintf(`concat("https://", "%s", http.request.uri.path)`, escapeCFString(targetDomain))
+		targetURLParam = map[string]interface{}{"expression": targetURLExpr}
 	} else {
-		targetURLExpr = fmt.Sprintf(`"https://%s/"`, targetDomain)
+		// 静态 URL 必须用 value，不能用 expression（Cloudflare 会把 expression 当表达式解析，纯 URL 会报错）
+		fullURL := "https://" + targetDomain
+		targetURLParam = map[string]interface{}{"value": fullURL}
 	}
 
 	fromValue := map[string]interface{}{
 		"status_code": 302,
-		"target_url":  map[string]interface{}{"expression": targetURLExpr},
+		"target_url":  targetURLParam,
 	}
 	if preservePath {
 		fromValue["preserve_query_string"] = true
@@ -3321,10 +3457,10 @@ func (s *CloudflareService) CreateDomainRedirectRule(zoneID, sourceDomain, targe
 			return "", fmt.Errorf("更新域名重定向规则失败: %w", err)
 		}
 		log.WithFields(map[string]interface{}{
-			"zone_id":   zoneID,
-			"source":    sourceDomain,
-			"target":    targetDomain,
-			"rule_id":   existingRuleID,
+			"zone_id": zoneID,
+			"source":  sourceDomain,
+			"target":  targetDomain,
+			"rule_id": existingRuleID,
 		}).Info("域名302重定向规则已更新")
 		return existingRuleID, nil
 	}
@@ -3334,10 +3470,10 @@ func (s *CloudflareService) CreateDomainRedirectRule(zoneID, sourceDomain, targe
 		return "", fmt.Errorf("创建域名重定向规则失败: %w", err)
 	}
 	log.WithFields(map[string]interface{}{
-		"zone_id":  zoneID,
-		"source":   sourceDomain,
-		"target":   targetDomain,
-		"rule_id":  ruleID,
+		"zone_id": zoneID,
+		"source":  sourceDomain,
+		"target":  targetDomain,
+		"rule_id": ruleID,
 	}).Info("域名302重定向规则已创建")
 	return ruleID, nil
 }
@@ -3354,28 +3490,37 @@ func (s *CloudflareService) UpdateDomainRedirectRule(zoneID, ruleID, sourceDomai
 	}
 
 	expression := fmt.Sprintf(`(http.host eq "%s")`, sourceDomain)
-	var targetURLExpr string
+	var targetURLParam map[string]interface{}
 	if preservePath {
-		targetURLExpr = fmt.Sprintf(`concat("https://", "%s", http.request.uri.path)`, targetDomain)
+		targetURLExpr := fmt.Sprintf(`concat("https://", "%s", http.request.uri.path)`, escapeCFString(targetDomain))
+		targetURLParam = map[string]interface{}{"expression": targetURLExpr}
 	} else {
-		targetURLExpr = fmt.Sprintf(`"https://%s/"`, targetDomain)
+		fullURL := "https://" + targetDomain
+		targetURLParam = map[string]interface{}{"value": fullURL}
 	}
 	fromValue := map[string]interface{}{
 		"status_code": 302,
-		"target_url":  map[string]interface{}{"expression": targetURLExpr},
+		"target_url":  targetURLParam,
 	}
 	if preservePath {
 		fromValue["preserve_query_string"] = true
 	}
 	rule := map[string]interface{}{
-		"expression": expression,
-		"action":     "redirect",
+		"expression":        expression,
+		"action":            "redirect",
 		"action_parameters": map[string]interface{}{"from_value": fromValue},
-		"description": fmt.Sprintf("域名302重定向: %s -> https://%s", sourceDomain, targetDomain),
-		"enabled":     true,
+		"description":       fmt.Sprintf("域名302重定向: %s -> https://%s", sourceDomain, targetDomain),
+		"enabled":           true,
 	}
 	_, err = s.updateRule(zoneID, rulesetID, ruleID, rule)
 	return err
+}
+
+// escapeCFString 转义 Cloudflare 表达式中的字符串字面量（\ 和 "）
+func escapeCFString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
 }
 
 // GetURLRedirectRulesetID 获取 Zone 的 URL Redirect Ruleset ID（仅查找，不创建）。不存在时返回空字符串。
