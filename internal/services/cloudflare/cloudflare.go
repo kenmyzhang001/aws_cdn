@@ -528,6 +528,7 @@ func (s *CloudflareService) CreateCNAMERecord(zoneID, name, value string, proxie
 
 // CreateARecord 创建 A 记录（用于根域名等）
 func (s *CloudflareService) CreateARecord(zoneID, name, content string, proxied bool) error {
+	log := logger.GetLogger()
 	name = strings.TrimSuffix(name, ".")
 	payload := map[string]interface{}{
 		"type":    "A",
@@ -540,9 +541,19 @@ func (s *CloudflareService) CreateARecord(zoneID, name, content string, proxied 
 	if err != nil {
 		return fmt.Errorf("序列化请求失败: %w", err)
 	}
+	log.WithFields(map[string]interface{}{
+		"zone_id": zoneID,
+		"name":    name,
+		"content": content,
+		"proxied": proxied,
+	}).Info("创建 A 记录")
 	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records", zoneID)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"zone_id": zoneID,
+			"url":     url,
+		}).Error("创建HTTP请求失败")
 		return fmt.Errorf("创建请求失败: %w", err)
 	}
 	for k, v := range s.getAuthHeaders() {
