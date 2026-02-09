@@ -63,6 +63,10 @@
               <el-icon><Setting /></el-icon>
               <span>Worker 管理</span>
             </el-menu-item>
+            <el-menu-item index="/domain-redirects">
+              <el-icon><Link /></el-icon>
+              <span>域名302重定向</span>
+            </el-menu-item>
           </el-sub-menu>
 
           <!-- 自定义下载链接管理 -->

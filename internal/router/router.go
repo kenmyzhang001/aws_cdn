@@ -85,6 +85,9 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	// 初始化 Worker 服务
 	cfWorkerService := services.NewCFWorkerService(db)
 
+	// 初始化域名 302 重定向服务
+	domainRedirectService := services.NewDomainRedirectService(db, cfAccountService)
+
 	// 初始化重点探测链接服务
 	focusProbeLinkService := services.NewFocusProbeLinkService(db)
 
@@ -102,6 +105,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	allLinksHandler := handlers.NewAllLinksHandler(downloadPackageService, customDownloadLinkService, r2CustomDomainService, r2FileService, focusProbeLinkService, speedProbeService)
 	speedProbeHandler := handlers.NewSpeedProbeHandler(speedProbeService)
 	cfWorkerHandler := handlers.NewCFWorkerHandler(cfWorkerService)
+	domainRedirectHandler := handlers.NewDomainRedirectHandler(domainRedirectService)
 	focusProbeLinkHandler := handlers.NewFocusProbeLinkHandler(focusProbeLinkService)
 
 	// API 路由
@@ -277,6 +281,16 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			cfWorkers.POST("", cfWorkerHandler.CreateWorker)
 			cfWorkers.PUT("/:id", cfWorkerHandler.UpdateWorker)
 			cfWorkers.DELETE("/:id", cfWorkerHandler.DeleteWorker)
+		}
+
+		// 域名 302 重定向管理（CF Redirect Rules）
+		domainRedirects := protected.Group("/domain-redirects")
+		{
+			domainRedirects.GET("", domainRedirectHandler.List)
+			domainRedirects.GET("/:id", domainRedirectHandler.Get)
+			domainRedirects.POST("", domainRedirectHandler.Create)
+			domainRedirects.PUT("/:id", domainRedirectHandler.Update)
+			domainRedirects.DELETE("/:id", domainRedirectHandler.Delete)
 		}
 
 		// 重点探测链接管理

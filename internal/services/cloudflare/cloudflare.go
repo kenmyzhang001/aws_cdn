@@ -3266,3 +3266,176 @@ func (s *CloudflareService) getOrCreateURLRedirectRuleset(zoneID string) (string
 
 	return createResult.Result.ID, nil
 }
+
+// CreateDomainRedirectRule 创建域名 302 重定向规则（主域名 -> 目标域名）
+// zoneID: Zone ID, sourceDomain: 主域名（源）, targetDomain: 目标域名（不含协议）, preservePath: 是否保留路径与查询串
+func (s *CloudflareService) CreateDomainRedirectRule(zoneID, sourceDomain, targetDomain string, preservePath bool) (string, error) {
+	log := logger.GetLogger()
+
+	// 规范目标域名：去掉协议与尾部斜杠
+	targetDomain = strings.TrimPrefix(targetDomain, "https://")
+	targetDomain = strings.TrimPrefix(targetDomain, "http://")
+	targetDomain = strings.TrimSuffix(targetDomain, "/")
+
+	rulesetID, err := s.getOrCreateURLRedirectRuleset(zoneID)
+	if err != nil {
+		return "", fmt.Errorf("获取或创建 URL Redirect Ruleset 失败: %w", err)
+	}
+
+	// 匹配主域名（仅根域名，不含子域名）
+	expression := fmt.Sprintf(`(http.host eq "%s")`, sourceDomain)
+
+	existingRuleID, err := s.findRuleByExpression(zoneID, rulesetID, expression)
+	if err != nil {
+		return "", fmt.Errorf("查找现有规则失败: %w", err)
+	}
+
+	var targetURLExpr string
+	if preservePath {
+		targetURLExpr = fmt.Sprintf(`concat("https://", "%s", http.request.uri.path)`, targetDomain)
+	} else {
+		targetURLExpr = fmt.Sprintf(`"https://%s/"`, targetDomain)
+	}
+
+	fromValue := map[string]interface{}{
+		"status_code": 302,
+		"target_url":  map[string]interface{}{"expression": targetURLExpr},
+	}
+	if preservePath {
+		fromValue["preserve_query_string"] = true
+	}
+
+	rule := map[string]interface{}{
+		"expression": expression,
+		"action":     "redirect",
+		"action_parameters": map[string]interface{}{
+			"from_value": fromValue,
+		},
+		"description": fmt.Sprintf("域名302重定向: %s -> https://%s", sourceDomain, targetDomain),
+		"enabled":     true,
+	}
+
+	if existingRuleID != "" {
+		_, err = s.updateRule(zoneID, rulesetID, existingRuleID, rule)
+		if err != nil {
+			return "", fmt.Errorf("更新域名重定向规则失败: %w", err)
+		}
+		log.WithFields(map[string]interface{}{
+			"zone_id":   zoneID,
+			"source":    sourceDomain,
+			"target":    targetDomain,
+			"rule_id":   existingRuleID,
+		}).Info("域名302重定向规则已更新")
+		return existingRuleID, nil
+	}
+
+	ruleID, err := s.addRule(zoneID, rulesetID, rule)
+	if err != nil {
+		return "", fmt.Errorf("创建域名重定向规则失败: %w", err)
+	}
+	log.WithFields(map[string]interface{}{
+		"zone_id":  zoneID,
+		"source":   sourceDomain,
+		"target":   targetDomain,
+		"rule_id":  ruleID,
+	}).Info("域名302重定向规则已创建")
+	return ruleID, nil
+}
+
+// UpdateDomainRedirectRule 更新域名 302 重定向规则（目标域名或是否保留路径）
+func (s *CloudflareService) UpdateDomainRedirectRule(zoneID, ruleID, sourceDomain, targetDomain string, preservePath bool) error {
+	targetDomain = strings.TrimPrefix(targetDomain, "https://")
+	targetDomain = strings.TrimPrefix(targetDomain, "http://")
+	targetDomain = strings.TrimSuffix(targetDomain, "/")
+
+	rulesetID, err := s.GetURLRedirectRulesetID(zoneID)
+	if err != nil || rulesetID == "" {
+		return fmt.Errorf("获取 Redirect Ruleset 失败: %w", err)
+	}
+
+	expression := fmt.Sprintf(`(http.host eq "%s")`, sourceDomain)
+	var targetURLExpr string
+	if preservePath {
+		targetURLExpr = fmt.Sprintf(`concat("https://", "%s", http.request.uri.path)`, targetDomain)
+	} else {
+		targetURLExpr = fmt.Sprintf(`"https://%s/"`, targetDomain)
+	}
+	fromValue := map[string]interface{}{
+		"status_code": 302,
+		"target_url":  map[string]interface{}{"expression": targetURLExpr},
+	}
+	if preservePath {
+		fromValue["preserve_query_string"] = true
+	}
+	rule := map[string]interface{}{
+		"expression": expression,
+		"action":     "redirect",
+		"action_parameters": map[string]interface{}{"from_value": fromValue},
+		"description": fmt.Sprintf("域名302重定向: %s -> https://%s", sourceDomain, targetDomain),
+		"enabled":     true,
+	}
+	_, err = s.updateRule(zoneID, rulesetID, ruleID, rule)
+	return err
+}
+
+// GetURLRedirectRulesetID 获取 Zone 的 URL Redirect Ruleset ID（仅查找，不创建）。不存在时返回空字符串。
+func (s *CloudflareService) GetURLRedirectRulesetID(zoneID string) (string, error) {
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets", zoneID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("获取 Ruleset 失败 (状态码: %d)", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+	var result struct {
+		Success bool `json:"success"`
+		Result  []struct {
+			ID    string `json:"id"`
+			Phase string `json:"phase"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+	for _, ruleset := range result.Result {
+		if ruleset.Phase == "http_request_dynamic_redirect" {
+			return ruleset.ID, nil
+		}
+	}
+	return "", nil
+}
+
+// DeleteRedirectRule 从 Ruleset 中删除一条规则
+func (s *CloudflareService) DeleteRedirectRule(zoneID, rulesetID, ruleID string) error {
+	url := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/rulesets/%s/rules/%s", zoneID, rulesetID, ruleID)
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("删除规则失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}

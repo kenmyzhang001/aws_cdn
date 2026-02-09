@@ -11,6 +11,7 @@ import R2BucketList from '@/views/R2BucketList.vue'
 import R2ApkLinkManager from '@/views/R2ApkLinkManager.vue'
 import CustomDownloadLinkList from '@/views/CustomDownloadLinkList.vue'
 import CfWorkerList from '@/views/CfWorkerList.vue'
+import DomainRedirectList from '@/views/DomainRedirectList.vue'
 import FocusProbeLinkList from '@/views/FocusProbeLinkList.vue'
 import Login from '@/views/Login.vue'
 
@@ -83,6 +84,11 @@ const routes = [
     path: '/cf-workers',
     name: 'CfWorkerList',
     component: CfWorkerList,
+  },
+  {
+    path: '/domain-redirects',
+    name: 'DomainRedirectList',
+    component: DomainRedirectList,
   },
   {
     path: '/focus-probe-links',
