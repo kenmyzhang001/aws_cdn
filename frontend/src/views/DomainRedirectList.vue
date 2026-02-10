@@ -104,10 +104,13 @@
         <el-form-item v-if="!editId" label="主域名（源）" required>
           <el-select
             v-model="form.zone_id"
-            placeholder="请先选择 CF 账号，再选择主域名"
+            placeholder="请先选择 CF 账号，再输入搜索主域名"
             style="width: 100%"
             filterable
-            :disabled="!form.cf_account_id || zoneLoading"
+            remote
+            :remote-method="remoteZoneSearch"
+            :loading="zoneLoading"
+            :disabled="!form.cf_account_id"
           >
             <el-option
               v-for="z in zoneList"
@@ -232,9 +235,17 @@ export default {
       form.value.source_domain = ''
       zoneList.value = []
       if (!form.value.cf_account_id) return
+      // 预加载一批 zone，用户也可在输入框输入关键词触发远程搜索
+      remoteZoneSearch('')
+    }
+
+    /** 主域名远程搜索：输入时调用接口按 name 搜索，query 为空时拉取第一页 */
+    const remoteZoneSearch = async (query) => {
+      if (!form.value.cf_account_id) return
+      const q = typeof query === 'string' ? query.trim() : ''
       zoneLoading.value = true
       try {
-        const res = await getCFAccountZones(form.value.cf_account_id, 1, 50, '')
+        const res = await getCFAccountZones(form.value.cf_account_id, 1, 50, q)
         zoneList.value = res?.zones || []
       } catch (e) {
         zoneList.value = []
@@ -384,6 +395,7 @@ export default {
       zoneList,
       zoneLoading,
       onCfAccountChange,
+      remoteZoneSearch,
       zoneNameById
     }
   }
