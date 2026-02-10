@@ -90,8 +90,8 @@ func main() {
 	serverURL := flag.String("server", "http://16.163.99.99:8080", "服务器地址")
 	interval := flag.Duration("interval", 10*time.Minute, "探测间隔")
 	timeout := flag.Duration("timeout", 60*time.Second, "单次探测超时时间")
-	maxSize := flag.Int64("max-size", 10*1024*1024, "最大下载文件大小（字节）")
-	speedThreshold := flag.Float64("speed-threshold", 10.0, "速度阈值（KB/s）")
+	maxSize := flag.Int64("max-size", 1*1024, "最大下载文件大小（字节）")
+	speedThreshold := flag.Float64("speed-threshold", 2.0, "速度阈值（KB/s）")
 	concurrency := flag.Int("concurrency", 1, "并发探测数量")
 	flag.Parse()
 
@@ -108,7 +108,7 @@ func main() {
 	log.Printf("   服务器地址: %s", config.ServerURL)
 	log.Printf("   探测间隔: %v", config.ProbeInterval)
 	log.Printf("   探测超时: %v", config.TimeoutDuration)
-	log.Printf("   最大文件大小: %d MB", config.MaxFileSize/(1024*1024))
+	log.Printf("   最大文件大小: %d KB", config.MaxFileSize/(1024))
 	log.Printf("   速度阈值: %.2f KB/s", config.SpeedThreshold)
 	log.Printf("   并发数量: %d", config.Concurrency)
 
@@ -302,14 +302,14 @@ func probeRedirectTarget(url string, config *Config) ProbeResult {
 		},
 	}
 
-	const downloadSize = 1 * 1024 // 1KB
+	downloadSize := config.MaxFileSize - 1
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("创建请求失败: %v", err)
 		return result
 	}
 	req.Header.Set("User-Agent", result.UserAgent)
-	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", downloadSize-1))
+	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", downloadSize))
 
 	startTime := time.Now()
 	resp, err := client.Do(req)
@@ -396,14 +396,14 @@ func probeURLOnce(url string, config *Config) ProbeResult {
 	startTime := time.Now()
 
 	// 发起请求（使用 Range 头只请求前1KB）
-	const maxDownloadSize = 1 * 1024 // 1KB
+	maxDownloadSize := config.MaxFileSize - 1
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		result.ErrorMessage = fmt.Sprintf("创建请求失败: %v", err)
 		return result
 	}
 	req.Header.Set("User-Agent", result.UserAgent)
-	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", maxDownloadSize-1))
+	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", maxDownloadSize))
 
 	resp, err := client.Do(req)
 	if err != nil {
