@@ -22,6 +22,8 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+const CheckTime = -time.Minute * 30
+
 // SpeedProbeStatus 探测状态
 type SpeedProbeStatus string
 
@@ -74,9 +76,9 @@ func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
 	queryStartTime := time.Now()
 
 	// 一次性查询所有URL的探测结果
-	err := db.Where("url IN ? AND created_at > ? AND speed_kbps != 0",
+	err := db.Where("url IN ? AND created_at > ?",
 		urls,
-		time.Now().Add(-time.Minute*60)).
+		time.Now().Add(CheckTime)).
 		Order("speed_kbps DESC").
 		Find(&results).Error
 
@@ -111,7 +113,7 @@ func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
 	err = db.Select("DISTINCT url").
 		Where("url IN ? AND created_at > ? AND speed_kbps = 0",
 			urls,
-			time.Now().Add(-time.Minute*60)).
+			time.Now().Add(CheckTime)).
 		Find(&unavailableURLs).Error
 
 	if err != nil {
@@ -123,15 +125,15 @@ func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
 	for _, url := range unavailableURLs {
 		unavailableMap[url] = true
 	}
-	log.Printf("[TraceID: %s] 10分钟内不可用URL数量: %d, 检查耗时: %v, 不可用URLs: %v",
-		traceID, len(unavailableURLs), time.Since(unavailableCheckStart), unavailableURLs)
+	log.Printf("[TraceID: %s] %s内不可用URL数量: %d, 检查耗时: %v, 不可用URLs: %v",
+		traceID, CheckTime.String(), len(unavailableURLs), time.Since(unavailableCheckStart), unavailableURLs)
 
 	// 按原始urls顺序返回可用的URL
 	var availableURLs []string
 	for _, url := range urls {
 		// 如果在10分钟内有speed_kbps=0的记录，跳过
 		if unavailableMap[url] {
-			log.Printf("[TraceID: %s] 跳过URL（10分钟内不可用）: %s, urls: %v", traceID, url, urls)
+			log.Printf("[TraceID: %s] 跳过URL（%s内不可用）: %s, urls: %v", traceID, CheckTime.String(), url, urls)
 			continue
 		}
 
@@ -161,7 +163,7 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 	queryStartTime := time.Now()
 
 	// 一次性查询所有URL的探测结果
-	err := db.Where("url IN ? AND created_at > ? AND speed_kbps != 0",
+	err := db.Where("url IN ? AND created_at > ?",
 		urls,
 		time.Now().Add(-time.Minute*35)).
 		Order("speed_kbps DESC").
@@ -198,7 +200,7 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 	err = db.Select("DISTINCT url").
 		Where("url IN ? AND created_at > ? AND speed_kbps = 0",
 			urls,
-			time.Now().Add(-time.Minute*60)).
+			time.Now().Add(CheckTime)).
 		Find(&unavailableURLs).Error
 
 	if err != nil {
@@ -210,15 +212,15 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 	for _, url := range unavailableURLs {
 		unavailableMap[url] = true
 	}
-	log.Printf("[TraceID: %s] 60分钟内不可用URL数量（按类型）: %d, 检查耗时: %v, 不可用URLs: %v",
-		traceID, len(unavailableURLs), time.Since(unavailableCheckStart), unavailableURLs)
+	log.Printf("[TraceID: %s] %s内不可用URL数量（按类型）: %d, 检查耗时: %v, 不可用URLs: %v",
+		traceID, CheckTime.String(), len(unavailableURLs), time.Since(unavailableCheckStart), unavailableURLs)
 
 	// 将结果转换为数组，过滤掉不可用的URL，按speed_kbps倒序排序
 	var sortedResults []SpeedProbeResult
 	for _, result := range urlMap {
-		// 如果在60分钟内有speed_kbps=0的记录，跳过
+		// 如果在%s内有speed_kbps=0的记录，跳过
 		if unavailableMap[result.URL] {
-			log.Printf("[TraceID: %s] 跳过URL（60分钟内不可用，按类型）: %s, urls: %v", traceID, result.URL, urls)
+			log.Printf("[TraceID: %s] 跳过URL（%s内不可用，按类型）: %s, urls: %v", traceID, CheckTime.String(), result.URL, urls)
 			continue
 		}
 		sortedResults = append(sortedResults, result)
@@ -314,14 +316,7 @@ func probeRedirectTarget(url string, traceID string) (float64, error) {
 	}
 
 	// 计算速度评分
-	speedKbps := 10000.0 / float64(requestDuration.Milliseconds())
-	if speedKbps > 10000.0 {
-		speedKbps = 10000.0
-	}
-	if speedKbps < 100.0 {
-		speedKbps = 100.0
-	}
-
+	speedKbps := 1024.0 / float64(requestDuration.Milliseconds())
 	log.Printf("[TraceID: %s] probeRedirectTarget 成功 - URL: %s, 匹配原因: %s, 状态码: %d, 评估速度: %.2f KB/s, 总耗时: %v",
 		traceID, url, matchReason, resp.StatusCode, speedKbps, time.Since(overallStart))
 	return speedKbps, nil
@@ -425,17 +420,7 @@ func probeURL(url string, traceID string) (float64, error) {
 	}
 
 	if isValid {
-		// 基于响应时间计算一个估算速度值（响应越快，速度越高）
-		// 假设响应时间越短，服务器性能越好，给予更高的速度评分
-		// 速度范围：100ms以内=10000KB/s, 500ms=2000KB/s, 1000ms=1000KB/s
-		speedKbps := 10000.0 / float64(requestDuration.Milliseconds())
-		if speedKbps > 10000.0 {
-			speedKbps = 10000.0 // 设置上限
-		}
-		if speedKbps < 100.0 {
-			speedKbps = 100.0 // 设置下限
-		}
-
+		speedKbps := 1024.0 / float64(requestDuration.Milliseconds())
 		log.Printf("[TraceID: %s] probeURL 成功 - URL: %s, 匹配原因: %s, 状态码: %d, 响应时间: %v, 评估速度: %.2f KB/s, 总耗时: %v",
 			traceID, url, matchReason, resp.StatusCode, requestDuration, speedKbps, totalDuration)
 		return speedKbps, nil
