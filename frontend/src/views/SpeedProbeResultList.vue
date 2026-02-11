@@ -86,11 +86,6 @@
             {{ row.speed_kbps != null ? row.speed_kbps.toFixed(2) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="file_size" label="文件大小" width="100" align="right">
-          <template #default="{ row }">
-            {{ row.file_size != null ? formatSize(row.file_size) : '-' }}
-          </template>
-        </el-table-column>
         <el-table-column prop="download_time_ms" label="耗时(ms)" width="100" align="right">
           <template #default="{ row }">
             {{ row.download_time_ms != null ? row.download_time_ms : '-' }}
