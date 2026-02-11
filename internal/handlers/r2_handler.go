@@ -295,6 +295,38 @@ func (h *R2Handler) GetR2CustomDomain(c *gin.Context) {
 	c.JSON(http.StatusOK, domain)
 }
 
+// RetryR2CustomDomain 重试配置自定义域名（仅支持 failed 或 pending 状态）
+func (h *R2Handler) RetryR2CustomDomain(c *gin.Context) {
+	log := logger.GetLogger()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		log.WithError(err).Error("重试自定义域名失败：无效的ID")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 ID"})
+		return
+	}
+
+	domain, err := h.domainService.GetR2CustomDomain(uint(id))
+	if err != nil {
+		log.WithError(err).Error("重试自定义域名失败：获取域名失败")
+		c.JSON(http.StatusNotFound, gin.H{"error": "域名不存在"})
+		return
+	}
+
+	if domain.Status != "failed" && domain.Status != "pending" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "仅支持对失败或待处理状态的域名进行重试"})
+		return
+	}
+
+	go func() {
+		err := h.domainService.ConfigureCustomDomainAsync(domain.ID)
+		if err != nil {
+			log.WithError(err).WithField("domain_id", domain.ID).Error("重试配置自定义域名失败")
+		}
+	}()
+
+	c.JSON(http.StatusOK, gin.H{"message": "已开始重试配置", "domain": domain})
+}
+
 // DeleteR2CustomDomain 删除自定义域名
 func (h *R2Handler) DeleteR2CustomDomain(c *gin.Context) {
 	log := logger.GetLogger()

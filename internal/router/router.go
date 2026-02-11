@@ -229,6 +229,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			r2CustomDomains.GET("/buckets/:r2_bucket_id", r2Handler.ListR2CustomDomains)
 			r2CustomDomains.POST("/buckets/:r2_bucket_id", r2Handler.AddR2CustomDomain)
 			r2CustomDomains.GET("/:id", r2Handler.GetR2CustomDomain)
+			r2CustomDomains.POST("/:id/retry", r2Handler.RetryR2CustomDomain)
 			r2CustomDomains.DELETE("/:id", r2Handler.DeleteR2CustomDomain)
 		}
 

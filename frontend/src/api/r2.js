@@ -52,6 +52,10 @@ export const r2Api = {
     return request.get(`/r2-custom-domains/${id}`)
   },
 
+  retryR2CustomDomain(id) {
+    return request.post(`/r2-custom-domains/${id}/retry`)
+  },
+
   deleteR2CustomDomain(id) {
     return request.delete(`/r2-custom-domains/${id}`)
   },

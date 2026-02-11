@@ -42,8 +42,17 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="380">
+        <el-table-column label="操作" width="450">
           <template #default="{ row }">
+            <el-button
+              v-if="row.status === 'failed' || row.status === 'pending'"
+              size="small"
+              type="warning"
+              :loading="retryingDomainId === row.id"
+              @click="handleRetry(row)"
+            >
+              重试
+            </el-button>
             <el-button size="small" @click="viewCacheRules(row)">
               缓存规则
             </el-button>
@@ -302,6 +311,7 @@ const selectedDomain = ref(null)
 
 const showConfigLogsDialog = ref(false)
 const configLogs = ref([])
+const retryingDomainId = ref(null)
 
 // CF 托管域名列表相关
 const cfDomains = ref([])
@@ -605,6 +615,20 @@ onUnmounted(() => {
   })
   pollingTimers.value.clear()
 })
+
+const handleRetry = async (row) => {
+  retryingDomainId.value = row.id
+  try {
+    await r2Api.retryR2CustomDomain(row.id)
+    ElMessage.success('已开始重试配置，请稍候...')
+    loadDomains()
+    startPollingDomainStatus(row.id)
+  } catch (error) {
+    // 错误已在拦截器中处理
+  } finally {
+    retryingDomainId.value = null
+  }
+}
 
 const viewCacheRules = (row) => {
   selectedDomain.value = row
