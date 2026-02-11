@@ -17,7 +17,7 @@ func NewDomainRedirectHandler(service *services.DomainRedirectService) *DomainRe
 	return &DomainRedirectHandler{service: service}
 }
 
-// List 列表，支持 ?cf_account_id=
+// List 列表，支持 ?cf_account_id= & page= & page_size=
 func (h *DomainRedirectHandler) List(c *gin.Context) {
 	log := logger.GetLogger()
 	var cfAccountID *uint
@@ -30,13 +30,18 @@ func (h *DomainRedirectHandler) List(c *gin.Context) {
 		u := uint(id)
 		cfAccountID = &u
 	}
-	list, err := h.service.List(cfAccountID)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	list, total, err := h.service.List(cfAccountID, page, pageSize)
 	if err != nil {
 		log.WithError(err).Error("获取域名重定向列表失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, list)
+	c.JSON(http.StatusOK, gin.H{
+		"data":       list,
+		"pagination": gin.H{"total": total, "page": page, "page_size": pageSize},
+	})
 }
 
 // Get 获取单条

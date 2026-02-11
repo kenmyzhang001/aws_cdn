@@ -43,7 +43,7 @@ func (h *CFWorkerHandler) CreateWorker(c *gin.Context) {
 		"cf_account_id": req.CFAccountID,
 		"worker_name":   req.WorkerName,
 		"worker_domain": req.WorkerDomain,
-		"target_domain": req.TargetDomain,
+		"mode":          req.Mode,
 	}).Info("开始创建 Worker")
 
 	worker, err := h.workerService.CreateWorker(&req)
@@ -155,8 +155,8 @@ func (h *CFWorkerHandler) UpdateWorker(c *gin.Context) {
 	}
 
 	log.WithFields(map[string]interface{}{
-		"worker_id":     id,
-		"target_domain": req.TargetDomain,
+		"worker_id": id,
+		"mode":     req.Mode,
 	}).Info("开始更新 Worker")
 
 	worker, err := h.workerService.UpdateWorker(uint(id), &req)

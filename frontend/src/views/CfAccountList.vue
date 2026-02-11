@@ -61,7 +61,7 @@
             placeholder="请输入 Cloudflare API Token（用于管理 R2 存储桶、自定义域名等，可选）"
           />
         </el-form-item>
-        <el-form-item label="R2 API Token">
+        <el-form-item label="R2 API Token(令牌值)">
           <el-input
             v-model="createForm.r2_api_token"
             type="textarea"
@@ -139,14 +139,6 @@
             placeholder="留空则不修改 API Token"
           />
         </el-form-item>
-        <el-form-item label="R2 API Token">
-          <el-input
-            v-model="editForm.r2_api_token"
-            type="textarea"
-            :rows="3"
-            placeholder="留空则不修改 R2 API Token"
-          />
-        </el-form-item>
         <el-form-item label="Account ID">
           <el-input
             v-model="editForm.account_id"
@@ -156,7 +148,15 @@
             可在 Cloudflare Dashboard 右侧边栏找到 Account ID
           </div>
         </el-form-item>
-        <el-form-item label="R2 Access Key ID">
+        <el-form-item label="令牌值(R2 API Token)">
+          <el-input
+            v-model="editForm.r2_api_token"
+            type="textarea"
+            :rows="3"
+            placeholder="留空则不修改 R2 API Token"
+          />
+        </el-form-item>
+        <el-form-item label="访问密钥 ID(R2 Access Key ID)">
           <el-input
             v-model="editForm.r2_access_key_id"
             type="password"
@@ -167,7 +167,7 @@
             在 Cloudflare Dashboard → R2 → Manage R2 API Tokens 中创建
           </div>
         </el-form-item>
-        <el-form-item label="R2 Secret Access Key">
+        <el-form-item label="机密访问密钥(R2 Secret Access Key)">
           <el-input
             v-model="editForm.r2_secret_access_key"
             type="password"

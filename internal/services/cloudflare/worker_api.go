@@ -390,7 +390,7 @@ func (s *WorkerAPIService) DeleteWorkerCustomDomain(domainID string) error {
 	return nil
 }
 
-// GenerateWorkerScript 生成 Worker 脚本
+// GenerateWorkerScript 生成 Worker 脚本（单链接）
 func GenerateWorkerScript(targetDomain string) string {
 	return fmt.Sprintf(`async function handle(request) {
   const target = "%s";
@@ -437,4 +437,171 @@ addEventListener("fetch", (event) => {
   event.respondWith(handle(event.request));
 });
 `, targetDomain)
+}
+
+// WorkerScriptConfig 多目标/轮播 Worker 配置
+type WorkerScriptConfig struct {
+	Targets     []string // 目标链接列表
+	FallbackURL string   // 兜底链接（可选）
+	Mode        string   // time / random / probe
+	RotateDays  int      // 时间轮播每 N 天
+	BaseDate    string   // 时间轮播基准日期 ISO
+}
+
+// GenerateWorkerScriptAdvanced 生成多目标+探活+轮播 Worker 脚本
+func GenerateWorkerScriptAdvanced(cfg WorkerScriptConfig) (string, error) {
+	if len(cfg.Targets) == 0 {
+		return "", fmt.Errorf("targets 不能为空")
+	}
+	targetsJSON, err := json.Marshal(cfg.Targets)
+	if err != nil {
+		return "", err
+	}
+	fallbackEscaped := escapeJSString(cfg.FallbackURL)
+	probePrimary := "https://probe1.aglobalpay.com/probe"
+	probeBackup := "https://probe2.aglobalpay.com/probe"
+
+	var pickFunction string
+	switch cfg.Mode {
+	case "time":
+		days := cfg.RotateDays
+		if days <= 0 {
+			days = 7
+		}
+		baseDate := cfg.BaseDate
+		if baseDate == "" {
+			baseDate = time.Now().Format("2006-01-02")
+		}
+		pickFunction = fmt.Sprintf(`
+async function pick() {
+  const availableTargets = await getAvailableTargets();
+  if (availableTargets.length === 0) return FALLBACK_URL || '';
+  const baseDate = new Date('%sT00:00:00Z');
+  const today = new Date();
+  const baseDateOnly = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const diffTime = todayOnly - baseDateOnly;
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  const index = Math.floor(diffDays / %d) %% availableTargets.length;
+  return availableTargets[index];
+}`, baseDate, days)
+	case "probe":
+		pickFunction = `
+async function pick() {
+  const availableTargets = await probeUrlsWithType(TARGETS, 'probe');
+  if (availableTargets.length === 0) return FALLBACK_URL || '';
+  return availableTargets[0];
+}`
+	default: // random
+		pickFunction = `
+async function pick() {
+  const availableTargets = await getAvailableTargets();
+  if (availableTargets.length === 0) return FALLBACK_URL || '';
+  return availableTargets[Math.floor(Math.random() * availableTargets.length)];
+}`
+	}
+
+	script := fmt.Sprintf(`addEventListener("fetch", event => {
+  event.respondWith(handle(event.request));
+});
+
+const TARGETS = %s;
+const FALLBACK_URL = %s;
+const PROBE_PRIMARY = "%s";
+const PROBE_BACKUP = "%s";
+
+let probeCache = { targets: [], timestamp: 0 };
+const PROBE_CACHE_TTL = 60000;
+
+async function probeUrls(urls) {
+  const probeNodes = [PROBE_PRIMARY, PROBE_BACKUP];
+  const timeout = 5000;
+  for (const probeNode of probeNodes) {
+    try {
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), timeout));
+      const fetchPromise = fetch(probeNode, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: urls })
+      });
+      const response = await Promise.race([fetchPromise, timeoutPromise]);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.available_urls && Array.isArray(data.available_urls)) return data.available_urls;
+      }
+    } catch (e) { continue; }
+  }
+  return [];
+}
+
+async function probeUrlsWithType(urls, type) {
+  const probeNodes = [PROBE_PRIMARY, PROBE_BACKUP];
+  const timeout = 5000;
+  for (const probeNode of probeNodes) {
+    try {
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), timeout));
+      const fetchPromise = fetch(probeNode, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: urls, type: type })
+      });
+      const response = await Promise.race([fetchPromise, timeoutPromise]);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.available_urls && Array.isArray(data.available_urls)) return data.available_urls;
+      }
+    } catch (e) { continue; }
+  }
+  return [];
+}
+
+async function getAvailableTargets() {
+  const now = Date.now();
+  if (probeCache.targets.length > 0 && (now - probeCache.timestamp) < PROBE_CACHE_TTL)
+    return probeCache.targets;
+  const availableTargets = await probeUrls(TARGETS);
+  probeCache = { targets: availableTargets, timestamp: now };
+  return availableTargets;
+}
+
+%s
+
+async function handle(request) {
+  const target = await pick();
+  const ua = request.headers.get("user-agent") || "";
+  if (/Telegram|Viber|Line|WhatsApp|MicroMessenger|WebView|wv/i.test(ua)) {
+    return new Response(
+      '<!doctype html><meta charset="utf-8"><script>location.replace("' + target + '")</script>',
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=UTF-8",
+          "Cache-Control": "public, max-age=1800, s-maxage=1800",
+          "CDN-Cache-Control": "public, max-age=1800",
+          "Surrogate-Control": "max-age=1800",
+          "X-Entry-Worker": "xbbsh-webview"
+        }
+      }
+    );
+  }
+  return new Response(null, {
+    status: 302,
+    headers: {
+      "Location": target,
+      "Cache-Control": "public, max-age=1800, s-maxage=1800",
+      "CDN-Cache-Control": "public, max-age=1800",
+      "Surrogate-Control": "max-age=1800",
+      "Vary": "*",
+      "X-Entry-Worker": "xbbsh-302"
+    }
+  });
+}
+`, string(targetsJSON), fallbackEscaped, probePrimary, probeBackup, pickFunction)
+	return script, nil
+}
+
+func escapeJSString(s string) string {
+	// 输出为 JS 字符串字面量，用双引号包裹
+	b, _ := json.Marshal(s)
+	return string(b)
 }

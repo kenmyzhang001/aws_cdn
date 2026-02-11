@@ -33,17 +33,28 @@ func (s *DomainRedirectService) getCFService(cfAccountID uint) (*cloudflare.Clou
 	return cloudflare.NewCloudflareService(cfg)
 }
 
-// List 列表，可选按 CF 账号筛选
-func (s *DomainRedirectService) List(cfAccountID *uint) ([]models.DomainRedirect, error) {
+// List 列表，可选按 CF 账号筛选，支持分页
+func (s *DomainRedirectService) List(cfAccountID *uint, page, pageSize int) ([]models.DomainRedirect, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 10
+	}
 	var list []models.DomainRedirect
-	query := s.db.Model(&models.DomainRedirect{}).Order("id DESC")
+	var total int64
+	query := s.db.Model(&models.DomainRedirect{})
 	if cfAccountID != nil {
 		query = query.Where("cf_account_id = ?", *cfAccountID)
 	}
-	if err := query.Preload("CFAccount").Find(&list).Error; err != nil {
-		return nil, fmt.Errorf("查询列表失败: %w", err)
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("查询总数失败: %w", err)
 	}
-	return list, nil
+	offset := (page - 1) * pageSize
+	if err := query.Preload("CFAccount").Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
+		return nil, 0, fmt.Errorf("查询列表失败: %w", err)
+	}
+	return list, total, nil
 }
 
 // Get 获取单条
