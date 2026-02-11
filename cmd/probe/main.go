@@ -531,6 +531,16 @@ func probeHandler(db *gorm.DB) gin.HandlerFunc {
 			})
 			return
 		}
+
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[TraceID: %s] 发生panic: %v", traceID, r)
+				c.JSON(http.StatusOK, ProbeResponse{
+					AvailableURLs: req.URLs,
+				})
+				return
+			}
+		}()
 		log.Printf("[TraceID: %s] 请求参数解析成功 - Type: %s, URLs数量: %d, 耗时: %v",
 			traceID, req.Type, len(req.URLs), time.Since(bindStartTime))
 		log.Printf("[TraceID: %s] 请求URLs列表: %v", traceID, req.URLs)
