@@ -28,6 +28,14 @@
             style="width: 140px"
           />
         </el-form-item>
+        <el-form-item label="User-Agent">
+          <el-input
+            v-model="filters.user_agent"
+            placeholder="关键词"
+            clearable
+            style="width: 180px"
+          />
+        </el-form-item>
         <el-form-item label="状态">
           <el-select
             v-model="filters.status"
@@ -72,6 +80,7 @@
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="url" label="URL" min-width="220" show-overflow-tooltip />
         <el-table-column prop="client_ip" label="客户端 IP" width="130" />
+        <el-table-column prop="user_agent" label="User-Agent" min-width="180" show-overflow-tooltip />
         <el-table-column prop="speed_kbps" label="速度(KB/s)" width="110" align="right">
           <template #default="{ row }">
             {{ row.speed_kbps != null ? row.speed_kbps.toFixed(2) : '-' }}
@@ -129,6 +138,7 @@ const total = ref(0)
 const filters = ref({
   url: '',
   client_ip: '',
+  user_agent: '',
   status: '',
   start_time: '',
   end_time: '',
@@ -149,6 +159,7 @@ const loadList = async () => {
     }
     if (filters.value.url) params.url = filters.value.url
     if (filters.value.client_ip) params.client_ip = filters.value.client_ip
+    if (filters.value.user_agent) params.user_agent = filters.value.user_agent
     if (filters.value.status) params.status = filters.value.status
     if (filters.value.start_time) params.start_time = filters.value.start_time
     if (filters.value.end_time) params.end_time = filters.value.end_time
@@ -174,6 +185,7 @@ const resetFilter = () => {
   filters.value = {
     url: '',
     client_ip: '',
+    user_agent: '',
     status: '',
     start_time: '',
     end_time: '',

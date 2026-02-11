@@ -597,6 +597,7 @@ func (s *SpeedProbeService) buildAlertMessage(alert *models.SpeedAlertLog, windo
 type ProbeResultFilters struct {
 	URL       string     // URL 模糊匹配
 	ClientIP  string     // 客户端 IP 模糊匹配
+	UserAgent string     // User-Agent 模糊匹配
 	Status    string     // 状态：success / failed / timeout
 	StartTime *time.Time // 创建时间起
 	EndTime   *time.Time // 创建时间止
@@ -617,6 +618,9 @@ func (s *SpeedProbeService) ListProbeResults(page, pageSize int, filters *ProbeR
 		}
 		if filters.ClientIP != "" {
 			query = query.Where("client_ip LIKE ?", "%"+strings.TrimSpace(filters.ClientIP)+"%")
+		}
+		if filters.UserAgent != "" {
+			query = query.Where("user_agent LIKE ?", "%"+strings.TrimSpace(filters.UserAgent)+"%")
 		}
 		if filters.Status != "" {
 			query = query.Where("status = ?", models.SpeedProbeStatus(filters.Status))

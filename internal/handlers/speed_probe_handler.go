@@ -153,7 +153,7 @@ func (h *SpeedProbeHandler) BatchReportProbeResults(c *gin.Context) {
 }
 
 // ListProbeResults 分页查询探测结果，支持丰富筛选
-// Query: page, page_size, url, client_ip, status, start_time, end_time, speed_min, speed_max
+// Query: page, page_size, url, client_ip, user_agent, status, start_time, end_time, speed_min, speed_max
 func (h *SpeedProbeHandler) ListProbeResults(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
@@ -167,6 +167,9 @@ func (h *SpeedProbeHandler) ListProbeResults(c *gin.Context) {
 	}
 	if clientIP := c.Query("client_ip"); clientIP != "" {
 		filters.ClientIP = clientIP
+	}
+	if userAgent := c.Query("user_agent"); userAgent != "" {
+		filters.UserAgent = userAgent
 	}
 	if status := c.Query("status"); status != "" {
 		filters.Status = status

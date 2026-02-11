@@ -1,7 +1,7 @@
 import request from './request'
 
 export const speedProbeApi = {
-  // 探测结果列表（支持 url, client_ip, status, start_time, end_time, speed_min, speed_max）
+  // 探测结果列表（支持 url, client_ip, user_agent, status, start_time, end_time, speed_min, speed_max）
   getProbeResultList(params) {
     return request.get('/speed-probe/results', { params })
   },
