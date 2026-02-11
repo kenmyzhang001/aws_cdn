@@ -51,7 +51,14 @@ func GetAllSitesData(ctx context.Context, client *redisv9.Client, startDate stri
 	}
 	var list []models.SiteDailyData
 	if err := json.Unmarshal(data, &list); err != nil {
-		return nil, err
+		// Redis 存的是 JSON 字符串（string），需先反序列化为 string 再反序列化为 []SiteDailyData
+		var raw string
+		if err2 := json.Unmarshal(data, &raw); err2 != nil {
+			return nil, err
+		}
+		if err2 := json.Unmarshal([]byte(raw), &list); err2 != nil {
+			return nil, err2
+		}
 	}
 	return list, nil
 }
