@@ -34,6 +34,7 @@ func NewFallbackRuleEngine(redisClient *redisv9.Client, ruleSvc *FallbackRuleSer
 // Run 执行一次规则检查：获取已启用规则，拉取今日/昨日数据，未达标则为该渠道下所有自定义链接写入一条 status=failed 的探测结果
 func (e *FallbackRuleEngine) Run(ctx context.Context) error {
 	log := logger.GetLogger()
+	log.Info("开始执行兜底规则检查")
 
 	if e.redisClient == nil {
 		log.Warn("Redis 未配置，跳过兜底规则检查")
@@ -89,11 +90,12 @@ func (e *FallbackRuleEngine) Run(ctx context.Context) error {
 			}
 		}
 		log.WithFields(map[string]interface{}{
-			"rule_id":       rule.ID,
+			"rule_id":      rule.ID,
 			"channel_code": rule.ChannelCode,
 			"link_count":   len(links),
 		}).Info("兜底规则已触发，已写入探测结果用于告警")
 	}
+	log.Info("兜底规则检查完成")
 
 	return nil
 }
