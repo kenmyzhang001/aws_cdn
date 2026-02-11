@@ -260,7 +260,8 @@ func probeRedirectTarget(url string, traceID string) (float64, error) {
 		return 0, fmt.Errorf("创建请求失败: %w", err)
 	}
 
-	// 设置Range header
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Range", "bytes=0-1023")
 
 	// 不跟随重定向的客户端
@@ -340,9 +341,12 @@ func probeURL(url string, traceID string) (float64, error) {
 		return 0, fmt.Errorf("创建请求失败: %w", err)
 	}
 
+	// 使用浏览器式 User-Agent，避免 CDN/WAF 因识别为脚本而返回 403/500（与 curl 行为一致）
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "*/*")
 	// 设置Range header，请求前1KB即可（只用于检测是否支持Range）
 	req.Header.Set("Range", "bytes=0-1023")
-	log.Printf("[TraceID: %s] 设置Range请求头 - URL: %s, Range: bytes=0-1023", traceID, url)
+	log.Printf("[TraceID: %s] 设置请求头 - URL: %s, Range: bytes=0-1023", traceID, url)
 
 	// 自定义HTTP客户端，允许跟随重定向
 	client := &http.Client{
@@ -366,6 +370,22 @@ func probeURL(url string, traceID string) (float64, error) {
 	defer resp.Body.Close()
 
 	requestDuration := time.Since(requestStartTime)
+
+	// 若带 Range 时目标返回 5xx（常见于 CDN 对 Range 处理异常），则用无 Range 重试一次以拿到 302
+	if resp.StatusCode >= 500 {
+		log.Printf("[TraceID: %s] 收到 %d，尝试无 Range 重试 - URL: %s", traceID, resp.StatusCode, url)
+		reqNoRange, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+		reqNoRange.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		reqNoRange.Header.Set("Accept", "*/*")
+		resp2, err2 := client.Do(reqNoRange)
+		if err2 == nil {
+			resp.Body.Close()
+			resp = resp2
+			requestDuration = time.Since(requestStartTime)
+			log.Printf("[TraceID: %s] 无 Range 重试响应 - URL: %s, 状态码: %d", traceID, url, resp.StatusCode)
+		}
+	}
+
 	totalDuration := time.Since(overallStart)
 
 	// 获取响应头信息
