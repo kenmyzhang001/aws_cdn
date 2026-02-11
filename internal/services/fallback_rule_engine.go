@@ -46,7 +46,10 @@ func (e *FallbackRuleEngine) Run(ctx context.Context) error {
 		return fmt.Errorf("获取已启用规则失败: %w", err)
 	}
 	if len(rules) == 0 {
+		log.Info("无已启用规则，跳过兜底规则检查")
 		return nil
+	} else {
+		log.WithField("rule_count", len(rules)).Info("已启用规则数量")
 	}
 
 	now := time.Now()
