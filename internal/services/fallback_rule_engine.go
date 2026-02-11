@@ -61,6 +61,7 @@ func (e *FallbackRuleEngine) Run(ctx context.Context) error {
 			continue
 		}
 		if !triggered {
+			log.WithField("rule_id", rule.ID).WithField("rule_name", rule.Name).Info("规则未触发，跳过")
 			continue
 		}
 
