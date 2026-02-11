@@ -5,8 +5,10 @@ import (
 	"aws_cdn/internal/database"
 	"aws_cdn/internal/logger"
 	"aws_cdn/internal/models"
+	"aws_cdn/internal/redis"
 	"aws_cdn/internal/router"
 	"aws_cdn/internal/services"
+	"context"
 	"os"
 	"time"
 
@@ -82,6 +84,11 @@ func main() {
 	// 初始化自定义下载链接服务
 	customDownloadLinkService := services.NewCustomDownloadLinkService(db)
 
+	// Redis 与兜底规则（供路由与定时任务使用）
+	redisClient := redis.NewClient(&cfg.Redis)
+	fallbackRuleService := services.NewFallbackRuleService(db)
+	fallbackRuleEngine := services.NewFallbackRuleEngine(redisClient, fallbackRuleService, customDownloadLinkService, speedProbeService)
+
 	// 初始化并启动定时任务服务
 	schedulerService := services.NewSchedulerService()
 
@@ -121,14 +128,24 @@ func main() {
 		log.Info("定时任务已禁用：更新自定义下载链接实际URL")
 	}
 
+	// 兜底规则检查任务（每 15 分钟执行一次，需在 Start 前注册）
+	if cfg.ScheduledTask.EnableFallbackRuleCheck {
+		schedulerService.AddTask("兜底规则检查", func() error {
+			return fallbackRuleEngine.Run(context.Background())
+		}, 15*time.Minute)
+		log.Info("定时任务已启用：兜底规则检查（每15分钟执行一次）")
+	} else {
+		log.Info("定时任务已禁用：兜底规则检查")
+	}
+
 	// 启动所有定时任务
 	go schedulerService.Start()
 
 	log.Info("定时任务服务已启动")
 	log.Info("  - 注意：链接探测由独立的 agent 进程执行")
 
-	// 初始化路由（传入 Telegram 服务以支持 webhook）
-	r := router.SetupRouter(db, db2, db3, cfg, telegramService)
+	// 初始化路由（传入 Telegram 服务、Redis、兜底规则服务）
+	r := router.SetupRouter(db, db2, db3, cfg, telegramService, redisClient, fallbackRuleService)
 
 	// 启动服务器
 	port := os.Getenv("SERVER_PORT")
