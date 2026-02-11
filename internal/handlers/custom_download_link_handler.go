@@ -27,6 +27,7 @@ func (h *CustomDownloadLinkHandler) CreateCustomDownloadLink(c *gin.Context) {
 		URL         string `json:"url" binding:"required"`
 		Name        string `json:"name"`
 		Description string `json:"description"`
+		ChannelCode string `json:"channel_code" binding:"required"` // 渠道，从 ListFullChannelNames 选择
 		GroupID     *uint  `json:"group_id"`
 		Status      string `json:"status"`
 	}
@@ -46,6 +47,7 @@ func (h *CustomDownloadLinkHandler) CreateCustomDownloadLink(c *gin.Context) {
 		URL:         req.URL,
 		Name:        req.Name,
 		Description: req.Description,
+		ChannelCode: req.ChannelCode,
 		GroupID:     req.GroupID,
 		Status:      status,
 	}
@@ -65,8 +67,9 @@ func (h *CustomDownloadLinkHandler) BatchCreateCustomDownloadLinks(c *gin.Contex
 	log := logger.GetLogger()
 
 	var req struct {
-		URLs    string `json:"urls" binding:"required"` // 支持换行符或逗号分隔
-		GroupID *uint  `json:"group_id"`
+		URLs        string `json:"urls" binding:"required"`         // 支持换行符或逗号分隔
+		ChannelCode string `json:"channel_code" binding:"required"`  // 渠道，从 ListFullChannelNames 选择
+		GroupID     *uint  `json:"group_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -75,7 +78,7 @@ func (h *CustomDownloadLinkHandler) BatchCreateCustomDownloadLinks(c *gin.Contex
 		return
 	}
 
-	links, err := h.service.BatchCreateCustomDownloadLinks(req.URLs, req.GroupID)
+	links, err := h.service.BatchCreateCustomDownloadLinks(req.URLs, req.ChannelCode, req.GroupID)
 	if err != nil {
 		log.WithError(err).Error("批量创建自定义下载链接操作失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -120,6 +123,11 @@ func (h *CustomDownloadLinkHandler) ListCustomDownloadLinks(c *gin.Context) {
 		}
 	}
 
+	var channelCode *string
+	if v := c.Query("channel_code"); v != "" {
+		channelCode = &v
+	}
+
 	var search *string
 	if searchStr := c.Query("search"); searchStr != "" {
 		search = &searchStr
@@ -131,7 +139,7 @@ func (h *CustomDownloadLinkHandler) ListCustomDownloadLinks(c *gin.Context) {
 		status = &s
 	}
 
-	links, total, err := h.service.ListCustomDownloadLinks(page, pageSize, groupID, search, status)
+	links, total, err := h.service.ListCustomDownloadLinks(page, pageSize, groupID, channelCode, search, status)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -165,6 +173,7 @@ func (h *CustomDownloadLinkHandler) UpdateCustomDownloadLink(c *gin.Context) {
 		URL         *string `json:"url"`
 		Name        *string `json:"name"`
 		Description *string `json:"description"`
+		ChannelCode *string `json:"channel_code"`
 		GroupID     *uint   `json:"group_id"`
 		Status      *string `json:"status"`
 	}
@@ -184,6 +193,9 @@ func (h *CustomDownloadLinkHandler) UpdateCustomDownloadLink(c *gin.Context) {
 	}
 	if req.Description != nil {
 		updates["description"] = *req.Description
+	}
+	if req.ChannelCode != nil {
+		updates["channel_code"] = *req.ChannelCode
 	}
 	if req.GroupID != nil {
 		updates["group_id"] = *req.GroupID
@@ -282,6 +294,7 @@ type CustomDownloadLinkResponse struct {
 	URL         string `json:"url"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	ChannelCode string `json:"channel_code"`
 	GroupID     *uint  `json:"group_id"`
 	GroupName   string `json:"group_name,omitempty"`
 	Status      string `json:"status"`
@@ -297,6 +310,7 @@ func (h *CustomDownloadLinkHandler) toResponse(link *models.CustomDownloadLink) 
 		URL:         link.URL,
 		Name:        link.Name,
 		Description: link.Description,
+		ChannelCode: link.ChannelCode,
 		GroupID:     link.GroupID,
 		Status:      string(link.Status),
 		ClickCount:  link.ClickCount,

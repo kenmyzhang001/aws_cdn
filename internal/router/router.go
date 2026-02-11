@@ -13,10 +13,12 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	redisv9 "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
-func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *services.TelegramService) *gin.Engine {
+// SetupRouter 初始化路由。redisClient 与 fallbackRuleService 由 main 传入以便 main 可创建 FallbackRuleEngine 并注册定时任务。
+func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *services.TelegramService, redisClient *redisv9.Client, fallbackRuleService *services.FallbackRuleService) *gin.Engine {
 	// 设置 Gin 模式
 	gin.SetMode(cfg.Server.Mode)
 
@@ -109,9 +111,17 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	domainRedirectHandler := handlers.NewDomainRedirectHandler(domainRedirectService)
 	focusProbeLinkHandler := handlers.NewFocusProbeLinkHandler(focusProbeLinkService)
 
-	// Redis 与游戏统计
-	redisClient := redis.NewClient(&cfg.Redis)
+	// Redis 与游戏统计（若 main 未传入 redisClient 则在此创建）
+	if redisClient == nil {
+		redisClient = redis.NewClient(&cfg.Redis)
+	}
 	gameStatsHandler := handlers.NewGameStatsHandler(redisClient)
+
+	// 兜底规则（fallbackRuleService 由 main 传入）
+	var fallbackRuleHandler *handlers.FallbackRuleHandler
+	if fallbackRuleService != nil {
+		fallbackRuleHandler = handlers.NewFallbackRuleHandler(fallbackRuleService)
+	}
 
 	// API 路由
 	api := r.Group("/api/v1")
@@ -327,6 +337,18 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 		{
 			gameStats.GET("/full-channel-names", gameStatsHandler.ListFullChannelNames)
 			gameStats.GET("/site-daily", gameStatsHandler.ListSiteDailyData)
+		}
+
+		// 兜底规则管理
+		if fallbackRuleHandler != nil {
+			fallbackRules := protected.Group("/fallback-rules")
+			{
+				fallbackRules.GET("", fallbackRuleHandler.ListFallbackRules)
+				fallbackRules.GET("/:id", fallbackRuleHandler.GetFallbackRule)
+				fallbackRules.POST("", fallbackRuleHandler.CreateFallbackRule)
+				fallbackRules.PUT("/:id", fallbackRuleHandler.UpdateFallbackRule)
+				fallbackRules.DELETE("/:id", fallbackRuleHandler.DeleteFallbackRule)
+			}
 		}
 	}
 

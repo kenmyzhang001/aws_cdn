@@ -61,6 +61,7 @@ type ScheduledTaskConfig struct {
 	EnableSpeedProbeAlert           bool // 是否启用速度探测告警检查任务
 	EnableCleanOldResults           bool // 是否启用清理旧探测结果任务
 	EnableUpdateCustomDownloadLinks bool // 是否启用更新自定义下载链接实际URL任务
+	EnableFallbackRuleCheck         bool // 是否启用兜底规则检查任务
 }
 
 func Load() *Config {
@@ -119,6 +120,7 @@ func Load() *Config {
 			EnableSpeedProbeAlert:           getBoolEnv("ENABLE_SPEED_PROBE_ALERT", true),
 			EnableCleanOldResults:           getBoolEnv("ENABLE_CLEAN_OLD_RESULTS", true),
 			EnableUpdateCustomDownloadLinks: getBoolEnv("ENABLE_UPDATE_CUSTOM_DOWNLOAD_LINKS", true),
+			EnableFallbackRuleCheck:         getBoolEnv("ENABLE_FALLBACK_RULE_CHECK", true),
 		},
 	}
 }

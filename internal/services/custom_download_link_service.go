@@ -25,12 +25,19 @@ func (s *CustomDownloadLinkService) CreateCustomDownloadLink(link *models.Custom
 	if link.URL == "" {
 		return fmt.Errorf("链接URL不能为空")
 	}
+	// 渠道必填（用于兜底规则与告警关联）
+	if link.ChannelCode == "" {
+		return fmt.Errorf("请选择渠道")
+	}
 	return s.db.Create(link).Error
 }
 
 // BatchCreateCustomDownloadLinks 批量创建自定义下载链接
-// urls: 链接列表，支持换行符或逗号分隔
-func (s *CustomDownloadLinkService) BatchCreateCustomDownloadLinks(urlsText string, groupID *uint) ([]models.CustomDownloadLink, error) {
+// urls: 链接列表，支持换行符或逗号分隔；channelCode: 渠道，必填
+func (s *CustomDownloadLinkService) BatchCreateCustomDownloadLinks(urlsText string, channelCode string, groupID *uint) ([]models.CustomDownloadLink, error) {
+	if channelCode == "" {
+		return nil, fmt.Errorf("请选择渠道")
+	}
 	// 解析链接（支持换行符和逗号分隔）
 	urls := parseURLs(urlsText)
 	if len(urls) == 0 {
@@ -40,9 +47,10 @@ func (s *CustomDownloadLinkService) BatchCreateCustomDownloadLinks(urlsText stri
 	links := make([]models.CustomDownloadLink, 0, len(urls))
 	for _, url := range urls {
 		link := models.CustomDownloadLink{
-			URL:     url,
-			GroupID: groupID,
-			Status:  models.CustomDownloadLinkStatusActive,
+			URL:         url,
+			ChannelCode: channelCode,
+			GroupID:     groupID,
+			Status:      models.CustomDownloadLinkStatusActive,
 		}
 		links = append(links, link)
 	}
@@ -103,8 +111,8 @@ func (s *CustomDownloadLinkService) ListAllCustomDownloadLinks() ([]models.Custo
 	return links, nil
 }
 
-// ListCustomDownloadLinks 列出所有自定义下载链接，支持分页、分组筛选和搜索
-func (s *CustomDownloadLinkService) ListCustomDownloadLinks(page, pageSize int, groupID *uint, search *string, status *models.CustomDownloadLinkStatus) ([]models.CustomDownloadLink, int64, error) {
+// ListCustomDownloadLinks 列出所有自定义下载链接，支持分页、分组/渠道筛选和搜索
+func (s *CustomDownloadLinkService) ListCustomDownloadLinks(page, pageSize int, groupID *uint, channelCode *string, search *string, status *models.CustomDownloadLinkStatus) ([]models.CustomDownloadLink, int64, error) {
 	var links []models.CustomDownloadLink
 	var total int64
 
@@ -114,6 +122,10 @@ func (s *CustomDownloadLinkService) ListCustomDownloadLinks(page, pageSize int, 
 
 	if groupID != nil {
 		query = query.Where("group_id = ?", *groupID)
+	}
+
+	if channelCode != nil && *channelCode != "" {
+		query = query.Where("channel_code = ?", *channelCode)
 	}
 
 	if search != nil && *search != "" {
@@ -154,6 +166,16 @@ func (s *CustomDownloadLinkService) BatchDeleteCustomDownloadLinks(ids []uint) e
 // IncrementClickCount 增加点击次数
 func (s *CustomDownloadLinkService) IncrementClickCount(id uint) error {
 	return s.db.Model(&models.CustomDownloadLink{}).Where("id = ?", id).UpdateColumn("click_count", gorm.Expr("click_count + ?", 1)).Error
+}
+
+// ListActiveLinksByChannelCode 按渠道查询启用状态的自定义下载链接（用于兜底规则触发时写探测结果）
+func (s *CustomDownloadLinkService) ListActiveLinksByChannelCode(channelCode string) ([]models.CustomDownloadLink, error) {
+	var links []models.CustomDownloadLink
+	if err := s.db.Where("channel_code = ? AND status = ? AND deleted_at IS NULL", channelCode, models.CustomDownloadLinkStatusActive).
+		Find(&links).Error; err != nil {
+		return nil, err
+	}
+	return links, nil
 }
 
 // UpdateActualURLsForAllLinks 更新所有链接的 actual_url（检查301/302重定向）

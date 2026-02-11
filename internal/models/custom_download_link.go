@@ -21,6 +21,7 @@ type CustomDownloadLink struct {
 	ActualURL   string                   `json:"actual_url" gorm:"type:varchar(1000);default:'"` // 真实下载链接URL（处理301/302重定向后）
 	Name        string                   `json:"name" gorm:"type:varchar(255);default:''"`       // 链接名称
 	Description string                   `json:"description" gorm:"type:text"`                   // 链接描述
+	ChannelCode string                   `json:"channel_code" gorm:"type:varchar(255);not null;default:'';index:idx_channel_code"` // 渠道（与 ListFullChannelNames 一致）
 	GroupID     *uint                    `json:"group_id" gorm:"index"`                          // 所属分组ID
 	Group       *Group                   `json:"group,omitempty" gorm:"foreignKey:GroupID"`      // 分组关联
 	Status      CustomDownloadLinkStatus `json:"status" gorm:"default:'active'"`                 // 状态
