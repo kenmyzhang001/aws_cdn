@@ -75,7 +75,7 @@ func (e *FallbackRuleEngine) Run(ctx context.Context) error {
 			continue
 		}
 		if len(links) == 0 {
-			log.WithField("channel_code", rule.ChannelCode).Debug("该渠道无启用自定义链接，跳过写入")
+			log.WithField("channel_code", rule.ChannelCode).Info("该渠道无启用自定义链接，跳过写入")
 			continue
 		}
 

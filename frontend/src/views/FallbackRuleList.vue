@@ -37,9 +37,9 @@
             <span v-else>{{ row.rule_type }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="params_json" label="参数" min-width="200">
+        <el-table-column prop="params_json" label="参数" min-width="240">
           <template #default="{ row }">
-            <code style="font-size: 12px;">{{ row.params_json }}</code>
+            <span class="params-text">{{ formatParamsLabel(row.rule_type, row.params_json) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="enabled" label="启用" width="80">
@@ -233,6 +233,30 @@ function buildParamsJson() {
   return '{}'
 }
 
+/** 列表页：将 params_json 按规则类型格式化为可读参数名称 */
+function formatParamsLabel(ruleType, paramsJson) {
+  if (!paramsJson || !paramsJson.trim()) return '-'
+  try {
+    const o = JSON.parse(paramsJson)
+    if (ruleType === 'yesterday_same_period') {
+      return `允许比昨天少: ${o.max_drop ?? '-'}（超过即告警）`
+    }
+    if (ruleType === 'fixed_time_target') {
+      return `目标时刻: ${o.target_hour ?? '-'} 时，累计注册数应达: ${o.target_reg_count ?? '-'}`
+    }
+    if (ruleType === 'hourly_increment') {
+      const parts = [`${o.start_hour ?? 0}–${o.target_hour ?? '-'} 时累计注册数应达: ${o.target_reg_count ?? '-'}`]
+      if (o.hourly_min_growth != null && o.hourly_min_growth > 0) {
+        parts.push(`每小时最少增: ${o.hourly_min_growth}`)
+      }
+      return parts.join('；')
+    }
+    return paramsJson
+  } catch (e) {
+    return paramsJson
+  }
+}
+
 async function loadChannels() {
   try {
     const res = await gameStatsApi.getFullChannelNames()
@@ -375,5 +399,10 @@ onMounted(() => {
   margin-left: 8px;
   font-size: 12px;
   color: #909399;
+}
+.params-text {
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.5;
 }
 </style>
