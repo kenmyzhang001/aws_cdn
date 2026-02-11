@@ -101,7 +101,7 @@
           <el-sub-menu index="game-stats">
             <template #title>
               <el-icon><DataLine /></el-icon>
-              <span>游戏统计</span>
+              <span>渠道兜底管理</span>
             </template>
             <el-menu-item index="/game-channels">
               <el-icon><List /></el-icon>
@@ -110,6 +110,10 @@
             <el-menu-item index="/site-daily">
               <el-icon><Document /></el-icon>
               <span>站点日数据</span>
+            </el-menu-item>
+            <el-menu-item index="/fallback-rules">
+              <el-icon><Warning /></el-icon>
+              <span>兜底规则</span>
             </el-menu-item>
           </el-sub-menu>
 

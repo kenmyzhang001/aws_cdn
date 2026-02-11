@@ -37,6 +37,7 @@ export function getCustomDownloadLink(id) {
  * @param {string} [data.name] - 链接名称（可选）
  * @param {string} [data.description] - 链接描述（可选）
  * @param {number} [data.group_id] - 所属分组ID（可选）
+ * @param {string} data.channel_code - 渠道（必填，从 ListFullChannelNames 选择）
  * @param {string} [data.status] - 状态（可选）
  * @returns {Promise}
  */
@@ -52,6 +53,7 @@ export function createCustomDownloadLink(data) {
  * 批量创建自定义下载链接
  * @param {Object} data - 链接数据
  * @param {string} data.urls - 链接列表（支持换行符或逗号分隔）
+ * @param {string} data.channel_code - 渠道（必填）
  * @param {number} [data.group_id] - 所属分组ID（可选）
  * @returns {Promise}
  */

@@ -12,6 +12,12 @@
       </template>
 
       <el-form :inline="true" :model="filters" class="filter-form">
+        <el-form-item label="时区">
+          <el-select v-model="filters.timezone" placeholder="时区" style="width: 130px" @change="onTimezoneChange">
+            <el-option label="缅甸时间" value="Asia/Yangon" />
+            <el-option label="北京时间" value="Asia/Shanghai" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="日期">
           <el-date-picker
             v-model="filters.date"
@@ -38,7 +44,8 @@
       </el-form>
 
       <div class="tip">
-        数据来源：Redis 缓存 <code>allSitesData_{{ filters.date }}_{{ String(filters.hour).padStart(2, '0') }}</code>
+        <span>查询时区：{{ filters.timezone === 'Asia/Yangon' ? '缅甸' : '北京' }}时间</span>
+        · 数据来源：Redis 缓存 <code>allSitesData_{{ filters.date }}_{{ String(filters.hour).padStart(2, '0') }}</code>
         <span v-if="total > 0">，共 {{ total }} 个站点。</span>
         <span v-else>（该时间点暂无缓存数据）</span>
       </div>
@@ -105,18 +112,40 @@ const loading = ref(false)
 const list = ref([])
 const total = ref(0)
 
-const now = () => {
-  const d = new Date()
+/** 获取指定时区下的当前日期与小时（用于查询条件） */
+function getNowInTimezone(tz) {
+  const now = new Date()
+  const s = now.toLocaleString('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+  const [datePart, timePart] = s.split(', ')
+  const [year, month, day] = datePart.split('-')
+  const hour = parseInt(timePart.split(':')[0], 10)
   return {
-    date: d.toISOString().slice(0, 10),
-    hour: d.getHours(),
+    date: `${year}-${month}-${day}`,
+    hour,
   }
 }
 
+const defaultTimezone = 'Asia/Yangon' // 默认缅甸时间
+
 const filters = ref({
-  date: now().date,
-  hour: now().hour,
+  timezone: defaultTimezone,
+  date: getNowInTimezone(defaultTimezone).date,
+  hour: getNowInTimezone(defaultTimezone).hour,
 })
+
+function onTimezoneChange() {
+  const n = getNowInTimezone(filters.value.timezone)
+  filters.value.date = n.date
+  filters.value.hour = n.hour
+}
 
 onMounted(() => {
   loadList()
@@ -145,7 +174,7 @@ const handleQuery = () => {
 }
 
 const resetToNow = () => {
-  const n = now()
+  const n = getNowInTimezone(filters.value.timezone)
   filters.value.date = n.date
   filters.value.hour = n.hour
   loadList()

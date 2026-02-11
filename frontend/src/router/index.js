@@ -17,6 +17,7 @@ import SpeedProbeResultList from '@/views/SpeedProbeResultList.vue'
 import SpeedAlertLogList from '@/views/SpeedAlertLogList.vue'
 import GameChannelList from '@/views/GameChannelList.vue'
 import SiteDailyDataList from '@/views/SiteDailyDataList.vue'
+import FallbackRuleList from '@/views/FallbackRuleList.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -118,6 +119,11 @@ const routes = [
     path: '/site-daily',
     name: 'SiteDailyDataList',
     component: SiteDailyDataList,
+  },
+  {
+    path: '/fallback-rules',
+    name: 'FallbackRuleList',
+    component: FallbackRuleList,
   },
 ]
 

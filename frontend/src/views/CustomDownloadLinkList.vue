@@ -104,6 +104,12 @@
               <span v-else style="color: #c0c4cc; font-size: 12px;">-</span>
             </template>
           </el-table-column>
+          <el-table-column prop="channel_code" label="渠道" width="140">
+            <template #default="{ row }">
+              <el-tag v-if="row.channel_code" size="small" type="info">{{ row.channel_code }}</el-tag>
+              <span v-else style="color: #c0c4cc; font-size: 12px;">-</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="group_name" label="分组" width="120">
             <template #default="{ row }">
               <el-tag v-if="row.group_name" size="small">{{ row.group_name }}</el-tag>
@@ -158,6 +164,22 @@
         <el-form-item label="链接URL" prop="url">
           <el-input v-model="linkForm.url" placeholder="请输入下载链接URL" />
         </el-form-item>
+        <el-form-item label="渠道" prop="channel_code">
+          <el-select
+            v-model="linkForm.channel_code"
+            placeholder="请选择渠道（可搜索）"
+            filterable
+            clearable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="ch in channelList"
+              :key="ch"
+              :label="ch"
+              :value="ch"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="链接名称">
           <el-input v-model="linkForm.name" placeholder="请输入链接名称（可选）" />
         </el-form-item>
@@ -206,6 +228,22 @@
             支持换行符或逗号分隔多个链接
           </div>
         </el-form-item>
+        <el-form-item label="渠道" required>
+          <el-select
+            v-model="batchForm.channel_code"
+            placeholder="请选择渠道（可搜索）"
+            filterable
+            clearable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="ch in channelList"
+              :key="ch"
+              :label="ch"
+              :value="ch"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="所属分组">
           <el-select v-model="batchForm.group_id" placeholder="请选择分组（可选）" clearable style="width: 100%">
             <el-option
@@ -228,6 +266,22 @@
       <el-form :model="editForm" label-width="100px" :rules="linkRules" ref="editFormRef">
         <el-form-item label="链接URL" prop="url">
           <el-input v-model="editForm.url" placeholder="请输入下载链接URL" />
+        </el-form-item>
+        <el-form-item label="渠道" prop="channel_code">
+          <el-select
+            v-model="editForm.channel_code"
+            placeholder="请选择渠道（可搜索）"
+            filterable
+            clearable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="ch in channelList"
+              :key="ch"
+              :label="ch"
+              :value="ch"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="链接名称">
           <el-input v-model="editForm.name" placeholder="请输入链接名称（可选）" />
@@ -279,6 +333,7 @@ import {
   incrementClickCount
 } from '@/api/custom_download_link';
 import { groupApi } from '@/api/group';
+import { gameStatsApi } from '@/api/gameStats';
 import { addFromCustomDownloadLink } from '@/api/focus_probe_link';
 
 // 数据
@@ -294,6 +349,7 @@ const totalAll = ref(0);
 const searchKeyword = ref('');
 const statusFilter = ref('');
 const activeGroupId = ref(null);
+const channelList = ref([]);
 
 // 对话框显示状态
 const showAddDialog = ref(false);
@@ -305,12 +361,14 @@ const linkForm = reactive({
   url: '',
   name: '',
   description: '',
+  channel_code: '',
   group_id: null,
   status: 'active'
 });
 
 const batchForm = reactive({
   urls: '',
+  channel_code: '',
   group_id: null
 });
 
@@ -319,6 +377,7 @@ const editForm = reactive({
   url: '',
   name: '',
   description: '',
+  channel_code: '',
   group_id: null,
   status: 'active'
 });
@@ -331,7 +390,21 @@ const editFormRef = ref(null);
 const linkRules = {
   url: [
     { required: true, message: '请输入链接URL', trigger: 'blur' }
+  ],
+  channel_code: [
+    { required: true, message: '请选择渠道', trigger: 'change' }
   ]
+};
+
+// 加载渠道列表（ListFullChannelNames）
+const loadChannels = async () => {
+  try {
+    const res = await gameStatsApi.getFullChannelNames();
+    channelList.value = res?.data || [];
+  } catch (e) {
+    console.error('加载渠道列表失败:', e);
+    channelList.value = [];
+  }
 };
 
 // 加载分组列表
@@ -436,6 +509,7 @@ const openAddDialog = () => {
     url: '',
     name: '',
     description: '',
+    channel_code: '',
     group_id: activeGroupId.value,
     status: 'active'
   });
@@ -446,6 +520,7 @@ const openAddDialog = () => {
 const openBatchAddDialog = () => {
   Object.assign(batchForm, {
     urls: '',
+    channel_code: '',
     group_id: activeGroupId.value
   });
   showBatchAddDialog.value = true;
@@ -458,6 +533,7 @@ const openEditDialog = (row) => {
     url: row.url,
     name: row.name,
     description: row.description,
+    channel_code: row.channel_code || '',
     group_id: row.group_id,
     status: row.status
   });
@@ -488,6 +564,10 @@ const handleAdd = async () => {
 const handleBatchAdd = async () => {
   if (!batchForm.urls.trim()) {
     ElMessage.warning('请输入至少一个链接');
+    return;
+  }
+  if (!batchForm.channel_code) {
+    ElMessage.warning('请选择渠道');
     return;
   }
   
@@ -620,6 +700,7 @@ const addToFocusProbe = async (row) => {
 
 // 组件挂载时加载数据
 onMounted(() => {
+  loadChannels();
   loadGroups();
   loadLinks();
 });
