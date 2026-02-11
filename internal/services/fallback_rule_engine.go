@@ -120,6 +120,12 @@ func (e *FallbackRuleEngine) evaluateRule(ctx context.Context, rule *models.Fall
 
 // getChannelRegCount 从 Redis 某日期某小时的站点数据中汇总指定渠道的注册数（匹配 ChannelCode 或 ChannelName）
 func (e *FallbackRuleEngine) getChannelRegCount(ctx context.Context, date string, hour int, channelCode string) (int, error) {
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
+		"date":         date,
+		"hour":         hour,
+		"channel_code": channelCode,
+	}).Info("获取渠道注册数")
 	list, err := redis.GetAllSitesData(ctx, e.redisClient, date, hour)
 	if err != nil {
 		if err == redisv9.Nil {
@@ -132,6 +138,12 @@ func (e *FallbackRuleEngine) getChannelRegCount(ctx context.Context, date string
 		for _, stat := range site.Stats {
 			if stat.ChannelCode == channelCode || stat.ChannelName == channelCode {
 				total += stat.RegCount
+				log.WithFields(map[string]interface{}{
+					"site_name":    site.SiteName,
+					"channel_code": stat.ChannelCode,
+					"channel_name": stat.ChannelName,
+					"reg_count":    stat.RegCount,
+				}).Info("获取渠道注册数")
 			}
 		}
 	}
@@ -140,14 +152,22 @@ func (e *FallbackRuleEngine) getChannelRegCount(ctx context.Context, date string
 
 // getChannelRegCountCumulative 从 0 点到 targetHour 的累计注册数（按小时 key 累加）
 func (e *FallbackRuleEngine) getChannelRegCountCumulative(ctx context.Context, date string, targetHour int, channelCode string) (int, error) {
-	var total int
-	for h := 0; h <= targetHour; h++ {
-		n, err := e.getChannelRegCount(ctx, date, h, channelCode)
-		if err != nil {
-			return 0, err
-		}
-		total += n
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
+		"date":         date,
+		"target_hour":  targetHour,
+		"channel_code": channelCode,
+	}).Info("获取渠道注册数累计")
+
+	total, err := e.getChannelRegCount(ctx, date, targetHour, channelCode)
+	if err != nil {
+		return 0, err
 	}
+
+	log.WithFields(map[string]interface{}{
+		"total": total,
+	}).Info("获取渠道注册数累计")
+
 	return total, nil
 }
 
