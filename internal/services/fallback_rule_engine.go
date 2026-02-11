@@ -112,7 +112,7 @@ func (e *FallbackRuleEngine) evaluateRule(ctx context.Context, rule *models.Fall
 	case models.FallbackRuleTypeFixedTimeTarget:
 		return e.evalFixedTimeTarget(ctx, rule, today, hour)
 	case models.FallbackRuleTypeHourlyIncrement:
-		return e.evalHourlyIncrement(ctx, rule, today, hour)
+		return e.evalHourlyIncrement(ctx, rule, today, yesterday, hour)
 	default:
 		return false, fmt.Errorf("不支持的规则类型: %s", rule.RuleType)
 	}
@@ -150,25 +150,26 @@ func (e *FallbackRuleEngine) getChannelRegCount(ctx context.Context, date string
 	return total, nil
 }
 
-// getChannelRegCountCumulative 从 0 点到 targetHour 的累计注册数（按小时 key 累加）
+// getChannelRegCountCumulative 返回指定日期、指定小时（targetHour）的渠道注册数（全量，非累计）
 func (e *FallbackRuleEngine) getChannelRegCountCumulative(ctx context.Context, date string, targetHour int, channelCode string) (int, error) {
 	log := logger.GetLogger()
 	log.WithFields(map[string]interface{}{
 		"date":         date,
 		"target_hour":  targetHour,
 		"channel_code": channelCode,
-	}).Info("获取渠道注册数累计")
+	}).Info("获取渠道注册数（对应时段全量）")
 
-	total, err := e.getChannelRegCount(ctx, date, targetHour, channelCode)
+	regCount, err := e.getChannelRegCount(ctx, date, targetHour, channelCode)
 	if err != nil {
 		return 0, err
 	}
 
 	log.WithFields(map[string]interface{}{
-		"total": total,
-	}).Info("获取渠道注册数累计")
+		"hour":      targetHour,
+		"reg_count": regCount,
+	}).Info("获取渠道注册数（对应时段全量）")
 
-	return total, nil
+	return regCount, nil
 }
 
 func (e *FallbackRuleEngine) evalYesterdaySamePeriod(ctx context.Context, rule *models.FallbackRule, today, yesterday string, hour int) (bool, error) {
@@ -218,7 +219,7 @@ func (e *FallbackRuleEngine) evalFixedTimeTarget(ctx context.Context, rule *mode
 	return cum < p.TargetRegCount, nil
 }
 
-func (e *FallbackRuleEngine) evalHourlyIncrement(ctx context.Context, rule *models.FallbackRule, today string, currentHour int) (bool, error) {
+func (e *FallbackRuleEngine) evalHourlyIncrement(ctx context.Context, rule *models.FallbackRule, today, yesterday string, currentHour int) (bool, error) {
 	p, err := rule.GetParamsHourlyIncrement()
 	if err != nil {
 		return false, err
@@ -226,15 +227,30 @@ func (e *FallbackRuleEngine) evalHourlyIncrement(ctx context.Context, rule *mode
 	if currentHour < p.TargetHour {
 		return false, nil
 	}
-	cum, err := e.getChannelRegCountCumulative(ctx, today, p.TargetHour, rule.ChannelCode)
+	// 当前小时累计
+	currCum, err := e.getChannelRegCountCumulative(ctx, today, p.TargetHour, rule.ChannelCode)
 	if err != nil {
 		return false, err
 	}
+	// 上一小时：目标小时 - 1；若为 0 点则上一小时为昨日 23 点
+	prevHour := p.TargetHour - 1
+	prevDate := today
+	if prevHour < 0 {
+		prevHour = 23
+		prevDate = yesterday
+	}
+	prevCum, err := e.getChannelRegCountCumulative(ctx, prevDate, prevHour, rule.ChannelCode)
+	if err != nil {
+		return false, err
+	}
+	increment := currCum - prevCum
 	log := logger.GetLogger()
 	log.WithFields(map[string]interface{}{
-		"cum":              cum,
+		"curr_cum":         currCum,
+		"prev_cum":         prevCum,
+		"increment":        increment,
 		"target_reg_count": p.TargetRegCount,
-		"是否触发":             cum < p.TargetRegCount,
+		"是否触发":             increment < p.TargetRegCount,
 	}).Info("每小时增量，未达标，兜底规则是否触发")
-	return cum < p.TargetRegCount, nil
+	return increment < p.TargetRegCount, nil
 }
