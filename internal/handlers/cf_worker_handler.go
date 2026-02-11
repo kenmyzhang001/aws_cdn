@@ -65,6 +65,22 @@ func (h *CFWorkerHandler) CreateWorker(c *gin.Context) {
 	})
 }
 
+// CheckDomain 检查 Worker 域名是否已被占用，用于创建前预检
+func (h *CFWorkerHandler) CheckDomain(c *gin.Context) {
+	domain := strings.TrimSpace(c.Query("domain"))
+	if domain == "" {
+		c.JSON(http.StatusOK, gin.H{"available": true, "used_by": "", "ref_id": 0, "ref_name": ""})
+		return
+	}
+	available, usedBy, refID, refName := h.workerService.CheckWorkerDomainAvailable(domain)
+	c.JSON(http.StatusOK, gin.H{
+		"available": available,
+		"used_by":   usedBy,
+		"ref_id":    refID,
+		"ref_name":  refName,
+	})
+}
+
 // GetWorkerList 获取 Worker 列表
 // @Summary 获取 Worker 列表
 // @Tags Worker

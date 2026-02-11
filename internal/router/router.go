@@ -278,6 +278,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 		cfWorkers := protected.Group("/cf-workers")
 		{
 			cfWorkers.GET("", cfWorkerHandler.GetWorkerList)
+			cfWorkers.GET("/check-domain", cfWorkerHandler.CheckDomain)
 			cfWorkers.GET("/:id", cfWorkerHandler.GetWorker)
 			cfWorkers.POST("", cfWorkerHandler.CreateWorker)
 			cfWorkers.PUT("/:id", cfWorkerHandler.UpdateWorker)
@@ -288,6 +289,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 		domainRedirects := protected.Group("/domain-redirects")
 		{
 			domainRedirects.GET("", domainRedirectHandler.List)
+			domainRedirects.GET("/check-domain", domainRedirectHandler.CheckDomain)
 			domainRedirects.GET("/:id", domainRedirectHandler.Get)
 			domainRedirects.POST("", domainRedirectHandler.Create)
 			domainRedirects.PUT("/:id", domainRedirectHandler.Update)

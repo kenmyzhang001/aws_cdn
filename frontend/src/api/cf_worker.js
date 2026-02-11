@@ -63,3 +63,16 @@ export function deleteWorker(id) {
     method: 'delete'
   });
 }
+
+/**
+ * 创建前检查 Worker 域名是否已被占用
+ * @param {string} domain - 域名
+ * @returns {Promise<{ available: boolean, used_by: string, ref_id: number, ref_name: string }>}
+ */
+export function checkWorkerDomain(domain) {
+  return request({
+    url: '/cf-workers/check-domain',
+    method: 'get',
+    params: { domain: domain || '' }
+  });
+}

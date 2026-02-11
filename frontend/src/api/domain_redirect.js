@@ -23,5 +23,10 @@ export const domainRedirectApi = {
 
   ensureDns(id) {
     return request.post(`/domain-redirects/${id}/ensure-dns`)
+  },
+
+  /** 创建前检查主域名是否已被占用 */
+  checkDomain(domain) {
+    return request.get('/domain-redirects/check-domain', { params: { domain: domain || '' } })
   }
 }

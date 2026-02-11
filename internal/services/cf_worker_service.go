@@ -97,6 +97,22 @@ func generateScript(targets []string, fallbackURL, mode string, rotateDays int, 
 	return adv, err
 }
 
+// CheckWorkerDomainAvailable 检查 Worker 域名是否已被占用。若被占用返回 used_by（domain_redirect/cf_worker）、ref_id、ref_name。
+func (s *CFWorkerService) CheckWorkerDomainAvailable(domain string) (available bool, usedBy string, refID uint, refName string) {
+	if domain == "" {
+		return true, "", 0, ""
+	}
+	var w models.CFWorker
+	if err := s.db.Where("LOWER(worker_domain) = LOWER(?)", domain).First(&w).Error; err == nil {
+		return false, "cf_worker", w.ID, w.WorkerName
+	}
+	var dr models.DomainRedirect
+	if err := s.db.Where("LOWER(source_domain) = LOWER(?)", domain).First(&dr).Error; err == nil {
+		return false, "domain_redirect", dr.ID, dr.SourceDomain
+	}
+	return true, "", 0, ""
+}
+
 // CreateWorker 创建 Worker
 func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWorker, error) {
 	log := logger.GetLogger()
@@ -104,6 +120,18 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 	targets, err := buildTargetsFromCreate(req)
 	if err != nil {
 		return nil, err
+	}
+
+	// 预先检查 Worker 域名是否已被占用（Worker 或 302 重定向）
+	if ok, usedBy, refID, refName := s.CheckWorkerDomainAvailable(req.WorkerDomain); !ok {
+		switch usedBy {
+		case "cf_worker":
+			return nil, fmt.Errorf("域名 %s 已被「Cloudflare Worker」使用（%s，ID: %d），请先删除该 Worker 后再创建", req.WorkerDomain, refName, refID)
+		case "domain_redirect":
+			return nil, fmt.Errorf("域名 %s 已被「域名302重定向」使用（%s），请先删除该重定向后再创建", req.WorkerDomain, refName)
+		default:
+			return nil, fmt.Errorf("域名 %s 已被占用，请先删除占用项后再创建", req.WorkerDomain)
+		}
 	}
 
 	// 1. 获取 CF 账号信息

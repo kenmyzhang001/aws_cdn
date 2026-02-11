@@ -64,6 +64,11 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
+        <el-table-column label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatDate(row.created_at || row.CreatedAt) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="row.status === 'active' ? 'success' : 'info'">
@@ -261,6 +266,19 @@ export default {
       fetchList()
     }
 
+    const formatDate = (dateString) => {
+      if (!dateString) return '-'
+      const date = new Date(dateString)
+      return date.toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      })
+    }
+
     const zoneNameById = (zoneId) => {
       const z = zoneList.value.find((x) => x.id === zoneId)
       return z ? z.name : zoneId
@@ -364,6 +382,18 @@ export default {
         return
       }
 
+      try {
+        const check = await domainRedirectApi.checkDomain(sourceDomain)
+        const res = check?.data ?? check
+        if (res && res.available === false) {
+          const usedBy = res.used_by === 'cf_worker' ? 'Cloudflare Worker' : '域名302重定向'
+          ElMessage.error(`主域名 ${sourceDomain} 已被「${usedBy}」使用${res.ref_name ? `（${res.ref_name}）` : ''}，请先删除后再创建`)
+          return
+        }
+      } catch (e) {
+        // 检查接口失败不阻塞，由创建时后端再次校验
+      }
+
       submitLoading.value = true
       try {
         await domainRedirectApi.create({
@@ -434,7 +464,8 @@ export default {
       zoneLoading,
       onCfAccountChange,
       remoteZoneSearch,
-      zoneNameById
+      zoneNameById,
+      formatDate
     }
   }
 }

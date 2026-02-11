@@ -70,13 +70,35 @@ func (s *DomainRedirectService) Get(id uint) (*models.DomainRedirect, error) {
 	return &dr, nil
 }
 
+// CheckSourceDomainAvailable 检查主域名（源）是否已被占用。若被占用返回 used_by（domain_redirect/cf_worker）、ref_id、ref_name。
+func (s *DomainRedirectService) CheckSourceDomainAvailable(domain string) (available bool, usedBy string, refID uint, refName string) {
+	if domain == "" {
+		return true, "", 0, ""
+	}
+	var dr models.DomainRedirect
+	if err := s.db.Where("LOWER(source_domain) = LOWER(?)", domain).First(&dr).Error; err == nil {
+		return false, "domain_redirect", dr.ID, dr.SourceDomain
+	}
+	var w models.CFWorker
+	if err := s.db.Where("LOWER(worker_domain) = LOWER(?)", domain).First(&w).Error; err == nil {
+		return false, "cf_worker", w.ID, w.WorkerName
+	}
+	return true, "", 0, ""
+}
+
 // Create 创建：在 CF 创建 302 规则并落库，并尝试为源主机名创建 DNS 记录
 func (s *DomainRedirectService) Create(cfAccountID uint, zoneID, sourceDomain, targetDomain string, preservePath bool) (*models.DomainRedirect, error) {
 	log := logger.GetLogger()
-	// 唯一性：同一主域名只能有一条
-	var exist models.DomainRedirect
-	if err := s.db.Where("source_domain = ?", sourceDomain).First(&exist).Error; err == nil {
-		return nil, fmt.Errorf("主域名 %s 已存在重定向配置", sourceDomain)
+	// 预先检查域名是否已被占用（302 或 Worker）
+	if ok, usedBy, refID, refName := s.CheckSourceDomainAvailable(sourceDomain); !ok {
+		switch usedBy {
+		case "domain_redirect":
+			return nil, fmt.Errorf("主域名 %s 已被「域名302重定向」使用（%s），请先删除该重定向后再创建", sourceDomain, refName)
+		case "cf_worker":
+			return nil, fmt.Errorf("主域名 %s 已被「Cloudflare Worker」使用（%s，ID: %d），请先删除该 Worker 后再创建", sourceDomain, refName, refID)
+		default:
+			return nil, fmt.Errorf("主域名 %s 已被占用，请先删除占用项后再创建", sourceDomain)
+		}
 	}
 
 	cfSvc, err := s.getCFService(cfAccountID)

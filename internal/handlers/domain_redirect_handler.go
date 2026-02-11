@@ -46,6 +46,22 @@ func (h *DomainRedirectHandler) List(c *gin.Context) {
 	})
 }
 
+// CheckDomain 检查主域名（源）是否已被占用，用于创建前预检
+func (h *DomainRedirectHandler) CheckDomain(c *gin.Context) {
+	domain := strings.TrimSpace(c.Query("domain"))
+	if domain == "" {
+		c.JSON(http.StatusOK, gin.H{"available": true, "used_by": "", "ref_id": 0, "ref_name": ""})
+		return
+	}
+	available, usedBy, refID, refName := h.service.CheckSourceDomainAvailable(domain)
+	c.JSON(http.StatusOK, gin.H{
+		"available": available,
+		"used_by":   usedBy,
+		"ref_id":    refID,
+		"ref_name":  refName,
+	})
+}
+
 // Get 获取单条
 func (h *DomainRedirectHandler) Get(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)

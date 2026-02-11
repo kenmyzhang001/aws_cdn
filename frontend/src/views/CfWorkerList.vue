@@ -500,7 +500,8 @@ import {
   getWorkerList,
   createWorker,
   updateWorker,
-  deleteWorker
+  deleteWorker,
+  checkWorkerDomain
 } from '@/api/cf_worker';
 import { cfAccountApi } from '@/api/cf_account';
 import { r2Api } from '@/api/r2';
@@ -1149,6 +1150,18 @@ const handleSubmit = async () => {
         createPayload.target_domain = workerForm.target_domain.trim();
       } else {
         createPayload.targets = payload.targets;
+      }
+      try {
+        const check = await checkWorkerDomain(workerForm.worker_domain);
+        const res = check?.data ?? check;
+        if (res && res.available === false) {
+          const usedBy = res.used_by === 'domain_redirect' ? '域名302重定向' : 'Cloudflare Worker';
+          ElMessage.error(`域名 ${workerForm.worker_domain} 已被「${usedBy}」使用${res.ref_name ? `（${res.ref_name}）` : ''}，请先删除后再创建`);
+          submitting.value = false;
+          return;
+        }
+      } catch (e) {
+        // 检查接口失败不阻塞，由创建时后端再次校验
       }
       await createWorker(createPayload);
       ElMessage.success('Worker 创建成功');
