@@ -9,7 +9,6 @@ import (
 	"time"
 
 	redisv9 "github.com/redis/go-redis/v9"
-	"github.com/sirupsen/logrus"
 )
 
 const ruleTriggeredClientIP = "0.0.0.0" // 兜底规则触发的探测结果占位 IP
@@ -166,7 +165,8 @@ func (e *FallbackRuleEngine) evalYesterdaySamePeriod(ctx context.Context, rule *
 		return false, err
 	}
 	drop := yesterdayCount - todayCount
-	logrus.WithFields(map[string]interface{}{
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
 		"today_count":     todayCount,
 		"yesterday_count": yesterdayCount,
 		"drop":            drop,
@@ -189,7 +189,8 @@ func (e *FallbackRuleEngine) evalFixedTimeTarget(ctx context.Context, rule *mode
 	if err != nil {
 		return false, err
 	}
-	logrus.WithFields(map[string]interface{}{
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
 		"cum":              cum,
 		"target_reg_count": p.TargetRegCount,
 		"是否触发":             cum < p.TargetRegCount,
@@ -209,7 +210,8 @@ func (e *FallbackRuleEngine) evalHourlyIncrement(ctx context.Context, rule *mode
 	if err != nil {
 		return false, err
 	}
-	logrus.WithFields(map[string]interface{}{
+	log := logger.GetLogger()
+	log.WithFields(map[string]interface{}{
 		"cum":              cum,
 		"target_reg_count": p.TargetRegCount,
 		"是否触发":             cum < p.TargetRegCount,
