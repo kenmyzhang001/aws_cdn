@@ -102,6 +102,11 @@
         <el-table-column prop="created_at" label="创建时间" width="170">
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
+        <el-table-column label="操作" width="90" fixed="right">
+          <template #default="{ row }">
+            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
+          </template>
+        </el-table-column>
       </el-table>
 
       <el-pagination
@@ -121,7 +126,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { speedProbeApi } from '@/api/speedProbe'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 
 const loading = ref(false)
@@ -219,6 +224,27 @@ const statusText = (status) => {
 const statusType = (status) => {
   const m = { success: 'success', failed: 'danger', timeout: 'warning' }
   return m[status] || 'info'
+}
+
+const handleDelete = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除该条探测结果吗？(ID: ${row.id})`,
+      '删除确认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    await speedProbeApi.deleteProbeResult(row.id)
+    ElMessage.success('删除成功')
+    loadList()
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error(e?.response?.data?.error || '删除失败')
+    }
+  }
 }
 </script>
 

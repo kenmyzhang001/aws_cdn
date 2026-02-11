@@ -9,6 +9,10 @@ export const speedProbeApi = {
   getProbeResultsByIP(ip, params) {
     return request.get(`/speed-probe/results/${encodeURIComponent(ip)}`, { params })
   },
+  // 删除单条探测结果
+  deleteProbeResult(id) {
+    return request.delete(`/speed-probe/results/${id}`)
+  },
   // 告警记录列表（支持 url, time_window_from, time_window_to, created_start, created_end, alert_sent, failed_rate_min, failed_rate_max）
   getAlertLogList(params) {
     return request.get('/speed-probe/alerts', { params })

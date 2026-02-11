@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type SpeedProbeHandler struct {
@@ -236,6 +237,25 @@ func (h *SpeedProbeHandler) GetProbeResultsByIP(c *gin.Context) {
 		"page":  page,
 		"size":  pageSize,
 	})
+}
+
+// DeleteProbeResult 按 ID 删除单条探测结果
+func (h *SpeedProbeHandler) DeleteProbeResult(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的探测结果 ID"})
+		return
+	}
+	if err := h.service.DeleteProbeResult(uint(id)); err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "探测结果不存在"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 }
 
 // ListAlertLogs 分页查询告警记录，支持丰富筛选

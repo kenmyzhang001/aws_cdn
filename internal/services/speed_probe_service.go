@@ -656,6 +656,18 @@ func (s *SpeedProbeService) GetProbeResultsByIP(clientIP string, page, pageSize 
 	return s.ListProbeResults(page, pageSize, &ProbeResultFilters{ClientIP: clientIP})
 }
 
+// DeleteProbeResult 按 ID 删除单条探测结果（仅主库；备库 ID 不同步，不按 ID 删）
+func (s *SpeedProbeService) DeleteProbeResult(id uint) error {
+	result := s.db.Where("id = ?", id).Delete(&models.SpeedProbeResult{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 // AlertLogFilters 告警记录列表筛选条件
 type AlertLogFilters struct {
 	URL              string     // URL 模糊匹配
