@@ -90,15 +90,32 @@
             <el-option label="每小时/到点累计（从某时到某时累计应达到）" value="hourly_increment" />
           </el-select>
         </el-form-item>
-        <el-form-item label="参数 JSON" required>
-          <el-input
-            v-model="form.params_json"
-            type="textarea"
-            :rows="4"
-            :placeholder="paramsPlaceholder"
-          />
-          <div class="form-tip">{{ paramsTip }}</div>
+        <el-form-item v-if="form.rule_type === 'yesterday_same_period'" label="允许比昨天少的上限" required>
+          <el-input-number v-model="form.params.max_drop" :min="0" :max="99999" placeholder="超过则告警" style="width: 140px" />
+          <span class="param-desc">少超过该数即触发告警</span>
         </el-form-item>
+        <template v-else-if="form.rule_type === 'fixed_time_target'">
+          <el-form-item label="目标时刻（0–23 时）" required>
+            <el-input-number v-model="form.params.target_hour" :min="0" :max="23" placeholder="例如 10" style="width: 120px" />
+          </el-form-item>
+          <el-form-item label="到该时刻累计注册数应达到" required>
+            <el-input-number v-model="form.params.target_reg_count" :min="0" :max="9999999" placeholder="例如 100" style="width: 140px" />
+          </el-form-item>
+        </template>
+        <template v-else-if="form.rule_type === 'hourly_increment'">
+          <el-form-item label="起始时刻（0–23 时）">
+            <el-input-number v-model="form.params.start_hour" :min="0" :max="23" placeholder="0" style="width: 120px" />
+          </el-form-item>
+          <el-form-item label="目标时刻（0–23 时）" required>
+            <el-input-number v-model="form.params.target_hour" :min="0" :max="23" placeholder="10" style="width: 120px" />
+          </el-form-item>
+          <el-form-item label="到目标时刻累计注册数应达到" required>
+            <el-input-number v-model="form.params.target_reg_count" :min="0" :max="9999999" placeholder="100" style="width: 140px" />
+          </el-form-item>
+          <el-form-item label="每小时最少增长（可选）">
+            <el-input-number v-model="form.params.hourly_min_growth" :min="0" :max="99999" placeholder="0 表示不校验" style="width: 140px" />
+          </el-form-item>
+        </template>
         <el-form-item label="启用">
           <el-switch v-model="form.enabled" />
         </el-form-item>
@@ -112,7 +129,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import {
@@ -139,31 +156,81 @@ const filters = reactive({
   enabled: null,
 })
 
+const defaultParams = () => ({
+  max_drop: 10,
+  target_hour: 10,
+  target_reg_count: 100,
+  start_hour: 0,
+  hourly_min_growth: 0,
+})
+
 const form = reactive({
   id: null,
   channel_code: '',
   name: '',
   rule_type: 'fixed_time_target',
-  params_json: '',
+  params: { ...defaultParams() },
   enabled: true,
 })
 
-const paramsPlaceholder = computed(() => {
-  if (form.rule_type === 'yesterday_same_period') return '{"max_drop": 10}'
-  if (form.rule_type === 'fixed_time_target') return '{"target_hour": 10, "target_reg_count": 100}'
-  if (form.rule_type === 'hourly_increment') return '{"start_hour": 0, "target_hour": 10, "target_reg_count": 100}'
-  return '{}'
-})
-
-const paramsTip = computed(() => {
-  if (form.rule_type === 'yesterday_same_period') return 'max_drop: 允许比昨天少的上限，超过则告警'
-  if (form.rule_type === 'fixed_time_target') return 'target_hour: 0-23；target_reg_count: 到该时刻累计注册数应达到'
-  if (form.rule_type === 'hourly_increment') return 'start_hour/target_hour: 0-23；target_reg_count: 到 target_hour 时累计应达到'
-  return ''
-})
-
 function onRuleTypeChange() {
-  form.params_json = paramsPlaceholder.value
+  const t = form.rule_type
+  if (t === 'yesterday_same_period') {
+    form.params = { max_drop: 10 }
+  } else if (t === 'fixed_time_target') {
+    form.params = { target_hour: 10, target_reg_count: 100 }
+  } else if (t === 'hourly_increment') {
+    form.params = { start_hour: 0, target_hour: 10, target_reg_count: 100, hourly_min_growth: 0 }
+  }
+}
+
+function parseParamsJson(ruleType, jsonStr) {
+  if (!jsonStr || !jsonStr.trim()) return defaultParams()
+  try {
+    const o = JSON.parse(jsonStr)
+    if (ruleType === 'yesterday_same_period') {
+      return { max_drop: Number(o.max_drop) || 0 }
+    }
+    if (ruleType === 'fixed_time_target') {
+      return {
+        target_hour: Number(o.target_hour) ?? 10,
+        target_reg_count: Number(o.target_reg_count) ?? 100,
+      }
+    }
+    if (ruleType === 'hourly_increment') {
+      return {
+        start_hour: Number(o.start_hour) ?? 0,
+        target_hour: Number(o.target_hour) ?? 10,
+        target_reg_count: Number(o.target_reg_count) ?? 100,
+        hourly_min_growth: Number(o.hourly_min_growth) ?? 0,
+      }
+    }
+    return { ...defaultParams() }
+  } catch (e) {
+    return { ...defaultParams() }
+  }
+}
+
+function buildParamsJson() {
+  const t = form.rule_type
+  if (t === 'yesterday_same_period') {
+    return JSON.stringify({ max_drop: form.params.max_drop })
+  }
+  if (t === 'fixed_time_target') {
+    return JSON.stringify({
+      target_hour: form.params.target_hour,
+      target_reg_count: form.params.target_reg_count,
+    })
+  }
+  if (t === 'hourly_increment') {
+    return JSON.stringify({
+      start_hour: form.params.start_hour,
+      target_hour: form.params.target_hour,
+      target_reg_count: form.params.target_reg_count,
+      hourly_min_growth: form.params.hourly_min_growth ?? 0,
+    })
+  }
+  return '{}'
 }
 
 async function loadChannels() {
@@ -194,41 +261,57 @@ async function loadList() {
 
 function openAddDialog() {
   isEdit.value = false
-  Object.assign(form, {
-    id: null,
-    channel_code: '',
-    name: '',
-    rule_type: 'fixed_time_target',
-    params_json: '{"target_hour": 10, "target_reg_count": 100}',
-    enabled: true,
-  })
+  form.id = null
+  form.channel_code = ''
+  form.name = ''
+  form.rule_type = 'fixed_time_target'
+  form.params = { target_hour: 10, target_reg_count: 100 }
+  form.enabled = true
   showDialog.value = true
 }
 
 function openEditDialog(row) {
   isEdit.value = true
-  Object.assign(form, {
-    id: row.id,
-    channel_code: row.channel_code,
-    name: row.name,
-    rule_type: row.rule_type,
-    params_json: row.params_json,
-    enabled: row.enabled,
-  })
+  form.id = row.id
+  form.channel_code = row.channel_code
+  form.name = row.name
+  form.rule_type = row.rule_type
+  form.params = parseParamsJson(row.rule_type, row.params_json)
+  form.enabled = row.enabled
   showDialog.value = true
 }
 
 async function submit() {
-  if (!form.channel_code || !form.name || !form.rule_type || !form.params_json) {
-    ElMessage.warning('请填写渠道、规则名称、类型和参数')
+  if (!form.channel_code || !form.name || !form.rule_type) {
+    ElMessage.warning('请填写渠道、规则名称和类型')
     return
   }
-  try {
-    JSON.parse(form.params_json)
-  } catch (e) {
-    ElMessage.warning('参数必须是合法 JSON')
+  const t = form.rule_type
+  if (t === 'yesterday_same_period' && (form.params.max_drop == null || form.params.max_drop < 0)) {
+    ElMessage.warning('请填写允许比昨天少的上限')
     return
   }
+  if (t === 'fixed_time_target') {
+    if (form.params.target_hour == null || form.params.target_hour < 0 || form.params.target_hour > 23) {
+      ElMessage.warning('目标时刻需为 0–23')
+      return
+    }
+    if (form.params.target_reg_count == null || form.params.target_reg_count < 0) {
+      ElMessage.warning('请填写到该时刻累计注册数')
+      return
+    }
+  }
+  if (t === 'hourly_increment') {
+    if (form.params.target_hour == null || form.params.target_hour < 0 || form.params.target_hour > 23) {
+      ElMessage.warning('目标时刻需为 0–23')
+      return
+    }
+    if (form.params.target_reg_count == null || form.params.target_reg_count < 0) {
+      ElMessage.warning('请填写到目标时刻累计注册数')
+      return
+    }
+  }
+  const params_json = buildParamsJson()
   submitting.value = true
   try {
     if (isEdit.value) {
@@ -236,7 +319,7 @@ async function submit() {
         channel_code: form.channel_code,
         name: form.name,
         rule_type: form.rule_type,
-        params_json: form.params_json,
+        params_json,
         enabled: form.enabled,
       })
       ElMessage.success('更新成功')
@@ -245,7 +328,7 @@ async function submit() {
         channel_code: form.channel_code,
         name: form.name,
         rule_type: form.rule_type,
-        params_json: form.params_json,
+        params_json,
         enabled: form.enabled,
       })
       ElMessage.success('创建成功')
@@ -285,8 +368,11 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
 }
-.form-tip {
-  margin-top: 4px;
+.params-row {
+  width: 100%;
+}
+.param-desc {
+  margin-left: 8px;
   font-size: 12px;
   color: #909399;
 }
