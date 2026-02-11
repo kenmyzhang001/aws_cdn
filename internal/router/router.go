@@ -322,10 +322,11 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			focusProbeLinks.POST("/from-r2-file", focusProbeLinkHandler.AddFromR2File)
 		}
 
-		// 游戏统计（Redis 渠道名称等）
+		// 游戏统计（Redis 渠道名称、站点日数据等）
 		gameStats := protected.Group("/game-stats")
 		{
 			gameStats.GET("/full-channel-names", gameStatsHandler.ListFullChannelNames)
+			gameStats.GET("/site-daily", gameStatsHandler.ListSiteDailyData)
 		}
 	}
 
