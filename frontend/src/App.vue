@@ -11,7 +11,7 @@
           :default-active="activeMenu"
           router
           class="sidebar-menu"
-          :default-openeds="['aws-cdn', 'cf-cdn']"
+          :default-openeds="['aws-cdn', 'cf-cdn', 'game-stats']"
         >
           <!-- 分组管理（一级菜单，AWS 和 CF 共用） -->
           <el-menu-item index="/groups">
@@ -97,11 +97,21 @@
             </el-menu-item>
           </el-sub-menu>
 
-          <!-- 游戏渠道（Redis） -->
-          <el-menu-item index="/game-channels">
-            <el-icon><List /></el-icon>
-            <span>渠道</span>
-          </el-menu-item>
+          <!-- 游戏统计（Redis） -->
+          <el-sub-menu index="game-stats">
+            <template #title>
+              <el-icon><DataLine /></el-icon>
+              <span>游戏统计</span>
+            </template>
+            <el-menu-item index="/game-channels">
+              <el-icon><List /></el-icon>
+              <span>渠道</span>
+            </el-menu-item>
+            <el-menu-item index="/site-daily">
+              <el-icon><Document /></el-icon>
+              <span>站点日数据</span>
+            </el-menu-item>
+          </el-sub-menu>
 
           <!-- 审计日志 -->
           <el-menu-item index="/audit-logs">

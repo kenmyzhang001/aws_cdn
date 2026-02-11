@@ -16,6 +16,7 @@ import FocusProbeLinkList from '@/views/FocusProbeLinkList.vue'
 import SpeedProbeResultList from '@/views/SpeedProbeResultList.vue'
 import SpeedAlertLogList from '@/views/SpeedAlertLogList.vue'
 import GameChannelList from '@/views/GameChannelList.vue'
+import SiteDailyDataList from '@/views/SiteDailyDataList.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -112,6 +113,11 @@ const routes = [
     path: '/game-channels',
     name: 'GameChannelList',
     component: GameChannelList,
+  },
+  {
+    path: '/site-daily',
+    name: 'SiteDailyDataList',
+    component: SiteDailyDataList,
   },
 ]
 

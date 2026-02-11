@@ -5,4 +5,8 @@ export const gameStatsApi = {
   getFullChannelNames() {
     return request.get('/game-stats/full-channel-names')
   },
+  // 按时间查询站点日数据（Redis 缓存 allSitesData_日期_小时）
+  getSiteDailyData(params = {}) {
+    return request.get('/game-stats/site-daily', { params })
+  },
 }
