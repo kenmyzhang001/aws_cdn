@@ -6,6 +6,7 @@ import (
 	"aws_cdn/internal/logger"
 	"aws_cdn/internal/middleware"
 	"aws_cdn/internal/models"
+	"aws_cdn/internal/redis"
 	"aws_cdn/internal/services"
 	"aws_cdn/internal/services/aws"
 	"aws_cdn/internal/services/cloudflare"
@@ -107,6 +108,10 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	cfWorkerHandler := handlers.NewCFWorkerHandler(cfWorkerService)
 	domainRedirectHandler := handlers.NewDomainRedirectHandler(domainRedirectService)
 	focusProbeLinkHandler := handlers.NewFocusProbeLinkHandler(focusProbeLinkService)
+
+	// Redis 与游戏统计
+	redisClient := redis.NewClient(&cfg.Redis)
+	gameStatsHandler := handlers.NewGameStatsHandler(redisClient)
 
 	// API 路由
 	api := r.Group("/api/v1")
@@ -315,6 +320,12 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			focusProbeLinks.POST("/from-download-package", focusProbeLinkHandler.AddFromDownloadPackage)
 			focusProbeLinks.POST("/from-custom-link", focusProbeLinkHandler.AddFromCustomDownloadLink)
 			focusProbeLinks.POST("/from-r2-file", focusProbeLinkHandler.AddFromR2File)
+		}
+
+		// 游戏统计（Redis 渠道名称等）
+		gameStats := protected.Group("/game-stats")
+		{
+			gameStats.GET("/full-channel-names", gameStatsHandler.ListFullChannelNames)
 		}
 	}
 

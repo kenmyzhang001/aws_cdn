@@ -97,6 +97,12 @@
             </el-menu-item>
           </el-sub-menu>
 
+          <!-- 游戏渠道（Redis） -->
+          <el-menu-item index="/game-channels">
+            <el-icon><List /></el-icon>
+            <span>渠道</span>
+          </el-menu-item>
+
           <!-- 审计日志 -->
           <el-menu-item index="/audit-logs">
             <el-icon><Document /></el-icon>

@@ -9,11 +9,18 @@ type Config struct {
 	Database      DatabaseConfig
 	Database2     DatabaseConfig
 	Database3     DatabaseConfig
+	Redis         RedisConfig
 	Server        ServerConfig
 	JWT           JWTConfig
 	AWS           AWSConfig
 	Cloudflare    CloudflareConfig
 	ScheduledTask ScheduledTaskConfig
+}
+
+type RedisConfig struct {
+	Addr     string
+	Password string
+	DB       int
 }
 
 type DatabaseConfig struct {
@@ -82,6 +89,11 @@ func Load() *Config {
 			DBName:   getEnv("DB3_NAME", "aws_cdn"),
 			SSLMode:  getEnv("DB3_SSLMODE", "disable"),
 		},
+		Redis: RedisConfig{
+			Addr:     getEnv("REDIS_ADDR", "localhost:6379"),
+			Password: getEnv("REDIS_PASSWORD", ""),
+			DB:       getIntEnv("REDIS_DB", 0),
+		},
 		Server: ServerConfig{
 			Port:     getEnv("SERVER_PORT", "8080"),
 			Mode:     getEnv("SERVER_MODE", "debug"),
@@ -125,6 +137,17 @@ func getBoolEnv(key string, defaultValue bool) bool {
 			return defaultValue
 		}
 		return boolValue
+	}
+	return defaultValue
+}
+
+func getIntEnv(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		intValue, err := strconv.Atoi(value)
+		if err != nil {
+			return defaultValue
+		}
+		return intValue
 	}
 	return defaultValue
 }

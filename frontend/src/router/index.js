@@ -15,6 +15,7 @@ import DomainRedirectList from '@/views/DomainRedirectList.vue'
 import FocusProbeLinkList from '@/views/FocusProbeLinkList.vue'
 import SpeedProbeResultList from '@/views/SpeedProbeResultList.vue'
 import SpeedAlertLogList from '@/views/SpeedAlertLogList.vue'
+import GameChannelList from '@/views/GameChannelList.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -106,6 +107,11 @@ const routes = [
     path: '/speed-alert-logs',
     name: 'SpeedAlertLogList',
     component: SpeedAlertLogList,
+  },
+  {
+    path: '/game-channels',
+    name: 'GameChannelList',
+    component: GameChannelList,
   },
 ]
 
