@@ -43,13 +43,13 @@ func (e *FallbackRuleEngine) Run(ctx context.Context) error {
 
 	rules, err := e.ruleSvc.ListEnabled()
 	if err != nil {
-		return fmt.Errorf("获取已启用规则失败: %w", err)
+		return fmt.Errorf("获取已启用兜底规则失败: %w", err)
 	}
 	if len(rules) == 0 {
 		log.Info("无已启用规则，跳过兜底规则检查")
 		return nil
 	} else {
-		log.WithField("rule_count", len(rules)).Info("已启用规则数量")
+		log.WithField("rule_count", len(rules)).Info("已启用兜底规则数量")
 	}
 
 	now := time.Now()
@@ -60,22 +60,22 @@ func (e *FallbackRuleEngine) Run(ctx context.Context) error {
 	for _, rule := range rules {
 		triggered, err := e.evaluateRule(ctx, &rule, today, yesterday, hour)
 		if err != nil {
-			log.WithError(err).WithField("rule_id", rule.ID).WithField("rule_name", rule.Name).Warn("规则评估失败，跳过")
+			log.WithError(err).WithField("rule_id", rule.ID).WithField("rule_name", rule.Name).Warn("兜底规则评估失败，跳过")
 			continue
 		}
 		if !triggered {
-			log.WithField("rule_id", rule.ID).WithField("rule_name", rule.Name).Info("规则未触发，跳过")
+			log.WithField("rule_id", rule.ID).WithField("rule_name", rule.Name).Info("兜底规则未触发，跳过")
 			continue
 		}
 
 		// 未达标：为该渠道下所有启用链接写入一条 failed 探测结果
 		links, err := e.linkSvc.ListActiveLinksByChannelCode(rule.ChannelCode)
 		if err != nil {
-			log.WithError(err).WithField("channel_code", rule.ChannelCode).Warn("获取渠道链接失败，跳过写入探测结果")
+			log.WithError(err).WithField("channel_code", rule.ChannelCode).Warn("获取渠道自定义链接失败，跳过写入探测结果，兜底规则未触发")
 			continue
 		}
 		if len(links) == 0 {
-			log.WithField("channel_code", rule.ChannelCode).Info("该渠道无启用自定义链接，跳过写入")
+			log.WithField("channel_code", rule.ChannelCode).Info("该渠道无启用自定义链接，跳过写入，兜底规则未触发")
 			continue
 		}
 
@@ -90,14 +90,14 @@ func (e *FallbackRuleEngine) Run(ctx context.Context) error {
 				UserAgent:    "fallback-rule-engine",
 			}
 			if err := e.probeSvc.ReportProbeResult(result); err != nil {
-				log.WithError(err).WithField("url", link.URL).Warn("写入探测结果失败")
+				log.WithError(err).WithField("url", link.URL).Warn("写入探测结果失败,兜底规则已触发")
 			}
 		}
 		log.WithFields(map[string]interface{}{
 			"rule_id":      rule.ID,
 			"channel_code": rule.ChannelCode,
 			"link_count":   len(links),
-		}).Info("兜底规则已触发，已写入探测结果用于告警")
+		}).Info("兜底规则已触发，已写入探测结果用于告警，兜底规则已触发")
 	}
 	log.Info("兜底规则检查完成")
 
