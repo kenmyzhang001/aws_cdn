@@ -166,13 +166,13 @@
 
         <el-form-item label="轮播模式">
           <el-radio-group v-model="workerForm.mode" @change="handleWorkerModeChange">
-            <el-radio label="single">单链接</el-radio>
-            <el-radio label="time">时间轮播</el-radio>
-            <el-radio label="random">随机</el-radio>
-            <el-radio label="probe">探针模式</el-radio>
+            <el-radio label="single">单链接(无兜底)</el-radio>
+            <el-radio label="time">时间轮播(有兜底)</el-radio>
+            <el-radio label="random">随机(有兜底)</el-radio>
+            <el-radio label="probe">探针模式(有兜底)</el-radio>
           </el-radio-group>
           <div class="form-tip">
-            单链接：固定跳转一个地址；时间轮播：按天数轮换；随机：每次随机选一个；探针：选最快可用地址
+            单链接：固定跳转一个地址，无兜底；时间轮播：按天数轮换，有兜底；随机：每次随机选一个，有兜底；探针：选最快可用地址，有兜底
           </div>
         </el-form-item>
 
