@@ -130,6 +130,7 @@ func main() {
 
 	// 兜底规则检查任务（每 15 分钟执行一次，需在 Start 前注册）
 	if cfg.ScheduledTask.EnableFallbackRuleCheck {
+		go fallbackRuleEngine.Run(context.Background())
 		schedulerService.AddTask("兜底规则检查", func() error {
 			return fallbackRuleEngine.Run(context.Background())
 		}, 15*time.Minute)
