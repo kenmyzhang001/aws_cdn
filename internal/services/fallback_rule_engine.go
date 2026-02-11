@@ -171,7 +171,8 @@ func (e *FallbackRuleEngine) evalYesterdaySamePeriod(ctx context.Context, rule *
 		"yesterday_count": yesterdayCount,
 		"drop":            drop,
 		"max_drop":        p.MaxDrop,
-	}).Info("昨日同时段对比，未达标，兜底规则已触发")
+		"是否触发":            drop > p.MaxDrop,
+	}).Info("昨日同时段对比，未达标，兜底规则是否触发")
 	return drop > p.MaxDrop, nil
 }
 
@@ -191,7 +192,8 @@ func (e *FallbackRuleEngine) evalFixedTimeTarget(ctx context.Context, rule *mode
 	logrus.WithFields(map[string]interface{}{
 		"cum":              cum,
 		"target_reg_count": p.TargetRegCount,
-	}).Info("指定时刻目标，未达标，兜底规则已触发")
+		"是否触发":             cum < p.TargetRegCount,
+	}).Info("指定时刻目标，未达标，兜底规则是否触发")
 	return cum < p.TargetRegCount, nil
 }
 
@@ -210,6 +212,7 @@ func (e *FallbackRuleEngine) evalHourlyIncrement(ctx context.Context, rule *mode
 	logrus.WithFields(map[string]interface{}{
 		"cum":              cum,
 		"target_reg_count": p.TargetRegCount,
-	}).Info("每小时增量，未达标，兜底规则已触发")
+		"是否触发":             cum < p.TargetRegCount,
+	}).Info("每小时增量，未达标，兜底规则是否触发")
 	return cum < p.TargetRegCount, nil
 }
