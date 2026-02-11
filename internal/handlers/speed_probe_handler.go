@@ -6,6 +6,7 @@ import (
 	"aws_cdn/internal/services"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -151,6 +152,64 @@ func (h *SpeedProbeHandler) BatchReportProbeResults(c *gin.Context) {
 	})
 }
 
+// ListProbeResults 分页查询探测结果，支持丰富筛选
+// Query: page, page_size, url, client_ip, status, start_time, end_time, speed_min, speed_max
+func (h *SpeedProbeHandler) ListProbeResults(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	var filters services.ProbeResultFilters
+	if url := c.Query("url"); url != "" {
+		filters.URL = url
+	}
+	if clientIP := c.Query("client_ip"); clientIP != "" {
+		filters.ClientIP = clientIP
+	}
+	if status := c.Query("status"); status != "" {
+		filters.Status = status
+	}
+	if startTimeStr := c.Query("start_time"); startTimeStr != "" {
+		if t, err := time.Parse("2006-01-02 15:04:05", startTimeStr); err == nil {
+			filters.StartTime = &t
+		} else if t, err := time.Parse("2006-01-02", startTimeStr); err == nil {
+			filters.StartTime = &t
+		}
+	}
+	if endTimeStr := c.Query("end_time"); endTimeStr != "" {
+		if t, err := time.Parse("2006-01-02 15:04:05", endTimeStr); err == nil {
+			filters.EndTime = &t
+		} else if t, err := time.Parse("2006-01-02", endTimeStr); err == nil {
+			filters.EndTime = &t
+		}
+	}
+	if v := c.Query("speed_min"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			filters.SpeedMin = &f
+		}
+	}
+	if v := c.Query("speed_max"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			filters.SpeedMax = &f
+		}
+	}
+
+	results, total, err := h.service.ListProbeResults(page, pageSize, &filters)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  results,
+		"total": total,
+		"page":  page,
+		"size":  pageSize,
+	})
+}
+
 // GetProbeResultsByIP 获取指定IP的探测结果
 func (h *SpeedProbeHandler) GetProbeResultsByIP(c *gin.Context) {
 	clientIP := c.Param("ip")
@@ -176,12 +235,54 @@ func (h *SpeedProbeHandler) GetProbeResultsByIP(c *gin.Context) {
 	})
 }
 
-// GetAlertLogs 获取告警记录
-func (h *SpeedProbeHandler) GetAlertLogs(c *gin.Context) {
+// ListAlertLogs 分页查询告警记录，支持丰富筛选
+// Query: page, page_size, url, time_window_from, time_window_to, created_start, created_end, alert_sent, failed_rate_min, failed_rate_max
+func (h *SpeedProbeHandler) ListAlertLogs(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if pageSize > 100 {
+		pageSize = 100
+	}
 
-	logs, total, err := h.service.GetAlertLogs(page, pageSize)
+	var filters services.AlertLogFilters
+	if url := c.Query("url"); url != "" {
+		filters.URL = url
+	}
+	parseTime := func(s string) *time.Time {
+		if s == "" {
+			return nil
+		}
+		if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
+			return &t
+		}
+		if t, err := time.Parse("2006-01-02", s); err == nil {
+			return &t
+		}
+		return nil
+	}
+	filters.TimeWindowFrom = parseTime(c.Query("time_window_from"))
+	filters.TimeWindowTo = parseTime(c.Query("time_window_to"))
+	filters.CreatedStart = parseTime(c.Query("created_start"))
+	filters.CreatedEnd = parseTime(c.Query("created_end"))
+	if v := c.Query("alert_sent"); v == "1" || v == "true" {
+		t := true
+		filters.AlertSent = &t
+	} else if v == "0" || v == "false" {
+		f := false
+		filters.AlertSent = &f
+	}
+	if v := c.Query("failed_rate_min"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			filters.FailedRateMin = &f
+		}
+	}
+	if v := c.Query("failed_rate_max"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			filters.FailedRateMax = &f
+		}
+	}
+
+	logs, total, err := h.service.ListAlertLogs(page, pageSize, &filters)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

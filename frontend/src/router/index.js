@@ -13,6 +13,8 @@ import CustomDownloadLinkList from '@/views/CustomDownloadLinkList.vue'
 import CfWorkerList from '@/views/CfWorkerList.vue'
 import DomainRedirectList from '@/views/DomainRedirectList.vue'
 import FocusProbeLinkList from '@/views/FocusProbeLinkList.vue'
+import SpeedProbeResultList from '@/views/SpeedProbeResultList.vue'
+import SpeedAlertLogList from '@/views/SpeedAlertLogList.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -94,6 +96,16 @@ const routes = [
     path: '/focus-probe-links',
     name: 'FocusProbeLinkList',
     component: FocusProbeLinkList,
+  },
+  {
+    path: '/speed-probe-results',
+    name: 'SpeedProbeResultList',
+    component: SpeedProbeResultList,
+  },
+  {
+    path: '/speed-alert-logs',
+    name: 'SpeedAlertLogList',
+    component: SpeedAlertLogList,
   },
 ]
 

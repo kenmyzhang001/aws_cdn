@@ -81,6 +81,22 @@
             <span>重点探测链接</span>
           </el-menu-item>
 
+          <!-- 速度探测数据 -->
+          <el-sub-menu index="speed-probe">
+            <template #title>
+              <el-icon><DataLine /></el-icon>
+              <span>速度探测数据</span>
+            </template>
+            <el-menu-item index="/speed-probe-results">
+              <el-icon><List /></el-icon>
+              <span>探测结果</span>
+            </el-menu-item>
+            <el-menu-item index="/speed-alert-logs">
+              <el-icon><Warning /></el-icon>
+              <span>告警记录</span>
+            </el-menu-item>
+          </el-sub-menu>
+
           <!-- 审计日志 -->
           <el-menu-item index="/audit-logs">
             <el-icon><Document /></el-icon>
@@ -98,7 +114,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box, Setting, Grid, Star } from '@element-plus/icons-vue'
+import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box, Setting, Grid, Star, DataLine, List, Warning } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)

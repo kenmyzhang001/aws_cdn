@@ -269,9 +269,10 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 		// 速度探测结果管理
 		speedProbe := protected.Group("/speed-probe")
 		{
-			speedProbe.GET("/results/:ip", speedProbeHandler.GetProbeResultsByIP)
-			speedProbe.GET("/alerts", speedProbeHandler.GetAlertLogs)
-			speedProbe.POST("/check", speedProbeHandler.TriggerCheck) // 手动触发检查
+			speedProbe.GET("/results", speedProbeHandler.ListProbeResults)       // 探测结果列表（带筛选）
+			speedProbe.GET("/results/:ip", speedProbeHandler.GetProbeResultsByIP) // 按 IP 查询
+			speedProbe.GET("/alerts", speedProbeHandler.ListAlertLogs)            // 告警记录列表（带筛选）
+			speedProbe.POST("/check", speedProbeHandler.TriggerCheck)             // 手动触发检查
 		}
 
 		// Cloudflare Worker 管理

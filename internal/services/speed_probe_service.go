@@ -593,44 +593,126 @@ func (s *SpeedProbeService) buildAlertMessage(alert *models.SpeedAlertLog, windo
 	return message
 }
 
-// GetProbeResultsByIP 获取指定IP的探测结果
-func (s *SpeedProbeService) GetProbeResultsByIP(clientIP string, page, pageSize int) ([]models.SpeedProbeResult, int64, error) {
+// ProbeResultFilters 探测结果列表筛选条件
+type ProbeResultFilters struct {
+	URL       string     // URL 模糊匹配
+	ClientIP  string     // 客户端 IP 模糊匹配
+	Status    string     // 状态：success / failed / timeout
+	StartTime *time.Time // 创建时间起
+	EndTime   *time.Time // 创建时间止
+	SpeedMin  *float64   // 速度下限 KB/s
+	SpeedMax  *float64   // 速度上限 KB/s
+}
+
+// ListProbeResults 分页查询探测结果，支持丰富筛选
+func (s *SpeedProbeService) ListProbeResults(page, pageSize int, filters *ProbeResultFilters) ([]models.SpeedProbeResult, int64, error) {
 	var results []models.SpeedProbeResult
 	var total int64
 
-	offset := (page - 1) * pageSize
+	query := s.db.Model(&models.SpeedProbeResult{})
 
-	query := s.db.Model(&models.SpeedProbeResult{}).Where("client_ip = ?", clientIP)
+	if filters != nil {
+		if filters.URL != "" {
+			query = query.Where("url LIKE ?", "%"+strings.TrimSpace(filters.URL)+"%")
+		}
+		if filters.ClientIP != "" {
+			query = query.Where("client_ip LIKE ?", "%"+strings.TrimSpace(filters.ClientIP)+"%")
+		}
+		if filters.Status != "" {
+			query = query.Where("status = ?", models.SpeedProbeStatus(filters.Status))
+		}
+		if filters.StartTime != nil {
+			query = query.Where("created_at >= ?", *filters.StartTime)
+		}
+		if filters.EndTime != nil {
+			query = query.Where("created_at <= ?", *filters.EndTime)
+		}
+		if filters.SpeedMin != nil {
+			query = query.Where("speed_kbps >= ?", *filters.SpeedMin)
+		}
+		if filters.SpeedMax != nil {
+			query = query.Where("speed_kbps <= ?", *filters.SpeedMax)
+		}
+	}
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := query.Offset(offset).Limit(pageSize).Order("created_at DESC").Find(&results).Error; err != nil {
+	offset := (page - 1) * pageSize
+	if err := query.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&results).Error; err != nil {
 		return nil, 0, err
 	}
 
 	return results, total, nil
 }
 
-// GetAlertLogs 获取告警记录
-func (s *SpeedProbeService) GetAlertLogs(page, pageSize int) ([]models.SpeedAlertLog, int64, error) {
+// GetProbeResultsByIP 获取指定IP的探测结果
+func (s *SpeedProbeService) GetProbeResultsByIP(clientIP string, page, pageSize int) ([]models.SpeedProbeResult, int64, error) {
+	return s.ListProbeResults(page, pageSize, &ProbeResultFilters{ClientIP: clientIP})
+}
+
+// AlertLogFilters 告警记录列表筛选条件
+type AlertLogFilters struct {
+	URL              string     // URL 模糊匹配
+	TimeWindowFrom   *time.Time // 时间窗口开始 >=
+	TimeWindowTo     *time.Time // 时间窗口结束 <=
+	CreatedStart     *time.Time // 创建时间起
+	CreatedEnd       *time.Time // 创建时间止
+	AlertSent        *bool      // 是否已发送告警
+	FailedRateMin    *float64   // 未达标率下限
+	FailedRateMax    *float64   // 未达标率上限
+}
+
+// ListAlertLogs 分页查询告警记录，支持丰富筛选
+func (s *SpeedProbeService) ListAlertLogs(page, pageSize int, filters *AlertLogFilters) ([]models.SpeedAlertLog, int64, error) {
 	var logs []models.SpeedAlertLog
 	var total int64
 
-	offset := (page - 1) * pageSize
-
 	query := s.db.Model(&models.SpeedAlertLog{})
+
+	if filters != nil {
+		if filters.URL != "" {
+			query = query.Where("url LIKE ?", "%"+strings.TrimSpace(filters.URL)+"%")
+		}
+		if filters.TimeWindowFrom != nil {
+			query = query.Where("time_window_start >= ?", *filters.TimeWindowFrom)
+		}
+		if filters.TimeWindowTo != nil {
+			query = query.Where("time_window_end <= ?", *filters.TimeWindowTo)
+		}
+		if filters.CreatedStart != nil {
+			query = query.Where("created_at >= ?", *filters.CreatedStart)
+		}
+		if filters.CreatedEnd != nil {
+			query = query.Where("created_at <= ?", *filters.CreatedEnd)
+		}
+		if filters.AlertSent != nil {
+			query = query.Where("alert_sent = ?", *filters.AlertSent)
+		}
+		if filters.FailedRateMin != nil {
+			query = query.Where("failed_rate >= ?", *filters.FailedRateMin)
+		}
+		if filters.FailedRateMax != nil {
+			query = query.Where("failed_rate <= ?", *filters.FailedRateMax)
+		}
+	}
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := query.Offset(offset).Limit(pageSize).Order("created_at DESC").Find(&logs).Error; err != nil {
+	offset := (page - 1) * pageSize
+	if err := query.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&logs).Error; err != nil {
 		return nil, 0, err
 	}
 
 	return logs, total, nil
+}
+
+// GetAlertLogs 获取告警记录（无筛选，兼容旧接口）
+func (s *SpeedProbeService) GetAlertLogs(page, pageSize int) ([]models.SpeedAlertLog, int64, error) {
+	return s.ListAlertLogs(page, pageSize, nil)
 }
 
 // CleanOldResults 清理旧的探测结果（保留指定天数）
