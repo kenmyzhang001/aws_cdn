@@ -406,6 +406,7 @@ export default {
       list,
       cfAccountList,
       filterCfAccountId,
+      pagination,
       fetchList,
       openCreateDialog,
       openEditDialog,
