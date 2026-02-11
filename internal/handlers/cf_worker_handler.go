@@ -5,6 +5,7 @@ import (
 	"aws_cdn/internal/services"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -71,6 +72,7 @@ func (h *CFWorkerHandler) CreateWorker(c *gin.Context) {
 // @Param page query int false "页码" default(1)
 // @Param page_size query int false "每页数量" default(10)
 // @Param cf_account_id query int false "CF 账号 ID"
+// @Param domain query string false "域名关键词（Worker 域名或目标域名）"
 // @Success 200 {object} map[string]interface{}
 // @Router /api/workers [get]
 func (h *CFWorkerHandler) GetWorkerList(c *gin.Context) {
@@ -79,14 +81,16 @@ func (h *CFWorkerHandler) GetWorkerList(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 	cfAccountID, _ := strconv.ParseUint(c.Query("cf_account_id"), 10, 32)
+	domain := strings.TrimSpace(c.Query("domain"))
 
 	log.WithFields(map[string]interface{}{
 		"page":          page,
 		"page_size":     pageSize,
 		"cf_account_id": cfAccountID,
+		"domain":        domain,
 	}).Info("查询 Worker 列表")
 
-	workers, total, err := h.workerService.GetWorkerList(page, pageSize, uint(cfAccountID))
+	workers, total, err := h.workerService.GetWorkerList(page, pageSize, uint(cfAccountID), domain)
 	if err != nil {
 		log.WithError(err).Error("查询 Worker 列表失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -29,6 +29,15 @@
             />
           </el-select>
         </el-form-item>
+        <el-form-item label="域名搜索">
+          <el-input
+            v-model="searchForm.domain"
+            placeholder="Worker 域名或目标域名"
+            clearable
+            style="width: 220px"
+            @keyup.enter="loadWorkers"
+          />
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="loadWorkers">查询</el-button>
           <el-button @click="resetSearch">重置</el-button>
@@ -498,7 +507,8 @@ import { r2Api } from '@/api/r2';
 
 // 搜索表单
 const searchForm = reactive({
-  cf_account_id: null
+  cf_account_id: null,
+  domain: ''
 });
 
 // Worker 列表
@@ -989,6 +999,7 @@ const loadWorkers = async () => {
 // 重置搜索
 const resetSearch = () => {
   searchForm.cf_account_id = null;
+  searchForm.domain = '';
   pagination.page = 1;
   loadWorkers();
 };

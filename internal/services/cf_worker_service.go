@@ -224,8 +224,8 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 	return worker, nil
 }
 
-// GetWorkerList 获取 Worker 列表
-func (s *CFWorkerService) GetWorkerList(page, pageSize int, cfAccountID uint) ([]models.CFWorker, int64, error) {
+// GetWorkerList 获取 Worker 列表，支持按域名关键词筛选（Worker 域名或目标域名）
+func (s *CFWorkerService) GetWorkerList(page, pageSize int, cfAccountID uint, domain string) ([]models.CFWorker, int64, error) {
 	var workers []models.CFWorker
 	var total int64
 
@@ -233,6 +233,10 @@ func (s *CFWorkerService) GetWorkerList(page, pageSize int, cfAccountID uint) ([
 
 	if cfAccountID > 0 {
 		query = query.Where("cf_account_id = ?", cfAccountID)
+	}
+	if domain != "" {
+		like := "%" + domain + "%"
+		query = query.Where("worker_domain LIKE ? OR target_domain LIKE ?", like, like)
 	}
 
 	// 获取总数

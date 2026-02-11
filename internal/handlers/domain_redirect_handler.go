@@ -5,6 +5,7 @@ import (
 	"aws_cdn/internal/services"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,7 +18,7 @@ func NewDomainRedirectHandler(service *services.DomainRedirectService) *DomainRe
 	return &DomainRedirectHandler{service: service}
 }
 
-// List 列表，支持 ?cf_account_id= & page= & page_size=
+// List 列表，支持 ?cf_account_id= & domain= & page= & page_size=
 func (h *DomainRedirectHandler) List(c *gin.Context) {
 	log := logger.GetLogger()
 	var cfAccountID *uint
@@ -30,9 +31,10 @@ func (h *DomainRedirectHandler) List(c *gin.Context) {
 		u := uint(id)
 		cfAccountID = &u
 	}
+	domain := strings.TrimSpace(c.Query("domain"))
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
-	list, total, err := h.service.List(cfAccountID, page, pageSize)
+	list, total, err := h.service.List(cfAccountID, domain, page, pageSize)
 	if err != nil {
 		log.WithError(err).Error("获取域名重定向列表失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

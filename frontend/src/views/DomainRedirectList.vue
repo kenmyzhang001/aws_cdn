@@ -30,6 +30,15 @@
               />
             </el-select>
           </el-form-item>
+          <el-form-item label="域名搜索">
+            <el-input
+              v-model="filterDomain"
+              placeholder="主域名或目标域名"
+              clearable
+              style="width: 220px"
+              @keyup.enter="fetchList"
+            />
+          </el-form-item>
           <el-form-item>
             <el-button type="primary" @click="fetchList">
               <el-icon><Search /></el-icon>
@@ -188,6 +197,7 @@ export default {
     const list = ref([])
     const cfAccountList = ref([])
     const filterCfAccountId = ref(null)
+    const filterDomain = ref('')
     const pagination = ref({
       page: 1,
       page_size: 10,
@@ -235,6 +245,7 @@ export default {
           page_size: pagination.value.page_size
         }
         if (filterCfAccountId.value) params.cf_account_id = filterCfAccountId.value
+        if (filterDomain.value) params.domain = filterDomain.value.trim()
         const res = await domainRedirectApi.list(params)
         list.value = res?.data ?? (Array.isArray(res) ? res : [])
         pagination.value.total = res?.pagination?.total ?? 0
