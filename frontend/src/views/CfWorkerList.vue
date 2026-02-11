@@ -66,11 +66,27 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="目标域名" width="220">
+        <el-table-column label="模式" width="100">
           <template #default="{ row }">
-            <el-link :href="`https://${row.target_domain}`" target="_blank" type="success">
-              {{ row.target_domain }}
-            </el-link>
+            <el-tag v-if="!row.mode || row.mode === 'single'" type="info">单链接</el-tag>
+            <el-tag v-else-if="row.mode === 'time'" type="warning">时间轮播</el-tag>
+            <el-tag v-else-if="row.mode === 'random'" type="success">随机</el-tag>
+            <el-tag v-else-if="row.mode === 'probe'" type="primary">探针</el-tag>
+            <el-tag v-else type="info">{{ row.mode }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="目标" width="220">
+          <template #default="{ row }">
+            <template v-if="row.targets && row.targets.length > 1">
+              <el-tooltip :content="row.targets.join('\n')" placement="top" max-width="400">
+                <span>{{ row.target_domain || row.targets[0] }}</span>
+              </el-tooltip>
+              <el-tag size="small" style="margin-left: 4px;">共 {{ row.targets.length }} 个</el-tag>
+            </template>
+            <template v-else>
+              <span>{{ row.target_domain || (row.targets && row.targets[0]) || '-' }}</span>
+              <el-link v-if="row.target_domain || (row.targets && row.targets[0])" :href="targetHref(row.target_domain || row.targets[0])" target="_blank" type="success" style="margin-left: 4px;">打开</el-link>
+            </template>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
@@ -148,12 +164,16 @@
           </div>
         </el-form-item>
 
-        <el-form-item label="Worker 名称" prop="worker_name" v-if="!isEdit">
-          <el-input
-            v-model="workerForm.worker_name"
-            placeholder="请输入 Worker 名称，如：my-redirect-worker"
-          />
-          <div class="form-tip">Worker 脚本的名称，创建后不可修改</div>
+        <el-form-item label="轮播模式">
+          <el-radio-group v-model="workerForm.mode" @change="handleWorkerModeChange">
+            <el-radio label="single">单链接</el-radio>
+            <el-radio label="time">时间轮播</el-radio>
+            <el-radio label="random">随机</el-radio>
+            <el-radio label="probe">探针模式</el-radio>
+          </el-radio-group>
+          <div class="form-tip">
+            单链接：固定跳转一个地址；时间轮播：按天数轮换；随机：每次随机选一个；探针：选最快可用地址
+          </div>
         </el-form-item>
 
         <el-form-item label="Worker 域名" prop="worker_domain" v-if="!isEdit">
@@ -284,29 +304,29 @@
           </div>
         </el-form-item>
 
-        <el-form-item label="目标域名来源">
-          <el-radio-group v-model="domainInputMode" @change="handleDomainModeChange">
-            <el-radio label="manual">手动输入</el-radio>
-            <el-radio label="select">从 CF 下载链接选择</el-radio>
-          </el-radio-group>
-        </el-form-item>
-
-        <!-- 手动输入模式 -->
-        <template v-if="domainInputMode === 'manual'">
-          <el-form-item label="目标域名" prop="target_domain">
-            <el-input
-              v-model="workerForm.target_domain"
-              placeholder="请输入目标跳转域名，如：https://target.example.com"
-              clearable
-            />
-            <div class="form-tip">
-              跳转的目标地址（域名 B），支持完整 URL
-            </div>
+        <!-- 单链接：目标域名来源 -->
+        <template v-if="workerForm.mode === 'single'">
+          <el-form-item label="目标域名来源">
+            <el-radio-group v-model="domainInputMode" @change="handleDomainModeChange">
+              <el-radio label="manual">手动输入</el-radio>
+              <el-radio label="select">从 CF 下载链接选择</el-radio>
+            </el-radio-group>
           </el-form-item>
+
+          <template v-if="domainInputMode === 'manual'">
+            <el-form-item label="目标域名" prop="target_domain">
+              <el-input
+                v-model="workerForm.target_domain"
+                placeholder="请输入目标跳转域名，如：https://target.example.com"
+                clearable
+              />
+              <div class="form-tip">跳转的目标地址，支持完整 URL</div>
+            </el-form-item>
+          </template>
         </template>
 
-        <!-- 从 CF 选择模式 -->
-        <template v-else-if="domainInputMode === 'select'">
+        <!-- 单链接：从 CF 选择 -->
+        <template v-if="workerForm.mode === 'single' && domainInputMode === 'select'">
           <el-form-item label="选择存储桶" required>
             <el-select
               v-model="selectedBucketId"
@@ -386,6 +406,42 @@
           </el-form-item>
         </template>
 
+        <!-- 多目标：时间轮播 / 随机 / 探针 -->
+        <template v-if="workerForm.mode && workerForm.mode !== 'single'">
+          <el-form-item label="目标链接列表" prop="targets_text" required>
+            <el-input
+              v-model="workerForm.targets_text"
+              type="textarea"
+              :rows="6"
+              placeholder="每行一个完整 URL，例如：&#10;https://cdn1.example.com/file.apk&#10;https://cdn2.example.com/file.apk"
+            />
+            <div class="form-tip">多个目标将参与轮播或探针选择；每行一个以 http:// 或 https:// 开头的 URL</div>
+          </el-form-item>
+          <el-form-item label="兜底链接">
+            <el-input
+              v-model="workerForm.fallback_url"
+              placeholder="可选：当所有目标都不可用时跳转的地址"
+              clearable
+            />
+          </el-form-item>
+          <template v-if="workerForm.mode === 'time'">
+            <el-form-item label="轮换天数" prop="rotate_days">
+              <el-input-number v-model="workerForm.rotate_days" :min="1" :max="365" placeholder="每 N 天轮换一个目标" />
+              <div class="form-tip">每多少天轮换到下一个目标，例如 7 表示每 7 天换一个</div>
+            </el-form-item>
+            <el-form-item label="基准日期">
+              <el-date-picker
+                v-model="workerForm.base_date"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="可选，默认今天"
+                clearable
+                style="width: 100%"
+              />
+            </el-form-item>
+          </template>
+        </template>
+
         <el-form-item label="状态" prop="status" v-if="isEdit">
           <el-select v-model="workerForm.status" style="width: 100%">
             <el-option label="激活" value="active" />
@@ -409,9 +465,9 @@
           style="margin-bottom: 20px"
         >
           <div style="line-height: 1.8;">
-            <p>• 访问 Worker 域名时，会根据用户 UA 自动选择跳转方式：</p>
-            <p>• 社交/短信 WebView（Telegram/Viber/Line/WhatsApp/微信等）：使用 JavaScript 跳转</p>
-            <p>• 普通浏览器（Chrome/Safari 等）：使用 302 跳转</p>
+            <p>• 单链接：固定跳转一个地址；时间轮播/随机/探针：多目标参与轮播或探活选最快。</p>
+            <p>• 社交/短信 WebView（Telegram/Viber/Line/WhatsApp/微信等）：使用 JavaScript 跳转；普通浏览器：302 跳转。</p>
+            <p>• 探活：时间轮播与随机模式会先探活再选可用目标；探针模式使用探测接口返回最快可用地址。</p>
             <p>• 缓存时间：30 分钟（1800 秒）</p>
           </div>
         </el-alert>
@@ -512,9 +568,14 @@ const workerForm = reactive({
   cf_account_id: null,
   worker_name: '',
   worker_domain: '',
-  worker_domain_prefix: '', // 子域名前缀
-  worker_base_domain: '', // 基础域名
+  worker_domain_prefix: '',
+  worker_base_domain: '',
   target_domain: '',
+  mode: 'single',
+  targets_text: '',      // 多目标时每行一个 URL
+  fallback_url: '',
+  rotate_days: 7,
+  base_date: '',
   status: 'active',
   description: ''
 });
@@ -527,19 +588,29 @@ const workerFormRules = {
   cf_account_id: [
     { required: true, message: '请选择 CF 账号', trigger: 'change' }
   ],
-  worker_name: [
-    { required: true, message: '请输入 Worker 名称', trigger: 'blur' },
-    { 
-      pattern: /^[a-z0-9-]+$/,
-      message: 'Worker 名称只能包含小写字母、数字和连字符',
-      trigger: 'blur'
-    }
-  ],
   worker_domain: [
     { required: true, message: '请输入 Worker 域名', trigger: 'blur' }
   ],
   target_domain: [
-    { required: true, message: '请输入目标域名', trigger: 'blur' }
+    {
+      validator: (rule, value, cb) => {
+        if (workerForm.mode === 'single' && !(value || '').trim()) return cb(new Error('请输入目标域名'));
+        cb();
+      },
+      trigger: 'blur'
+    }
+  ],
+  targets_text: [
+    {
+      validator: (rule, value, cb) => {
+        if (workerForm.mode && workerForm.mode !== 'single') {
+          const lines = (value || '').trim().split(/\n/).map(s => s.trim()).filter(s => s && (s.startsWith('http://') || s.startsWith('https://')));
+          if (lines.length === 0) return cb(new Error('请至少输入一个以 http:// 或 https:// 开头的目标链接'));
+        }
+        cb();
+      },
+      trigger: 'blur'
+    }
   ]
 };
 
@@ -876,16 +947,21 @@ const useCustomDomain = () => {
 
 // 处理域名输入模式变化
 const handleDomainModeChange = (mode) => {
-  console.log('域名输入模式切换为:', mode);
-  
-  // 切换模式时清空相关数据
   workerForm.target_domain = '';
   selectedBucketId.value = null;
   selectedBucketDomains.value = [];
-  
-  // 如果切换到选择模式，且还没有加载存储桶，则加载
-  if (mode === 'select' && r2Buckets.value.length === 0) {
-    loadR2Buckets();
+  if (mode === 'select' && r2Buckets.value.length === 0) loadR2Buckets();
+};
+
+// 处理轮播模式变化
+const handleWorkerModeChange = (mode) => {
+  if (mode !== 'single') {
+    workerForm.target_domain = '';
+    domainInputMode.value = 'manual';
+  }
+  if (mode === 'single') {
+    workerForm.targets_text = '';
+    workerForm.fallback_url = '';
   }
 };
 
@@ -935,19 +1011,22 @@ const showCreateDialog = () => {
 const showEditDialog = (row) => {
   isEdit.value = true;
   currentWorkerId.value = row.id;
-  
-  // 编辑模式下不需要解析前缀和基础域名，因为域名字段是只读的
+  const targets = row.targets && Array.isArray(row.targets) ? row.targets : (row.target_domain ? [row.target_domain] : []);
   Object.assign(workerForm, {
     cf_account_id: row.cf_account_id,
     worker_name: row.worker_name,
     worker_domain: row.worker_domain,
     worker_domain_prefix: '',
     worker_base_domain: '',
-    target_domain: row.target_domain,
+    target_domain: row.target_domain || (targets[0] || ''),
+    mode: row.mode || 'single',
+    targets_text: targets.join('\n'),
+    fallback_url: row.fallback_url || '',
+    rotate_days: row.rotate_days || 7,
+    base_date: row.base_date || '',
     status: row.status || 'active',
     description: row.description || ''
   });
-  
   dialogVisible.value = true;
 };
 
@@ -961,12 +1040,15 @@ const handleDialogClose = () => {
     worker_domain_prefix: '',
     worker_base_domain: '',
     target_domain: '',
+    mode: 'single',
+    targets_text: '',
+    fallback_url: '',
+    rotate_days: 7,
+    base_date: '',
     status: 'active',
     description: ''
   });
   currentWorkerId.value = null;
-  
-  // 重置存储桶选择和输入模式
   domainInputMode.value = 'manual';
   selectedBucketId.value = null;
   selectedBucketDomains.value = [];
@@ -976,35 +1058,98 @@ const handleDialogClose = () => {
   resetDomainPagination();
 };
 
+const targetHref = (u) => {
+  if (!u) return '#';
+  return u.startsWith('http') ? u : 'https://' + u;
+};
+
+// 根据域名 + 时间自动生成 Worker 名称（仅小写字母、数字、下划线、连字符）
+const generateWorkerName = (domain) => {
+  if (!domain || !domain.trim()) return '';
+  const safe = domain.trim()
+    .replace(/\./g, '_')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '') || 'worker';
+  const time = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+  return `${safe}_${time}`;
+};
+
+// 解析多目标文本为数组
+const parseTargetsText = (text) => {
+  return (text || '').trim().split(/\n/).map(s => s.trim()).filter(s => s && (s.startsWith('http://') || s.startsWith('https://')));
+};
+
 // 提交表单
 const handleSubmit = async () => {
   try {
     await workerFormRef.value?.validate();
-    
+    const isSingle = workerForm.mode === 'single';
+    if (isSingle && !(workerForm.target_domain || '').trim()) {
+      ElMessage.error('请输入目标域名');
+      return;
+    }
+    if (!isSingle) {
+      const targets = parseTargetsText(workerForm.targets_text);
+      if (targets.length === 0) {
+        ElMessage.error('请至少输入一个以 http:// 或 https:// 开头的目标链接');
+        return;
+      }
+    }
+
     submitting.value = true;
-    
+
+    const payload = {
+      status: workerForm.status,
+      description: workerForm.description,
+      mode: workerForm.mode || 'single',
+      fallback_url: workerForm.fallback_url || '',
+      rotate_days: workerForm.rotate_days || 0,
+      base_date: workerForm.base_date || ''
+    };
+    if (isSingle) {
+      payload.target_domain = workerForm.target_domain.trim();
+    } else {
+      payload.targets = parseTargetsText(workerForm.targets_text);
+    }
+
     if (isEdit.value) {
-      // 更新 Worker
-      await updateWorker(currentWorkerId.value, {
-        target_domain: workerForm.target_domain,
-        status: workerForm.status,
-        description: workerForm.description
-      });
+      await updateWorker(currentWorkerId.value, payload);
       ElMessage.success('Worker 更新成功');
     } else {
-      // 创建 Worker
-      await createWorker(workerForm);
+      const workerName = generateWorkerName(workerForm.worker_domain);
+      if (!workerName) {
+        ElMessage.error('请先填写 Worker 域名');
+        submitting.value = false;
+        return;
+      }
+      const createPayload = {
+        cf_account_id: workerForm.cf_account_id,
+        worker_name: workerName,
+        worker_domain: workerForm.worker_domain,
+        description: workerForm.description,
+        mode: payload.mode,
+        fallback_url: payload.fallback_url,
+        rotate_days: payload.rotate_days,
+        base_date: payload.base_date
+      };
+      if (isSingle) {
+        createPayload.target_domain = workerForm.target_domain.trim();
+      } else {
+        createPayload.targets = payload.targets;
+      }
+      await createWorker(createPayload);
       ElMessage.success('Worker 创建成功');
     }
-    
+
     dialogVisible.value = false;
     loadWorkers();
   } catch (error) {
     if (error.response?.data?.error) {
       ElMessage.error(error.response.data.error);
     } else if (error !== false) {
-      // 排除表单验证失败的情况
-      ElMessage.error('操作失败: ' + error.message);
+      ElMessage.error('操作失败: ' + (error.message || ''));
     }
   } finally {
     submitting.value = false;

@@ -27,23 +27,84 @@ func NewCFWorkerService(db *gorm.DB) *CFWorkerService {
 
 // CreateWorkerRequest 创建 Worker 请求
 type CreateWorkerRequest struct {
-	CFAccountID  uint   `json:"cf_account_id" binding:"required"`
-	WorkerName   string `json:"worker_name" binding:"required"`
-	WorkerDomain string `json:"worker_domain" binding:"required"`
-	TargetDomain string `json:"target_domain" binding:"required"`
-	Description  string `json:"description"`
+	CFAccountID  uint     `json:"cf_account_id" binding:"required"`
+	WorkerName   string   `json:"worker_name" binding:"required"`
+	WorkerDomain string   `json:"worker_domain" binding:"required"`
+	TargetDomain string   `json:"target_domain"`   // 单链接时使用；与 targets 二选一
+	Targets      []string `json:"targets"`          // 多目标链接（轮播/探针时使用）
+	FallbackURL  string   `json:"fallback_url"`    // 兜底链接（可选）
+	Mode         string   `json:"mode"`            // single / time / random / probe
+	RotateDays   int      `json:"rotate_days"`    // 时间轮播每 N 天
+	BaseDate     string   `json:"base_date"`       // 时间轮播基准日期 ISO
+	Description  string   `json:"description"`
 }
 
 // UpdateWorkerRequest 更新 Worker 请求
 type UpdateWorkerRequest struct {
-	TargetDomain string `json:"target_domain" binding:"required"`
-	Description  string `json:"description"`
-	Status       string `json:"status"`
+	TargetDomain string   `json:"target_domain"`
+	Targets      []string `json:"targets"`
+	FallbackURL  string   `json:"fallback_url"`
+	Mode         string   `json:"mode"`
+	RotateDays   int      `json:"rotate_days"`
+	BaseDate     string   `json:"base_date"`
+	Description  string   `json:"description"`
+	Status       string   `json:"status"`
+}
+
+// buildTargetsFromRequest 从请求中得到目标链接列表（至少一个）
+func buildTargetsFromCreate(req *CreateWorkerRequest) ([]string, error) {
+	if len(req.Targets) > 0 {
+		return req.Targets, nil
+	}
+	if req.TargetDomain != "" {
+		return []string{req.TargetDomain}, nil
+	}
+	return nil, fmt.Errorf("请提供 target_domain 或 targets")
+}
+
+func buildTargetsFromUpdate(req *UpdateWorkerRequest, currentTargets []string, currentTargetDomain string) []string {
+	if len(req.Targets) > 0 {
+		return req.Targets
+	}
+	if req.TargetDomain != "" {
+		return []string{req.TargetDomain}
+	}
+	if len(currentTargets) > 0 {
+		return currentTargets
+	}
+	if currentTargetDomain != "" {
+		return []string{currentTargetDomain}
+	}
+	return nil
+}
+
+// generateScript 根据目标与模式生成脚本
+func generateScript(targets []string, fallbackURL, mode string, rotateDays int, baseDate string) (string, error) {
+	if len(targets) == 0 {
+		return "", fmt.Errorf("目标链接不能为空")
+	}
+	useSingle := mode == "" || mode == "single" || (len(targets) == 1 && (mode == "" || mode == "single"))
+	if useSingle {
+		return cloudflare.GenerateWorkerScript(targets[0]), nil
+	}
+	adv, err := cloudflare.GenerateWorkerScriptAdvanced(cloudflare.WorkerScriptConfig{
+		Targets:     targets,
+		FallbackURL: fallbackURL,
+		Mode:        mode,
+		RotateDays:  rotateDays,
+		BaseDate:    baseDate,
+	})
+	return adv, err
 }
 
 // CreateWorker 创建 Worker
 func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWorker, error) {
 	log := logger.GetLogger()
+
+	targets, err := buildTargetsFromCreate(req)
+	if err != nil {
+		return nil, err
+	}
 
 	// 1. 获取 CF 账号信息
 	var cfAccount models.CFAccount
@@ -59,21 +120,20 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 
 	// 4. 获取 Worker 域名的 Zone ID
 	var zoneID string
-	// 从 worker_domain 中提取根域名
 	rootDomain := extractRootDomain(req.WorkerDomain)
-
-	// 尝试获取 Zone ID
 	zoneID, zoneErr := s.getZoneID(apiToken, rootDomain)
 	if zoneErr != nil {
 		log.WithError(zoneErr).WithFields(map[string]interface{}{
 			"worker_domain": req.WorkerDomain,
 			"root_domain":   rootDomain,
 		}).Warn("获取 Zone ID 失败")
-		// 不阻止创建，继续执行
 	}
 
 	// 5. 生成 Worker 脚本
-	script := cloudflare.GenerateWorkerScript(req.TargetDomain)
+	script, err := generateScript(targets, req.FallbackURL, req.Mode, req.RotateDays, req.BaseDate)
+	if err != nil {
+		return nil, err
+	}
 
 	// 6. 创建 Worker 脚本
 	if err := cfService.CreateWorker(req.WorkerName, script); err != nil {
@@ -109,9 +169,8 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 		pattern := fmt.Sprintf("%s/*", req.WorkerDomain)
 		routeID, routeErr := cfService.CreateWorkerRoute(zoneID, pattern, req.WorkerName)
 		if routeErr != nil {
-			// 两种方式都失败，删除已创建的 Worker
 			_ = cfService.DeleteWorker(req.WorkerName)
-			return nil, fmt.Errorf("Worker 域名绑定失败: 自定义域名错误(%v), 路由错误(%v)", err, routeErr)
+			return nil, fmt.Errorf("Worker 域名绑定失败: 路由错误 %v", routeErr)
 		}
 		workerRoute = routeID
 		log.WithFields(map[string]interface{}{
@@ -122,11 +181,25 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 	}
 
 	// 9. 保存到数据库
+	targetsJSON := ""
+	if len(targets) > 0 {
+		b, _ := json.Marshal(targets)
+		targetsJSON = string(b)
+	}
+	firstTarget := ""
+	if len(targets) > 0 {
+		firstTarget = targets[0]
+	}
 	worker := &models.CFWorker{
 		CFAccountID:    req.CFAccountID,
 		WorkerName:     req.WorkerName,
 		WorkerDomain:   req.WorkerDomain,
-		TargetDomain:   req.TargetDomain,
+		TargetDomain:   firstTarget,
+		Targets:        targetsJSON,
+		FallbackURL:    req.FallbackURL,
+		Mode:           req.Mode,
+		RotateDays:     req.RotateDays,
+		BaseDate:       req.BaseDate,
 		ZoneID:         zoneID,
 		WorkerRoute:    workerRoute,
 		CustomDomainID: customDomainID,
@@ -189,39 +262,66 @@ func (s *CFWorkerService) GetWorkerByID(id uint) (*models.CFWorker, error) {
 func (s *CFWorkerService) UpdateWorker(id uint, req *UpdateWorkerRequest) (*models.CFWorker, error) {
 	log := logger.GetLogger()
 
-	// 1. 获取 Worker 信息
 	worker, err := s.GetWorkerByID(id)
 	if err != nil {
 		return nil, err
 	}
 
-	// 2. 获取 CF 账号信息
 	var cfAccount models.CFAccount
 	if err := s.db.First(&cfAccount, worker.CFAccountID).Error; err != nil {
 		return nil, fmt.Errorf("CF 账号不存在: %w", err)
 	}
 
-	// 3. 使用 API Token（已明文存储）
-	apiToken := cfAccount.APIToken
+	currentTargets := worker.TargetsList()
+	needScriptUpdate := false
+	newTargets := buildTargetsFromUpdate(req, currentTargets, worker.TargetDomain)
+	if len(newTargets) > 0 {
+		newFirst := newTargets[0]
+		if newFirst != worker.TargetDomain {
+			worker.TargetDomain = newFirst
+			needScriptUpdate = true
+		}
+		targetsJSON, _ := json.Marshal(newTargets)
+		if string(targetsJSON) != worker.Targets {
+			worker.Targets = string(targetsJSON)
+			needScriptUpdate = true
+		}
+	}
+	if req.FallbackURL != worker.FallbackURL {
+		worker.FallbackURL = req.FallbackURL
+		needScriptUpdate = true
+	}
+	mode := req.Mode
+	if mode == "" && worker.Mode != "" {
+		mode = worker.Mode
+	}
+	if mode != worker.Mode {
+		worker.Mode = mode
+		needScriptUpdate = true
+	}
+	if req.RotateDays != 0 || worker.RotateDays != 0 {
+		if req.RotateDays != worker.RotateDays {
+			worker.RotateDays = req.RotateDays
+			needScriptUpdate = true
+		}
+	}
+	if req.BaseDate != worker.BaseDate {
+		worker.BaseDate = req.BaseDate
+		needScriptUpdate = true
+	}
 
-	// 4. 如果目标域名变化，需要更新 Worker 脚本
-	if req.TargetDomain != "" && req.TargetDomain != worker.TargetDomain {
-		cfService := cloudflare.NewWorkerAPIService(apiToken, cfAccount.AccountID)
-		script := cloudflare.GenerateWorkerScript(req.TargetDomain)
-
+	if needScriptUpdate && len(newTargets) > 0 {
+		script, err := generateScript(newTargets, worker.FallbackURL, worker.Mode, worker.RotateDays, worker.BaseDate)
+		if err != nil {
+			return nil, err
+		}
+		cfService := cloudflare.NewWorkerAPIService(cfAccount.APIToken, cfAccount.AccountID)
 		if err := cfService.CreateWorker(worker.WorkerName, script); err != nil {
 			return nil, fmt.Errorf("更新 Worker 脚本失败: %w", err)
 		}
-
-		log.WithFields(map[string]interface{}{
-			"worker_name":   worker.WorkerName,
-			"target_domain": req.TargetDomain,
-		}).Info("Worker 脚本更新成功")
-
-		worker.TargetDomain = req.TargetDomain
+		log.WithFields(map[string]interface{}{"worker_name": worker.WorkerName}).Info("Worker 脚本更新成功")
 	}
 
-	// 5. 更新其他字段
 	if req.Description != "" {
 		worker.Description = req.Description
 	}
@@ -229,11 +329,9 @@ func (s *CFWorkerService) UpdateWorker(id uint, req *UpdateWorkerRequest) (*mode
 		worker.Status = req.Status
 	}
 
-	// 6. 保存到数据库
 	if err := s.db.Save(worker).Error; err != nil {
 		return nil, fmt.Errorf("更新 Worker 失败: %w", err)
 	}
-
 	return worker, nil
 }
 

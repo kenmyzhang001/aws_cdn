@@ -20,7 +20,7 @@
               placeholder="全部"
               clearable
               style="width: 280px"
-              @change="fetchList"
+              @change="onFilterChange"
             >
               <el-option
                 v-for="a in cfAccountList"
@@ -76,6 +76,17 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <el-pagination
+        v-model:current-page="pagination.page"
+        v-model:page-size="pagination.page_size"
+        :total="pagination.total"
+        :page-sizes="[10, 20, 50, 100]"
+        layout="total, sizes, prev, pager, next, jumper"
+        @size-change="fetchList"
+        @current-change="fetchList"
+        style="margin-top: 16px; justify-content: flex-end;"
+      />
     </el-card>
 
     <!-- 新增/编辑：仅新增时选 Zone -->
@@ -177,6 +188,11 @@ export default {
     const list = ref([])
     const cfAccountList = ref([])
     const filterCfAccountId = ref(null)
+    const pagination = ref({
+      page: 1,
+      page_size: 10,
+      total: 0
+    })
 
     const dialogVisible = ref(false)
     const editId = ref(null)
@@ -214,14 +230,24 @@ export default {
     const fetchList = async () => {
       loading.value = true
       try {
-        const params = filterCfAccountId.value ? { cf_account_id: filterCfAccountId.value } : {}
+        const params = {
+          page: pagination.value.page,
+          page_size: pagination.value.page_size
+        }
+        if (filterCfAccountId.value) params.cf_account_id = filterCfAccountId.value
         const res = await domainRedirectApi.list(params)
-        list.value = Array.isArray(res) ? res : []
+        list.value = res?.data ?? (Array.isArray(res) ? res : [])
+        pagination.value.total = res?.pagination?.total ?? 0
       } catch (e) {
         list.value = []
       } finally {
         loading.value = false
       }
+    }
+
+    const onFilterChange = () => {
+      pagination.value.page = 1
+      fetchList()
     }
 
     const zoneNameById = (zoneId) => {
