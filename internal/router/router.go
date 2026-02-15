@@ -116,6 +116,8 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 		redisClient = redis.NewClient(&cfg.Redis)
 	}
 	gameStatsHandler := handlers.NewGameStatsHandler(redisClient)
+	channelGroupService := services.NewChannelGroupService(db)
+	channelGroupHandler := handlers.NewChannelGroupHandler(channelGroupService)
 
 	// 兜底规则（fallbackRuleService 由 main 传入）
 	var fallbackRuleHandler *handlers.FallbackRuleHandler
@@ -333,11 +335,17 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			focusProbeLinks.POST("/from-r2-file", focusProbeLinkHandler.AddFromR2File)
 		}
 
-		// 游戏统计（Redis 渠道名称、站点日数据等）
+		// 游戏统计（Redis 渠道名称、站点日数据、渠道分组等）
 		gameStats := protected.Group("/game-stats")
 		{
 			gameStats.GET("/full-channel-names", gameStatsHandler.ListFullChannelNames)
 			gameStats.GET("/site-daily", gameStatsHandler.ListSiteDailyData)
+			// 渠道分组（用于站点日数据分组统计，与域名/下载包 Group 区分）
+			gameStats.GET("/channel-groups", channelGroupHandler.ListChannelGroups)
+			gameStats.GET("/channel-groups/:id", channelGroupHandler.GetChannelGroup)
+			gameStats.POST("/channel-groups", channelGroupHandler.CreateChannelGroup)
+			gameStats.PUT("/channel-groups/:id", channelGroupHandler.UpdateChannelGroup)
+			gameStats.DELETE("/channel-groups/:id", channelGroupHandler.DeleteChannelGroup)
 		}
 
 		// 兜底规则管理
