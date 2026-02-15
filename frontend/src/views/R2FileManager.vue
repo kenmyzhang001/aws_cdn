@@ -97,6 +97,8 @@
           <el-upload
             ref="uploadRef"
             :auto-upload="false"
+            :limit="5"
+            :on-exceed="handleExceed"
             :on-change="handleFileChange"
             :on-remove="handleFileRemove"
             :multiple="true"
@@ -108,7 +110,7 @@
             </div>
             <template #tip>
               <div class="el-upload__tip">
-                支持多文件上传，可同时选择多个文件
+                单次最多上传 5 个文件
               </div>
             </template>
           </el-upload>
@@ -311,9 +313,16 @@ const getFileName = (key) => {
   return key
 }
 
+const MAX_UPLOAD_FILES = 5
+
+const handleExceed = () => {
+  ElMessage.warning(`单次最多上传 ${MAX_UPLOAD_FILES} 个文件，请移除部分文件后再添加`)
+}
+
 const handleFileChange = (file, fileList) => {
-  // 更新上传文件列表
-  uploadFiles.value = fileList.map((f) => ({
+  // 限制最多 5 个文件（取前 5 个）
+  const list = fileList.slice(0, MAX_UPLOAD_FILES)
+  uploadFiles.value = list.map((f) => ({
     name: f.name,
     raw: f.raw,
     status: 'waiting', // waiting, uploading, success, error
@@ -321,6 +330,11 @@ const handleFileChange = (file, fileList) => {
     error: null,
     cancelToken: null,
   }))
+  // 若超出限制，同步 el-upload 内部列表只保留 5 个
+  if (fileList.length > MAX_UPLOAD_FILES && uploadRef.value) {
+    uploadRef.value.clearFiles()
+    list.forEach((f) => uploadRef.value.handleStart?.(f.raw))
+  }
 }
 
 const handleFileRemove = (file, fileList) => {
