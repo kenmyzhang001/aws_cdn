@@ -125,11 +125,13 @@
                 <el-select
                   v-model="g.channelCodes"
                   multiple
+                  filterable
                   collapse-tags
                   collapse-tags-tooltip
-                  placeholder="选择渠道"
+                  placeholder="搜索并选择渠道（可多选）"
+                  filter-placeholder="输入渠道名或编码搜索"
                   size="small"
-                  style="width: 280px"
+                  style="width: 320px"
                   :title="`已选 ${g.channelCodes.length} 个渠道`"
                   @change="saveGroup(g)"
                 >
