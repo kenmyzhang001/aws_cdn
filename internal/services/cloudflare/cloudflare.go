@@ -1699,6 +1699,7 @@ func (s *CloudflareService) CreateWAFSecurityRule(zoneID, domain string, fileExt
 	if len(fileExtensions) == 0 {
 		fileExtensions = []string{"apk"}
 	}
+	domain = extractRootDomain(domain)
 
 	// 构建文件扩展名匹配表达式
 	var extensionExpr string
@@ -1804,7 +1805,7 @@ func (s *CloudflareService) CreateWAFSecurityRule(zoneID, domain string, fileExt
 // domain: 要保护的域名（例如：dl1.example.com）
 func (s *CloudflareService) CreateWAFVIPDownloadRule(zoneID, domain string) (string, error) {
 	log := logger.GetLogger()
-
+	domain = extractRootDomain(domain)
 	// 构建匹配表达式：.apk 或 .obb 或 /download/ 路径
 	// 这是最宽松的规则，只要是下载相关的，统统放行！
 	// 覆盖主域名和所有子域名

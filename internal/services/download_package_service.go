@@ -531,6 +531,49 @@ func (s *DownloadPackageService) processDownloadPackageAsync(pkg *models.Downloa
 	// 5. 构建下载URL
 	downloadURL := fmt.Sprintf("https://%s/%s", pkg.DomainName, pkg.FileName)
 
+	// 5.5 若域名为 Cloudflare DNS，创建 WAF VIP 下载规则与安全规则（与 cf_account 创建规则一致）
+	if domain.DNSProvider == models.DNSProviderCloudflare && domain.HostedZoneID != "" {
+		cfSvc, cfErr := s.domainService.GetCloudflareServiceForDomain(domain)
+		if cfErr != nil {
+			log.WithError(cfErr).WithFields(map[string]interface{}{
+				"package_id":  pkg.ID,
+				"domain_name": pkg.DomainName,
+			}).Warn("获取 Cloudflare 服务失败，跳过 WAF 规则创建")
+		} else if cfSvc != nil {
+			zoneID := domain.HostedZoneID
+			vipRuleID, vipErr := cfSvc.CreateWAFVIPDownloadRule(zoneID, pkg.DomainName)
+			if vipErr != nil {
+				log.WithError(vipErr).WithFields(map[string]interface{}{
+					"package_id": pkg.ID,
+					"domain":     pkg.DomainName,
+					"zone_id":    zoneID,
+				}).Warn("创建 WAF VIP 下载规则失败")
+			} else if vipRuleID != "" {
+				log.WithFields(map[string]interface{}{
+					"package_id": pkg.ID,
+					"domain":     pkg.DomainName,
+					"zone_id":    zoneID,
+					"rule_id":    vipRuleID,
+				}).Info("WAF VIP 下载规则创建成功")
+			}
+			wafRuleID, wafErr := cfSvc.CreateWAFSecurityRule(zoneID, pkg.DomainName, []string{"apk"})
+			if wafErr != nil {
+				log.WithError(wafErr).WithFields(map[string]interface{}{
+					"package_id": pkg.ID,
+					"domain":     pkg.DomainName,
+					"zone_id":    zoneID,
+				}).Warn("创建 WAF 安全规则失败")
+			} else if wafRuleID != "" {
+				log.WithFields(map[string]interface{}{
+					"package_id": pkg.ID,
+					"domain":     pkg.DomainName,
+					"zone_id":    zoneID,
+					"rule_id":    wafRuleID,
+				}).Info("WAF 安全规则创建成功")
+			}
+		}
+	}
+
 	// 确保 CloudFront 分发已启用
 	log.WithFields(map[string]interface{}{
 		"package_id":    pkg.ID,
@@ -671,7 +714,7 @@ func (s *DownloadPackageService) ListDownloadPackages(page, pageSize int, groupI
 		searchPattern := "%" + *search + "%"
 		query = query.Where("download_packages.domain_name LIKE ?", searchPattern)
 	}
-	
+
 	// CF账号筛选：需要通过域名表关联
 	if cfAccountID != nil {
 		query = query.Joins("LEFT JOIN domains ON download_packages.domain_id = domains.id").

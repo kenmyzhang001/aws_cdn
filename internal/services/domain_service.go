@@ -76,6 +76,14 @@ func (s *DomainService) createCloudflareService(cfAccountID *uint) (*cloudflare.
 	return cloudflareSvc, nil
 }
 
+// GetCloudflareServiceForDomain 获取域名对应的 Cloudflare 客户端（仅当 DNS 为 Cloudflare 时返回）
+func (s *DomainService) GetCloudflareServiceForDomain(domain *models.Domain) (*cloudflare.CloudflareService, error) {
+	if domain == nil || domain.DNSProvider != models.DNSProviderCloudflare {
+		return nil, nil
+	}
+	return s.createCloudflareService(domain.CFAccountID)
+}
+
 // TransferDomain 转入域名到 AWS 或 Cloudflare
 func (s *DomainService) TransferDomain(domainName, registrar string, dnsProvider models.DNSProvider, cfAccountID *uint, groupID *uint) (*models.Domain, error) {
 	log := logger.GetLogger()
