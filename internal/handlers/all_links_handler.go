@@ -147,6 +147,15 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 				Domain:      rule.SourceDomain,
 				CreatedAt:   rule.CreatedAt.Format("2006-01-02 15:04:05"),
 			}
+			log.WithFields(map[string]interface{}{
+				"url":         item.URL,
+				"name":        item.Name,
+				"description": item.Description,
+				"type":        item.Type,
+				"status":      item.Status,
+				"domain":      item.Domain,
+				"created_at":  item.CreatedAt,
+			}).Info("重定向规则")
 			response.Links = append(response.Links, item)
 		}
 	}
