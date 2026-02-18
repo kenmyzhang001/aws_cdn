@@ -66,11 +66,21 @@
             <el-tag>{{ row.type || 'full' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="名称服务器" show-overflow-tooltip>
+        <el-table-column label="名称服务器" width="280">
           <template #default="{ row }">
-            <span v-if="row.name_servers && row.name_servers.length">
-              {{ row.name_servers.join(', ') }}
-            </span>
+            <div v-if="row.name_servers && row.name_servers.length" class="name-servers-cell">
+              <div class="name-servers-lines">{{ row.name_servers.join('\n') }}</div>
+              <el-button
+                type="primary"
+                link
+                size="small"
+                @click="copyNameServers(row.name_servers)"
+                title="一键复制"
+              >
+                <el-icon><CopyDocument /></el-icon>
+                复制
+              </el-button>
+            </div>
             <span v-else style="color: #909399">-</span>
           </template>
         </el-table-column>
@@ -252,7 +262,7 @@
 <script>
 import { ref, onMounted, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Setting, Plus } from '@element-plus/icons-vue'
+import { Search, Setting, Plus, CopyDocument } from '@element-plus/icons-vue'
 import { cfAccountApi } from '@/api/cf_account'
 import { getCFAccountZones, setZoneAPKSecurityRule, addZones } from '@/api/cf_zone'
 
