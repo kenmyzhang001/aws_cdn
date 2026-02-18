@@ -18,6 +18,7 @@ type AllLinksHandler struct {
 	r2FileService             *services.R2FileService
 	focusProbeLinkService     *services.FocusProbeLinkService
 	speedProbeService         *services.SpeedProbeService
+	redirectService           *services.RedirectService
 }
 
 func NewAllLinksHandler(
@@ -27,6 +28,7 @@ func NewAllLinksHandler(
 	r2FileService *services.R2FileService,
 	focusProbeLinkService *services.FocusProbeLinkService,
 	speedProbeService *services.SpeedProbeService,
+	redirectService *services.RedirectService,
 ) *AllLinksHandler {
 	return &AllLinksHandler{
 		downloadPackageService:    downloadPackageService,
@@ -35,6 +37,7 @@ func NewAllLinksHandler(
 		r2FileService:             r2FileService,
 		focusProbeLinkService:     focusProbeLinkService,
 		speedProbeService:         speedProbeService,
+		redirectService:           redirectService,
 	}
 }
 
@@ -44,7 +47,7 @@ type LinkItem struct {
 	URL         string `json:"url"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Type        string `json:"type"` // download_package, custom_download_link, r2_apk_file
+	Type        string `json:"type"` // download_package, custom_download_link, r2_apk_file, redirect_rule
 	Status      string `json:"status,omitempty"`
 	FilePath    string `json:"file_path,omitempty"` // R2文件路径
 	Domain      string `json:"domain,omitempty"`    // R2域名
@@ -127,7 +130,28 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 		}
 	}
 
-	// 3. 获取所有 R2 APK 文件
+	// 3. 获取所有重定向规则的 source_domain
+	redirectRules, _, err := h.redirectService.ListRedirectRules(1, 10000, nil, nil)
+	if err != nil {
+		log.WithError(err).Error("获取重定向规则列表失败")
+	} else {
+		for _, rule := range redirectRules {
+			// 用 https://source_domain 作为 URL，便于去重和探测
+			item := LinkItem{
+				ID:          rule.ID,
+				URL:         "https://" + rule.SourceDomain,
+				Name:        rule.SourceDomain,
+				Description: rule.Note,
+				Type:        "redirect_rule",
+				Status:      string(rule.Status),
+				Domain:      rule.SourceDomain,
+				CreatedAt:   rule.CreatedAt.Format("2006-01-02 15:04:05"),
+			}
+			response.Links = append(response.Links, item)
+		}
+	}
+
+	// 4. 获取所有 R2 APK 文件
 	r2APKFiles, err := h.r2FileService.ListAllAPKFileRecords()
 	if err != nil {
 		log.WithError(err).Error("获取R2 APK文件列表失败")

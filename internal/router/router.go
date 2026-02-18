@@ -105,7 +105,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	cfAccountHandler := handlers.NewCFAccountHandler(cfAccountService)
 	r2Handler := handlers.NewR2Handler(r2BucketService, r2CustomDomainService, r2CacheRuleService, r2FileService)
 	customDownloadLinkHandler := handlers.NewCustomDownloadLinkHandler(customDownloadLinkService)
-	allLinksHandler := handlers.NewAllLinksHandler(downloadPackageService, customDownloadLinkService, r2CustomDomainService, r2FileService, focusProbeLinkService, speedProbeService)
+	allLinksHandler := handlers.NewAllLinksHandler(downloadPackageService, customDownloadLinkService, r2CustomDomainService, r2FileService, focusProbeLinkService, speedProbeService, redirectService)
 	speedProbeHandler := handlers.NewSpeedProbeHandler(speedProbeService)
 	cfWorkerHandler := handlers.NewCFWorkerHandler(cfWorkerService)
 	domainRedirectHandler := handlers.NewDomainRedirectHandler(domainRedirectService)
