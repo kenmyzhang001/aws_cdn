@@ -4,6 +4,10 @@
       <template #header>
         <div class="card-header">
           <span>Cloudflare 域名管理</span>
+          <el-button type="primary" @click="openAddDialog">
+            <el-icon><Plus /></el-icon>
+            添加域名
+          </el-button>
         </div>
       </template>
 
@@ -104,6 +108,98 @@
       </div>
     </el-card>
 
+    <!-- 添加域名对话框 -->
+    <el-dialog
+      v-model="showAddDialog"
+      title="批量添加域名"
+      width="560px"
+      :close-on-click-modal="false"
+      @closed="onAddDialogClosed"
+    >
+      <el-form label-width="100px">
+        <el-form-item label="CF 账号" required>
+          <el-select
+            v-model="addForm.cfAccountId"
+            placeholder="请选择 CF 账号"
+            style="width: 100%"
+            filterable
+          >
+            <el-option
+              v-for="account in cfAccountList"
+              :key="account.id"
+              :label="`${account.email} (${account.note || account.account_id})`"
+              :value="account.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="域名列表" required>
+          <el-input
+            v-model="addForm.domainsText"
+            type="textarea"
+            :rows="8"
+            placeholder="每行一个域名，如：&#10;example.com&#10;foo.com&#10;bar.com"
+          />
+          <div class="form-tip">每行输入一个根域名，将自动去重、去空</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showAddDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleAddZones" :loading="addSubmitting">
+          确定添加
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 添加域名结果对话框 -->
+    <el-dialog
+      v-model="showAddResultDialog"
+      title="添加域名结果"
+      width="700px"
+    >
+      <div v-if="addResult">
+        <el-alert
+          :type="addResult.stats.failed_count === 0 ? 'success' : (addResult.stats.success_count > 0 ? 'warning' : 'error')"
+          :title="addResult.message"
+          :closable="false"
+          style="margin-bottom: 16px"
+        />
+        <el-descriptions border :column="1" style="margin-bottom: 16px">
+          <el-descriptions-item label="成功">
+            <el-tag type="success">{{ addResult.stats.success_count }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="失败">
+            <el-tag :type="addResult.stats.failed_count > 0 ? 'danger' : 'info'">
+              {{ addResult.stats.failed_count }}
+            </el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+        <el-table :data="addResult.results" border stripe max-height="400">
+          <el-table-column prop="domain" label="域名" width="180" />
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'success' ? 'success' : 'danger'">
+                {{ row.status === 'success' ? '成功' : '失败' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="名称服务器 (Name Servers)" min-width="260">
+            <template #default="{ row }">
+              <template v-if="row.status === 'success' && row.name_servers && row.name_servers.length">
+                <div class="nameserver-list">
+                  <span v-for="ns in row.name_servers" :key="ns" class="nameserver-item">{{ ns }}</span>
+                </div>
+              </template>
+              <span v-else-if="row.message" class="error-msg">{{ row.message }}</span>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="showAddResultDialog = false">确定</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 规则设置结果对话框 -->
     <el-dialog
       v-model="showResultDialog"
@@ -156,15 +252,16 @@
 <script>
 import { ref, onMounted, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Setting } from '@element-plus/icons-vue'
+import { Search, Setting, Plus } from '@element-plus/icons-vue'
 import { cfAccountApi } from '@/api/cf_account'
-import { getCFAccountZones, setZoneAPKSecurityRule } from '@/api/cf_zone'
+import { getCFAccountZones, setZoneAPKSecurityRule, addZones } from '@/api/cf_zone'
 
 export default {
   name: 'CfZoneList',
   components: {
     Search,
-    Setting
+    Setting,
+    Plus
   },
   setup() {
     const loading = ref(false)
@@ -180,6 +277,15 @@ export default {
 
     const showResultDialog = ref(false)
     const ruleSetResult = ref(null)
+
+    const showAddDialog = ref(false)
+    const addForm = reactive({
+      cfAccountId: null,
+      domainsText: ''
+    })
+    const addSubmitting = ref(false)
+    const showAddResultDialog = ref(false)
+    const addResult = ref(null)
 
     // 获取 CF 账号列表
     const fetchCFAccounts = async () => {
@@ -299,6 +405,48 @@ export default {
       }
     }
 
+    // 批量添加域名
+    const handleAddZones = async () => {
+      if (!addForm.cfAccountId) {
+        ElMessage.warning('请选择 CF 账号')
+        return
+      }
+      const lines = (addForm.domainsText || '').split(/\n/).map(s => s.trim()).filter(Boolean)
+      const domains = [...new Set(lines)]
+      if (domains.length === 0) {
+        ElMessage.warning('请至少输入一个域名')
+        return
+      }
+
+      addSubmitting.value = true
+      try {
+        const res = await addZones(addForm.cfAccountId, domains)
+        addResult.value = res
+        showAddResultDialog.value = true
+        showAddDialog.value = false
+        ElMessage.success('添加请求已处理')
+        if (selectedCFAccountId.value === addForm.cfAccountId) {
+          fetchZones()
+        }
+      } catch (error) {
+        console.error('添加域名失败:', error)
+        ElMessage.error(error.response?.data?.error || '添加域名失败')
+      } finally {
+        addSubmitting.value = false
+      }
+    }
+
+    const openAddDialog = () => {
+      addForm.cfAccountId = selectedCFAccountId.value || (cfAccountList.value[0]?.id ?? null)
+      addForm.domainsText = ''
+      showAddDialog.value = true
+    }
+
+    const onAddDialogClosed = () => {
+      addForm.cfAccountId = null
+      addForm.domainsText = ''
+    }
+
     // 格式化日期
     const formatDate = (dateStr) => {
       if (!dateStr) return '-'
@@ -329,12 +477,20 @@ export default {
       totalPages,
       showResultDialog,
       ruleSetResult,
+      showAddDialog,
+      addForm,
+      addSubmitting,
+      showAddResultDialog,
+      addResult,
       fetchCFAccounts,
       fetchZones,
       handleAccountChange,
       handlePageChange,
       handleSizeChange,
       handleSetAPKRule,
+      openAddDialog,
+      handleAddZones,
+      onAddDialogClosed,
       formatDate
     }
   }
@@ -360,5 +516,32 @@ export default {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 6px;
+}
+
+.nameserver-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.nameserver-item {
+  font-family: monospace;
+  font-size: 12px;
+  color: #409eff;
+}
+
+.error-msg {
+  font-size: 12px;
+  color: #f56c6c;
+}
+
+.muted {
+  color: #909399;
 }
 </style>

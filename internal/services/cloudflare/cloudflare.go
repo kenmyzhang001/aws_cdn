@@ -310,6 +310,104 @@ func (s *CloudflareService) ListZones(page, perPage int, name, accountID string)
 	}, nil
 }
 
+// CreateZoneResult 创建 Zone 的返回结果（包含 name_servers）
+type CreateZoneResult struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Status      string   `json:"status"`
+	Type        string   `json:"type"`
+	NameServers []string `json:"name_servers"`
+}
+
+// CreateZone 在指定 CF 账号下添加一个域名（Zone）
+// accountID: Cloudflare 账户 ID（非本系统 cf_account.id）
+// domainName: 要添加的根域名，如 example.com
+func (s *CloudflareService) CreateZone(accountID, domainName string) (*CreateZoneResult, error) {
+	log := logger.GetLogger()
+
+	domainName = strings.TrimSpace(strings.TrimSuffix(strings.ToLower(domainName), "."))
+	if domainName == "" {
+		return nil, fmt.Errorf("域名为空")
+	}
+
+	payload := map[string]interface{}{
+		"name":        domainName,
+		"account":     map[string]string{"id": accountID},
+		"type":        "full",
+		"jump_start":  true,
+	}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	url := "https://api.cloudflare.com/client/v4/zones"
+	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"account_id": accountID,
+		"domain":     domainName,
+	}).Info("请求 Cloudflare 创建 Zone")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Result  struct {
+			ID          string   `json:"id"`
+			Name        string   `json:"name"`
+			Status      string   `json:"status"`
+			Type        string   `json:"type"`
+			NameServers []string `json:"name_servers"`
+		} `json:"result"`
+		Errors []struct {
+			Message string `json:"message"`
+			Code    int    `json:"code"`
+		} `json:"errors"`
+	}
+
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		if len(result.Errors) > 0 {
+			return nil, fmt.Errorf("Cloudflare API错误: %s", result.Errors[0].Message)
+		}
+		return nil, fmt.Errorf("创建 Zone 失败 (状态码: %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	log.WithFields(map[string]interface{}{
+		"zone_id":      result.Result.ID,
+		"domain":       result.Result.Name,
+		"name_servers": result.Result.NameServers,
+	}).Info("Cloudflare Zone 创建成功")
+
+	return &CreateZoneResult{
+		ID:          result.Result.ID,
+		Name:        result.Result.Name,
+		Status:      result.Result.Status,
+		Type:        result.Result.Type,
+		NameServers: result.Result.NameServers,
+	}, nil
+}
+
 // CreateCNAMERecord 创建CNAME记录
 // proxied: 是否启用Cloudflare代理（橙色云朵），默认为 false（灰色云朵，仅DNS）
 func (s *CloudflareService) CreateCNAMERecord(zoneID, name, value string, proxied ...bool) error {

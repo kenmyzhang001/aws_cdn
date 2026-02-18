@@ -42,3 +42,17 @@ export function setZoneAPKSecurityRule(cfAccountId, zoneId, domainName) {
     }
   });
 }
+
+/**
+ * 批量添加域名到指定 CF 账号
+ * @param {number} cfAccountId - CF账号ID
+ * @param {string[]} domains - 域名列表，如 ['example.com', 'foo.com']
+ * @returns {Promise<{ message, results, stats }>}
+ */
+export function addZones(cfAccountId, domains) {
+  return request({
+    url: `/cf-accounts/${cfAccountId}/zones`,
+    method: 'post',
+    data: { domains }
+  });
+}

@@ -165,6 +165,112 @@ func (h *CFAccountHandler) DeleteCFAccount(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Cloudflare账号删除成功"})
 }
 
+// AddZones 批量添加域名到指定 CF 账号
+func (h *CFAccountHandler) AddZones(c *gin.Context) {
+	log := logger.GetLogger()
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		log.WithError(err).WithField("id_param", c.Param("id")).Error("添加域名失败：无效的账号ID")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的账号 ID"})
+		return
+	}
+
+	var req struct {
+		Domains []string `json:"domains" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.WithError(err).WithField("account_id", id).Error("添加域名失败：请求参数验证失败")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供 domains 数组，如 [\"example.com\"]"})
+		return
+	}
+
+	// 去重、去空
+	seen := make(map[string]bool)
+	var domains []string
+	for _, d := range req.Domains {
+		d = strings.TrimSpace(strings.TrimSuffix(strings.ToLower(d), "."))
+		if d != "" && !seen[d] {
+			seen[d] = true
+			domains = append(domains, d)
+		}
+	}
+	if len(domains) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请至少提供一个有效域名"})
+		return
+	}
+
+	account, err := h.service.GetCFAccount(uint(id))
+	if err != nil {
+		log.WithError(err).WithField("account_id", id).Error("获取CF账号失败")
+		c.JSON(http.StatusNotFound, gin.H{"error": "CF 账号不存在"})
+		return
+	}
+
+	cfg := &config.CloudflareConfig{APIToken: account.APIToken}
+	cfService, err := cloudflare.NewCloudflareService(cfg)
+	if err != nil {
+		log.WithError(err).Error("创建 Cloudflare 服务失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建 Cloudflare 服务失败"})
+		return
+	}
+
+	cfAccountID := account.AccountID
+	if cfAccountID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "该 CF 账号未配置 account_id，无法添加域名"})
+		return
+	}
+
+	type zoneResult struct {
+		Domain      string   `json:"domain"`
+		Status      string   `json:"status"`
+		ZoneID      string   `json:"zone_id,omitempty"`
+		NameServers []string `json:"name_servers,omitempty"`
+		Message     string   `json:"message,omitempty"`
+	}
+
+	var results []zoneResult
+	var successCount, failedCount int
+
+	for _, domain := range domains {
+		created, err := cfService.CreateZone(cfAccountID, domain)
+		if err != nil {
+			log.WithError(err).WithField("domain", domain).Warn("添加域名失败")
+			results = append(results, zoneResult{
+				Domain:  domain,
+				Status:  "failed",
+				Message: err.Error(),
+			})
+			failedCount++
+			continue
+		}
+		results = append(results, zoneResult{
+			Domain:      domain,
+			Status:      "success",
+			ZoneID:      created.ID,
+			NameServers: created.NameServers,
+		})
+		successCount++
+	}
+
+	message := "批量添加完成"
+	if failedCount > 0 && successCount == 0 {
+		message = "全部添加失败"
+	} else if failedCount > 0 {
+		message = "部分添加成功"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": message,
+		"results": results,
+		"stats": gin.H{
+			"success_count": successCount,
+			"failed_count":  failedCount,
+			"total":         len(domains),
+		},
+	})
+}
+
 // GetCFAccountZones 获取 CF 账号下的所有域名（Zones）
 func (h *CFAccountHandler) GetCFAccountZones(c *gin.Context) {
 	log := logger.GetLogger()

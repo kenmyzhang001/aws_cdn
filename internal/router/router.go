@@ -224,6 +224,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			cfAccounts.PUT("/:id", cfAccountHandler.UpdateCFAccount)
 			cfAccounts.DELETE("/:id", cfAccountHandler.DeleteCFAccount)
 			cfAccounts.GET("/:id/zones", cfAccountHandler.GetCFAccountZones)
+			cfAccounts.POST("/:id/zones", cfAccountHandler.AddZones)
 			cfAccounts.POST("/:id/zones/apk-security", cfAccountHandler.SetZoneAPKSecurityRule)
 			cfAccounts.POST("/:id/enable-r2", r2Handler.EnableR2)
 		}
