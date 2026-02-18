@@ -198,6 +198,8 @@ const total = ref(0)
 // 分组统计（与后端渠道分组接口同步）
 const groups = ref([])
 const groupsLoading = ref(false)
+// 全量渠道列表（来自 full-channel-names 接口，用于分组下拉选项，即未查站点日数据时也有可选渠道）
+const fullChannelNames = ref([])
 
 /** 将接口返回的渠道分组转为前端使用的结构 */
 function mapChannelGroupFromApi(g) {
@@ -224,15 +226,37 @@ async function loadChannelGroups() {
   }
 }
 
-/** 从当前列表中收集所有不重复的渠道（用于分组选择） */
+/** 从接口加载全量渠道名称（用于分组下拉，请求 api/v1/game-stats/full-channel-names） */
+async function loadFullChannelNames() {
+  try {
+    const res = await gameStatsApi.getFullChannelNames()
+    const data = res.data ?? res
+    const arr = Array.isArray(data) ? data : []
+    fullChannelNames.value = arr
+  } catch (e) {
+    console.warn('加载全量渠道列表失败', e?.response?.data?.error || e?.message)
+    fullChannelNames.value = []
+  }
+}
+
+/** 从当前列表 + 全量渠道接口合并得到下拉选项（优先用站点日数据中的渠道名，否则用 full-channel-names 的编码） */
 const availableChannels = computed(() => {
   const map = new Map()
+  // 1）先从站点日数据中收集渠道（有名称）
   for (const site of list.value) {
     if (!site.stats || !Array.isArray(site.stats)) continue
     for (const s of site.stats) {
       if (s.channelCode && !map.has(s.channelCode)) {
         map.set(s.channelCode, { channelCode: s.channelCode, channelName: s.channelName || s.channelCode })
       }
+    }
+  }
+  // 2）再补全 full-channel-names 接口返回的渠道（未查站点日数据或无数据时下拉也有选项）
+  const full = fullChannelNames.value || []
+  for (const codeOrName of full) {
+    const key = typeof codeOrName === 'string' ? codeOrName : String(codeOrName)
+    if (key && !map.has(key)) {
+      map.set(key, { channelCode: key, channelName: key })
     }
   }
   return Array.from(map.values()).sort((a, b) => (a.channelName || '').localeCompare(b.channelName || ''))
@@ -384,6 +408,7 @@ function onTimezoneChange() {
 onMounted(() => {
   loadList()
   loadChannelGroups()
+  loadFullChannelNames()
 })
 
 const loadList = async () => {
