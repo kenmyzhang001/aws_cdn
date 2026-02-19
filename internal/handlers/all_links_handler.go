@@ -18,7 +18,7 @@ type AllLinksHandler struct {
 	r2FileService             *services.R2FileService
 	focusProbeLinkService     *services.FocusProbeLinkService
 	speedProbeService         *services.SpeedProbeService
-	redirectService           *services.RedirectService
+	domainRedirectService     *services.DomainRedirectService
 }
 
 func NewAllLinksHandler(
@@ -28,7 +28,7 @@ func NewAllLinksHandler(
 	r2FileService *services.R2FileService,
 	focusProbeLinkService *services.FocusProbeLinkService,
 	speedProbeService *services.SpeedProbeService,
-	redirectService *services.RedirectService,
+	domainRedirectService *services.DomainRedirectService,
 ) *AllLinksHandler {
 	return &AllLinksHandler{
 		downloadPackageService:    downloadPackageService,
@@ -37,7 +37,7 @@ func NewAllLinksHandler(
 		r2FileService:             r2FileService,
 		focusProbeLinkService:     focusProbeLinkService,
 		speedProbeService:         speedProbeService,
-		redirectService:           redirectService,
+		domainRedirectService:     domainRedirectService,
 	}
 }
 
@@ -130,22 +130,26 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 		}
 	}
 
-	// 3. 获取所有重定向规则的 source_domain
-	redirectRules, _, err := h.redirectService.ListRedirectRules(1, 10000, nil, nil)
+	// 3. 从 DomainRedirect 获取域名 302 重定向链接
+	domainRedirects, _, err := h.domainRedirectService.List(nil, "", 1, 20000)
 	if err != nil {
-		log.WithError(err).Error("获取重定向规则列表失败")
+		log.WithError(err).Error("获取域名重定向列表失败")
 	} else {
-		for _, rule := range redirectRules {
+		for _, dr := range domainRedirects {
 			// 用 https://source_domain 作为 URL，便于去重和探测
+			desc := "→ " + dr.TargetDomain
+			if dr.PreservePath {
+				desc += " (保留路径)"
+			}
 			item := LinkItem{
-				ID:          rule.ID,
-				URL:         "https://" + rule.SourceDomain,
-				Name:        rule.SourceDomain,
-				Description: rule.Note,
+				ID:          dr.ID,
+				URL:         "https://" + dr.SourceDomain,
+				Name:        dr.SourceDomain,
+				Description: desc,
 				Type:        "redirect_rule",
-				Status:      string(rule.Status),
-				Domain:      rule.SourceDomain,
-				CreatedAt:   rule.CreatedAt.Format("2006-01-02 15:04:05"),
+				Status:      dr.Status,
+				Domain:      dr.SourceDomain,
+				CreatedAt:   dr.CreatedAt.Format("2006-01-02 15:04:05"),
 			}
 			log.WithFields(map[string]interface{}{
 				"url":         item.URL,
@@ -155,7 +159,7 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 				"status":      item.Status,
 				"domain":      item.Domain,
 				"created_at":  item.CreatedAt,
-			}).Info("重定向规则")
+			}).Info("域名302重定向")
 			response.Links = append(response.Links, item)
 		}
 	}

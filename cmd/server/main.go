@@ -107,7 +107,7 @@ func main() {
 	// 清理旧探测结果任务（根据配置决定是否启用）
 	if cfg.ScheduledTask.EnableCleanOldResults {
 		go speedProbeService.CleanOldResults(services.TimeWindowMinutes)
-		// 添加清理旧探测结果任务（每天执行一次，保留30天数据）
+			// 添加清理旧探测结果任务（每天执行一次，保留30天数据）
 		schedulerService.AddTask("清理旧探测结果", func() error {
 			return speedProbeService.CleanOldResults(services.TimeWindowMinutes)
 		}, 24*time.Hour)

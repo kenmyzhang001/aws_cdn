@@ -271,7 +271,8 @@ export default {
   components: {
     Search,
     Setting,
-    Plus
+    Plus,
+    CopyDocument
   },
   setup() {
     const loading = ref(false)
@@ -354,6 +355,31 @@ export default {
       } else {
         zoneList.value = []
         totalCount.value = 0
+      }
+    }
+
+    // 一键复制名称服务器（换行分隔）
+    const copyNameServers = (nameServers) => {
+      if (!nameServers || !nameServers.length) return
+      const text = nameServers.join('\n')
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          ElMessage.success('名称服务器已复制到剪贴板')
+        }).catch(() => {
+          ElMessage.error('复制失败')
+        })
+      } else {
+        try {
+          const ta = document.createElement('textarea')
+          ta.value = text
+          document.body.appendChild(ta)
+          ta.select()
+          document.execCommand('copy')
+          document.body.removeChild(ta)
+          ElMessage.success('名称服务器已复制到剪贴板')
+        } catch {
+          ElMessage.error('复制失败')
+        }
       }
     }
 
@@ -495,6 +521,7 @@ export default {
       fetchCFAccounts,
       fetchZones,
       handleAccountChange,
+      copyNameServers,
       handlePageChange,
       handleSizeChange,
       handleSetAPKRule,
@@ -510,6 +537,17 @@ export default {
 <style scoped>
 .cf-zone-list {
   padding: 20px;
+}
+
+.name-servers-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.name-servers-lines {
+  white-space: pre-line;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .card-header {
