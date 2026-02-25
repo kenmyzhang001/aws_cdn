@@ -18,6 +18,7 @@ import SpeedAlertLogList from '@/views/SpeedAlertLogList.vue'
 import GameChannelList from '@/views/GameChannelList.vue'
 import SiteDailyDataList from '@/views/SiteDailyDataList.vue'
 import FallbackRuleList from '@/views/FallbackRuleList.vue'
+import Ec2InstanceList from '@/views/Ec2InstanceList.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -49,6 +50,11 @@ const routes = [
     path: '/download-packages',
     name: 'DownloadPackageList',
     component: DownloadPackageList,
+  },
+  {
+    path: '/ec2-instances',
+    name: 'Ec2InstanceList',
+    component: Ec2InstanceList,
   },
   {
     path: '/audit-logs',

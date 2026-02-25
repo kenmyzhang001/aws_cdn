@@ -88,6 +88,9 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	// 初始化 Worker 服务
 	cfWorkerService := services.NewCFWorkerService(db)
 
+	// 初始化 EC2 实例服务
+	ec2InstanceService := services.NewEc2InstanceService(db, &cfg.AWS)
+
 	// 初始化域名 302 重定向服务
 	domainRedirectService := services.NewDomainRedirectService(db, cfAccountService)
 
@@ -108,6 +111,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	allLinksHandler := handlers.NewAllLinksHandler(downloadPackageService, customDownloadLinkService, r2CustomDomainService, r2FileService, focusProbeLinkService, speedProbeService, domainRedirectService)
 	speedProbeHandler := handlers.NewSpeedProbeHandler(speedProbeService)
 	cfWorkerHandler := handlers.NewCFWorkerHandler(cfWorkerService)
+	ec2InstanceHandler := handlers.NewEc2InstanceHandler(ec2InstanceService)
 	domainRedirectHandler := handlers.NewDomainRedirectHandler(domainRedirectService)
 	focusProbeLinkHandler := handlers.NewFocusProbeLinkHandler(focusProbeLinkService)
 
@@ -303,6 +307,18 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			cfWorkers.POST("", cfWorkerHandler.CreateWorker)
 			cfWorkers.PUT("/:id", cfWorkerHandler.UpdateWorker)
 			cfWorkers.DELETE("/:id", cfWorkerHandler.DeleteWorker)
+		}
+
+		// EC2 实例管理
+		ec2Instances := protected.Group("/ec2-instances")
+		{
+			ec2Instances.GET("/region-config", ec2InstanceHandler.GetRegionConfig)
+			ec2Instances.GET("/deleted", ec2InstanceHandler.ListDeleted)
+			ec2Instances.GET("", ec2InstanceHandler.List)
+			ec2Instances.GET("/:id", ec2InstanceHandler.Get)
+			ec2Instances.POST("", ec2InstanceHandler.Create)
+			ec2Instances.PUT("/:id", ec2InstanceHandler.Update)
+			ec2Instances.DELETE("/:id", ec2InstanceHandler.Delete)
 		}
 
 		// 域名 302 重定向管理（CF Redirect Rules）

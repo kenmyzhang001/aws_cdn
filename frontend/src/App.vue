@@ -43,6 +43,10 @@
               <el-icon><Download /></el-icon>
               <span>下载包管理</span>
             </el-menu-item>
+            <el-menu-item index="/ec2-instances">
+              <el-icon><Monitor /></el-icon>
+              <span>实例管理</span>
+            </el-menu-item>
           </el-sub-menu>
 
           <!-- CF-CDN 一级菜单 -->
@@ -134,7 +138,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box, Setting, Grid, Star, DataLine, List, Warning } from '@element-plus/icons-vue'
+import { Link, RefreshRight, Connection, Download, Document, Folder, User, Box, Setting, Grid, Star, DataLine, List, Warning, Monitor } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const activeMenu = computed(() => route.path)
