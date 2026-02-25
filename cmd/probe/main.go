@@ -91,10 +91,9 @@ func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
 	}
 
 	if len(results) == 0 {
-		log.Printf("[TraceID: %s] 数据库无结果，切换到实时探测模式, urls: %v", traceID, urls)
-		probeResults := realTimeProbe(urls, traceID)
-		log.Printf("[TraceID: %s] probeURLs 结束（实时探测） - 结果数量: %d, 总耗时: %v, urls: %v", traceID, len(probeResults), time.Since(startTime), urls)
-		return probeResults
+		log.Printf("[TraceID: %s] 数据库无结果，跳过探活逻辑，认为全部正常返回, urls: %v", traceID, urls)
+		log.Printf("[TraceID: %s] probeURLs 结束 - 返回URLs数量: %d, 总耗时: %v, urls: %v", traceID, len(urls), time.Since(startTime), urls)
+		return urls
 	}
 
 	// 使用map去重，每个URL只保留speed最高的那条记录
@@ -128,7 +127,7 @@ func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
 	log.Printf("[TraceID: %s] %s内不可用URL数量: %d, 检查耗时: %v, 不可用URLs: %v",
 		traceID, CheckTime.String(), len(unavailableURLs), time.Since(unavailableCheckStart), unavailableURLs)
 
-	// 按原始urls顺序返回可用的URL
+	// 按原始urls顺序返回可用的URL（无数据库记录的URL视为正常，直接返回）
 	var availableURLs []string
 	for _, url := range urls {
 		// 如果在10分钟内有speed_kbps=0的记录，跳过
@@ -142,7 +141,9 @@ func probeURLs(db *gorm.DB, urls []string, traceID string) []string {
 				traceID, result.URL, result.SpeedKbps, result.CreatedAt.Format("2006-01-02 15:04:05"), urls)
 			availableURLs = append(availableURLs, result.URL)
 		} else {
-			log.Printf("[TraceID: %s] 未匹配到URL: %s, urls: %v", traceID, url, urls)
+			// 数据库无该URL的探测记录，跳过探活逻辑，视为正常
+			log.Printf("[TraceID: %s] URL无数据库记录，跳过探活视为正常: %s, urls: %v", traceID, url, urls)
+			availableURLs = append(availableURLs, url)
 		}
 	}
 
@@ -178,10 +179,9 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 	}
 
 	if len(results) == 0 {
-		log.Printf("[TraceID: %s] 数据库无结果（按类型），切换到实时探测模式, urls: %v", traceID, urls)
-		probeResults := realTimeProbe(urls, traceID)
-		log.Printf("[TraceID: %s] probeURLsByType 结束（实时探测） - 结果数量: %d, 总耗时: %v, urls: %v", traceID, len(probeResults), time.Since(startTime), urls)
-		return probeResults
+		log.Printf("[TraceID: %s] 数据库无结果（按类型），跳过探活逻辑，认为全部正常返回, urls: %v", traceID, urls)
+		log.Printf("[TraceID: %s] probeURLsByType 结束 - 返回URLs数量: %d, 总耗时: %v, urls: %v", traceID, len(urls), time.Since(startTime), urls)
+		return urls
 	}
 
 	// 使用map去重，每个URL只保留speed最高的那条记录
@@ -217,6 +217,7 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 
 	// 将结果转换为数组，过滤掉不可用的URL，按speed_kbps倒序排序
 	var sortedResults []SpeedProbeResult
+	urlsWithRecord := make(map[string]bool)
 	for _, result := range urlMap {
 		// 如果在%s内有speed_kbps=0的记录，跳过
 		if unavailableMap[result.URL] {
@@ -224,6 +225,7 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 			continue
 		}
 		sortedResults = append(sortedResults, result)
+		urlsWithRecord[result.URL] = true
 	}
 
 	sort.Slice(sortedResults, func(i, j int) bool {
@@ -232,12 +234,18 @@ func probeURLsByType(db *gorm.DB, urls []string, traceID string) []string {
 
 	log.Printf("[TraceID: %s] 按速度排序完成（过滤后）, 结果数量: %d, urls: %v", traceID, len(sortedResults), urls)
 
-	// 返回按速度排序的URL列表
+	// 返回按速度排序的URL列表，无数据库记录的URL视为正常追加在末尾
 	var availableURLs []string
 	for idx, result := range sortedResults {
 		log.Printf("[TraceID: %s] 排序结果 #%d: URL: %s, 速度: %.2f KB/s, 记录时间: %v, urls: %v",
 			traceID, idx+1, result.URL, result.SpeedKbps, result.CreatedAt.Format("2006-01-02 15:04:05"), urls)
 		availableURLs = append(availableURLs, result.URL)
+	}
+	for _, url := range urls {
+		if !urlsWithRecord[url] {
+			log.Printf("[TraceID: %s] URL无数据库记录（按类型），跳过探活视为正常: %s, urls: %v", traceID, url, urls)
+			availableURLs = append(availableURLs, url)
+		}
 	}
 
 	log.Printf("[TraceID: %s] probeURLsByType 结束 - 返回URLs数量: %d, 总耗时: %v, urls: %v", traceID, len(availableURLs), time.Since(startTime), urls)
