@@ -12,20 +12,14 @@ import (
 )
 
 var RegionToAMI = map[string]string{
-	"us-east-1":      "ami-0c55b159cbfafe1f0",
-	"us-west-2":      "ami-0e001c9271cf7f3b9",
-	"ap-northeast-1": "ami-0d52744d6551d851e",
-	"eu-west-1":      "ami-0ea3407d01d3bcb54",
+	"ap-east-1": "ami-0ee9ac79045aa1d6b",
 }
 
 var RegionToSecurityGroup = map[string]string{
-	"us-east-1":      "sg-00000000000000000",
-	"us-west-2":      "sg-00000000000000000",
-	"ap-northeast-1": "sg-00000000000000000",
-	"eu-west-1":      "sg-00000000000000000",
+	"ap-east-1": "sg-0b6fa9e47ec4886dd",
 }
 
-const DefaultInstanceType = "t3.micro"
+const DefaultInstanceType = "t3.nano"
 
 type RegionConfig struct {
 	Region          string `json:"region"`

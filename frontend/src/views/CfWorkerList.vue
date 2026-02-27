@@ -38,6 +38,18 @@
             @keyup.enter="loadWorkers"
           />
         </el-form-item>
+        <el-form-item label="业务模式">
+          <el-select
+            v-model="searchForm.business_mode"
+            clearable
+            placeholder="全部"
+            style="width: 120px"
+            @change="loadWorkers"
+          >
+            <el-option label="下载" value="下载" />
+            <el-option label="推广" value="推广" />
+          </el-select>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="loadWorkers">查询</el-button>
           <el-button @click="resetSearch">重置</el-button>
@@ -75,7 +87,14 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="模式" width="100">
+        <el-table-column label="业务模式" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="row.business_mode === '下载'" type="primary">下载</el-tag>
+            <el-tag v-else-if="row.business_mode === '推广'" type="success">推广</el-tag>
+            <el-tag v-else type="info">{{ row.business_mode || '推广' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="轮播模式" width="100">
           <template #default="{ row }">
             <el-tag v-if="!row.mode || row.mode === 'single'" type="info">单链接</el-tag>
             <el-tag v-else-if="row.mode === 'time'" type="warning">时间轮播</el-tag>
@@ -173,6 +192,13 @@
           </div>
         </el-form-item>
 
+        <el-form-item label="业务模式">
+          <el-radio-group v-model="workerForm.business_mode">
+            <el-radio label="推广">推广</el-radio>
+            <el-radio label="下载">下载</el-radio>
+          </el-radio-group>
+          <div class="form-tip">用于区分 Worker 用途：推广或下载</div>
+        </el-form-item>
         <el-form-item label="轮播模式">
           <el-radio-group v-model="workerForm.mode" @change="handleWorkerModeChange">
             <el-radio label="single">单链接(无兜底)</el-radio>
@@ -509,7 +535,8 @@ import { r2Api } from '@/api/r2';
 // 搜索表单
 const searchForm = reactive({
   cf_account_id: null,
-  domain: ''
+  domain: '',
+  business_mode: ''
 });
 
 // Worker 列表
@@ -583,6 +610,7 @@ const workerForm = reactive({
   worker_base_domain: '',
   target_domain: '',
   mode: 'single',
+  business_mode: '推广',  // 业务模式：下载、推广
   targets_text: '',      // 多目标时每行一个 URL
   fallback_url: '',
   rotate_days: 7,
@@ -1001,6 +1029,7 @@ const loadWorkers = async () => {
 const resetSearch = () => {
   searchForm.cf_account_id = null;
   searchForm.domain = '';
+  searchForm.business_mode = '';
   pagination.page = 1;
   loadWorkers();
 };
@@ -1032,6 +1061,7 @@ const showEditDialog = (row) => {
     worker_base_domain: '',
     target_domain: row.target_domain || (targets[0] || ''),
     mode: row.mode || 'single',
+    business_mode: row.business_mode || '推广',
     targets_text: targets.join('\n'),
     fallback_url: row.fallback_url || '',
     rotate_days: row.rotate_days || 7,
@@ -1053,6 +1083,7 @@ const handleDialogClose = () => {
     worker_base_domain: '',
     target_domain: '',
     mode: 'single',
+    business_mode: '推广',
     targets_text: '',
     fallback_url: '',
     rotate_days: 7,
@@ -1116,6 +1147,7 @@ const handleSubmit = async () => {
       status: workerForm.status,
       description: workerForm.description,
       mode: workerForm.mode || 'single',
+      business_mode: workerForm.business_mode || '推广',
       fallback_url: workerForm.fallback_url || '',
       rotate_days: workerForm.rotate_days || 0,
       base_date: workerForm.base_date || ''
@@ -1142,6 +1174,7 @@ const handleSubmit = async () => {
         worker_domain: workerForm.worker_domain,
         description: workerForm.description,
         mode: payload.mode,
+        business_mode: payload.business_mode,
         fallback_url: payload.fallback_url,
         rotate_days: payload.rotate_days,
         base_date: payload.base_date

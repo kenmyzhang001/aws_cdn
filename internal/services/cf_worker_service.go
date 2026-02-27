@@ -27,13 +27,14 @@ func NewCFWorkerService(db *gorm.DB) *CFWorkerService {
 
 // CreateWorkerRequest 创建 Worker 请求
 type CreateWorkerRequest struct {
-	CFAccountID  uint     `json:"cf_account_id" binding:"required"`
+	CFAccountID   uint     `json:"cf_account_id" binding:"required"`
 	WorkerName   string   `json:"worker_name" binding:"required"`
 	WorkerDomain string   `json:"worker_domain" binding:"required"`
 	TargetDomain string   `json:"target_domain"`   // 单链接时使用；与 targets 二选一
 	Targets      []string `json:"targets"`          // 多目标链接（轮播/探针时使用）
 	FallbackURL  string   `json:"fallback_url"`    // 兜底链接（可选）
 	Mode         string   `json:"mode"`            // single / time / random / probe
+	BusinessMode string   `json:"business_mode"`   // 业务模式：下载、推广
 	RotateDays   int      `json:"rotate_days"`    // 时间轮播每 N 天
 	BaseDate     string   `json:"base_date"`       // 时间轮播基准日期 ISO
 	Description  string   `json:"description"`
@@ -41,14 +42,15 @@ type CreateWorkerRequest struct {
 
 // UpdateWorkerRequest 更新 Worker 请求
 type UpdateWorkerRequest struct {
-	TargetDomain string   `json:"target_domain"`
-	Targets      []string `json:"targets"`
-	FallbackURL  string   `json:"fallback_url"`
-	Mode         string   `json:"mode"`
-	RotateDays   int      `json:"rotate_days"`
-	BaseDate     string   `json:"base_date"`
-	Description  string   `json:"description"`
-	Status       string   `json:"status"`
+	TargetDomain  string   `json:"target_domain"`
+	Targets       []string `json:"targets"`
+	FallbackURL   string   `json:"fallback_url"`
+	Mode          string   `json:"mode"`
+	BusinessMode  string   `json:"business_mode"` // 业务模式：下载、推广
+	RotateDays    int      `json:"rotate_days"`
+	BaseDate      string   `json:"base_date"`
+	Description   string   `json:"description"`
+	Status        string   `json:"status"`
 }
 
 // buildTargetsFromRequest 从请求中得到目标链接列表（至少一个）
@@ -218,6 +220,10 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 	if len(targets) > 0 {
 		firstTarget = targets[0]
 	}
+	businessMode := req.BusinessMode
+	if businessMode != "下载" && businessMode != "推广" {
+		businessMode = "推广"
+	}
 	worker := &models.CFWorker{
 		CFAccountID:    req.CFAccountID,
 		WorkerName:     req.WorkerName,
@@ -226,6 +232,7 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 		Targets:        targetsJSON,
 		FallbackURL:    req.FallbackURL,
 		Mode:           req.Mode,
+		BusinessMode:   businessMode,
 		RotateDays:     req.RotateDays,
 		BaseDate:       req.BaseDate,
 		ZoneID:         zoneID,
@@ -252,8 +259,8 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 	return worker, nil
 }
 
-// GetWorkerList 获取 Worker 列表，支持按域名关键词筛选（Worker 域名或目标域名）
-func (s *CFWorkerService) GetWorkerList(page, pageSize int, cfAccountID uint, domain string) ([]models.CFWorker, int64, error) {
+// GetWorkerList 获取 Worker 列表，支持按域名关键词、业务模式筛选
+func (s *CFWorkerService) GetWorkerList(page, pageSize int, cfAccountID uint, domain, businessMode string) ([]models.CFWorker, int64, error) {
 	var workers []models.CFWorker
 	var total int64
 
@@ -265,6 +272,9 @@ func (s *CFWorkerService) GetWorkerList(page, pageSize int, cfAccountID uint, do
 	if domain != "" {
 		like := "%" + domain + "%"
 		query = query.Where("worker_domain LIKE ? OR target_domain LIKE ?", like, like)
+	}
+	if businessMode != "" && (businessMode == "下载" || businessMode == "推广") {
+		query = query.Where("business_mode = ?", businessMode)
 	}
 
 	// 获取总数
@@ -340,6 +350,9 @@ func (s *CFWorkerService) UpdateWorker(id uint, req *UpdateWorkerRequest) (*mode
 	if req.BaseDate != worker.BaseDate {
 		worker.BaseDate = req.BaseDate
 		needScriptUpdate = true
+	}
+	if req.BusinessMode != "" && (req.BusinessMode == "下载" || req.BusinessMode == "推广") {
+		worker.BusinessMode = req.BusinessMode
 	}
 
 	if needScriptUpdate && len(newTargets) > 0 {

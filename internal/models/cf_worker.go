@@ -18,6 +18,7 @@ type CFWorker struct {
 	Targets          string         `json:"-" gorm:"type:longtext"`                                 // 目标链接列表 JSON（存库用，接口返回用 TargetsArray）
 	FallbackURL      string         `json:"fallback_url" gorm:"type:varchar(512)"`                   // 兜底链接（可选）
 	Mode             string         `json:"mode" gorm:"type:varchar(20);default:single"`           // single / time / random / probe
+	BusinessMode     string         `json:"business_mode" gorm:"column:business_mode;type:varchar(20);default:推广;index"` // 业务模式：下载、推广
 	RotateDays       int            `json:"rotate_days" gorm:"default:0"`                           // 时间轮播每 N 天轮换
 	BaseDate         string         `json:"base_date" gorm:"type:varchar(20)"`                     // 时间轮播基准日期
 	ZoneID           string         `json:"zone_id" gorm:"type:varchar(100)"`                      // Worker 域名所在的 Zone ID
