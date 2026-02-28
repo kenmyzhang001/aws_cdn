@@ -14,6 +14,7 @@ type Ec2Instance struct {
 	SecurityGroupID string         `json:"security_group_id" gorm:"type:varchar(64);not null"`
 	InstanceType    string         `json:"instance_type" gorm:"type:varchar(32);default:t3.micro"`
 	AWSInstanceID   string         `json:"aws_instance_id" gorm:"type:varchar(64);uniqueIndex"`
+	PublicIP        string         `json:"public_ip,omitempty" gorm:"-"` // 从 AWS 查询填充，不落库
 	State           string         `json:"state" gorm:"type:varchar(32)"`
 	Note            string         `json:"note" gorm:"type:text"`
 	CreatedAt       time.Time      `json:"created_at"`

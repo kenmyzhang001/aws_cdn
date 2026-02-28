@@ -92,7 +92,7 @@ func (s *Ec2InstanceService) Create(req *CreateRequest) (*models.Ec2Instance, er
 	return inst, nil
 }
 
-// List 仅查数据库，不调用 AWS；返回未软删除的实例
+// List 查数据库并填充公网 IP（从 AWS DescribeInstances 获取），返回未软删除的实例
 func (s *Ec2InstanceService) List(page, pageSize int, region string) ([]*models.Ec2Instance, int64, error) {
 	var list []*models.Ec2Instance
 	q := s.db.Model(&models.Ec2Instance{})
@@ -109,6 +109,32 @@ func (s *Ec2InstanceService) List(page, pageSize int, region string) ([]*models.
 	}
 	if err := q.Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
 		return nil, 0, err
+	}
+	// 按 region 分组，批量查 AWS 公网 IP 并填充
+	byRegion := make(map[string][]*models.Ec2Instance)
+	for _, inst := range list {
+		if inst.AWSInstanceID != "" {
+			byRegion[inst.Region] = append(byRegion[inst.Region], inst)
+		}
+	}
+	for r, insts := range byRegion {
+		client, err := aws.NewEC2Client(s.cfg, r)
+		if err != nil {
+			continue
+		}
+		ids := make([]string, 0, len(insts))
+		for _, i := range insts {
+			ids = append(ids, i.AWSInstanceID)
+		}
+		ipMap, err := aws.GetInstancesPublicIPs(client, ids)
+		if err != nil {
+			continue
+		}
+		for _, i := range insts {
+			if ip, ok := ipMap[i.AWSInstanceID]; ok {
+				i.PublicIP = ip
+			}
+		}
 	}
 	return list, total, nil
 }

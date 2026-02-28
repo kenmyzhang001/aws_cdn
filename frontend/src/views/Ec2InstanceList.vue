@@ -31,6 +31,24 @@
             <el-table-column prop="security_group_id" label="安全组" width="160" show-overflow-tooltip />
             <el-table-column prop="instance_type" label="规格" width="100" />
             <el-table-column prop="aws_instance_id" label="实例 ID" width="180" show-overflow-tooltip />
+            <el-table-column label="链接" min-width="280">
+              <template #default="{ row }">
+                <span class="link-cell">
+                  <span class="link-text" :title="getProxyLink(row)">
+                    {{ row.public_ip ? getProxyLink(row) : '暂无IP' }}
+                  </span>
+                  <el-button
+                    link
+                    type="primary"
+                    size="small"
+                    :disabled="!row.public_ip"
+                    @click="copyLink(row)"
+                  >
+                    <el-icon><CopyDocument /></el-icon>
+                  </el-button>
+                </span>
+              </template>
+            </el-table-column>
             <el-table-column prop="state" label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="row.state === 'running' ? 'success' : row.state === 'terminated' ? 'info' : 'warning'">
@@ -142,7 +160,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, CopyDocument } from '@element-plus/icons-vue'
 import {
   getRegionConfig,
   getEc2InstanceList,
@@ -178,6 +196,24 @@ const editForm = ref({ id: null, name: '', note: '' })
 const editFormRef = ref(null)
 const editRules = {
   name: [{ required: true, message: '请输入名称', trigger: 'blur' }]
+}
+
+const SS_LINK_PREFIX = 'ss://YWVzLTI1Ni1nY206YXdzMjAyMjAxMjE=@'
+const SS_LINK_SUFFIX = ':8388/?#HK'
+
+function getProxyLink(row) {
+  if (!row.public_ip) return ''
+  return `${SS_LINK_PREFIX}${row.public_ip}${SS_LINK_SUFFIX}${row.name || ''}`
+}
+
+function copyLink(row) {
+  const link = getProxyLink(row)
+  if (!link) return
+  navigator.clipboard.writeText(link).then(() => {
+    ElMessage.success('已复制链接')
+  }).catch(() => {
+    ElMessage.error('复制失败')
+  })
 }
 
 function formatDate(v) {
@@ -303,4 +339,15 @@ onMounted(() => {
   align-items: center;
 }
 .search-form { margin-bottom: 16px; }
+.link-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.link-text {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 </style>

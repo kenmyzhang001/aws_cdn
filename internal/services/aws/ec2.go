@@ -49,7 +49,7 @@ func RunInstance(client *ec2.EC2, amiID, instanceType, securityGroupID, name str
 	if err != nil {
 		return "", fmt.Errorf("启动实例失败: %w", err)
 	}
-	if out.Instances == nil || len(out.Instances) == 0 {
+	if len(out.Instances) == 0 {
 		return "", fmt.Errorf("未返回实例 ID")
 	}
 	return aws.StringValue(out.Instances[0].InstanceId), nil
@@ -61,4 +61,30 @@ func TerminateInstance(client *ec2.EC2, instanceID string) error {
 		InstanceIds: aws.StringSlice([]string{instanceID}),
 	})
 	return err
+}
+
+// GetInstancesPublicIPs 批量查询实例公网 IP，返回 instanceID -> publicIP 映射
+func GetInstancesPublicIPs(client *ec2.EC2, instanceIDs []string) (map[string]string, error) {
+	if len(instanceIDs) == 0 {
+		return nil, nil
+	}
+	out, err := client.DescribeInstances(&ec2.DescribeInstancesInput{
+		InstanceIds: aws.StringSlice(instanceIDs),
+	})
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string)
+	for _, r := range out.Reservations {
+		for _, inst := range r.Instances {
+			if inst.InstanceId == nil {
+				continue
+			}
+			id := aws.StringValue(inst.InstanceId)
+			if inst.PublicIpAddress != nil {
+				m[id] = aws.StringValue(inst.PublicIpAddress)
+			}
+		}
+	}
+	return m, nil
 }
