@@ -27,35 +27,34 @@
             <el-table-column prop="id" label="ID" width="70" />
             <el-table-column prop="name" label="名称" width="120" />
             <el-table-column prop="region" label="地区" width="120" />
-            <el-table-column prop="ami_id" label="AMI" width="180" show-overflow-tooltip />
-            <el-table-column prop="security_group_id" label="安全组" width="160" show-overflow-tooltip />
-            <el-table-column prop="instance_type" label="规格" width="100" />
             <el-table-column prop="aws_instance_id" label="实例 ID" width="180" show-overflow-tooltip />
-            <el-table-column label="链接" min-width="280">
+            <el-table-column label="链接" min-width="320">
               <template #default="{ row }">
-                <span class="link-cell">
-                  <span class="link-text" :title="getProxyLink(row)">
+                <div class="link-cell">
+                  <div class="link-text" :title="getProxyLink(row)">
                     {{ row.public_ip ? getProxyLink(row) : '暂无IP' }}
-                  </span>
+                  </div>
                   <el-button
                     link
                     type="primary"
                     size="small"
+                    class="copy-btn"
                     :disabled="!row.public_ip"
                     @click="copyLink(row)"
                   >
                     <el-icon><CopyDocument /></el-icon>
+                    复制
                   </el-button>
-                </span>
+                </div>
               </template>
             </el-table-column>
-            <el-table-column prop="state" label="状态" width="100">
+            <!--el-table-column prop="state" label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="row.state === 'running' ? 'success' : row.state === 'terminated' ? 'info' : 'warning'">
                   {{ row.state || 'pending' }}
                 </el-tag>
               </template>
-            </el-table-column>
+            </el-table-column-->
             <el-table-column prop="note" label="备注" min-width="120" show-overflow-tooltip />
             <el-table-column label="创建时间" width="170">
               <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
@@ -340,14 +339,19 @@ onMounted(() => {
 }
 .search-form { margin-bottom: 16px; }
 .link-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
 .link-text {
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  width: 100%;
+  word-break: break-all;
+  white-space: pre-wrap;
+  line-height: 1.4;
+  font-size: 12px;
+}
+.copy-btn {
+  flex-shrink: 0;
 }
 </style>
