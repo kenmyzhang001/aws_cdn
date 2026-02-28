@@ -133,6 +133,8 @@ func (s *Ec2InstanceService) List(page, pageSize int, region string) ([]*models.
 		for _, i := range insts {
 			if ip, ok := ipMap[i.AWSInstanceID]; ok {
 				i.PublicIP = ip
+				// 持久化到数据库，便于回收站等场景显示
+				_ = s.db.Model(i).Update("public_ip", ip).Error
 			}
 		}
 	}

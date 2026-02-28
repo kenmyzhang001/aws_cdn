@@ -86,11 +86,41 @@
           />
         </el-tab-pane>
         <el-tab-pane label="回收站" name="deleted">
+          <div class="deleted-toolbar">
+            <el-button
+              type="success"
+              :disabled="!deletedList.length || !deletedList.some((r) => r.public_ip)"
+              @click="copyAllDeletedLinks"
+            >
+              <el-icon><CopyDocument /></el-icon>
+              一键复制全部链接
+            </el-button>
+          </div>
           <el-table v-loading="loadingDeleted" :data="deletedList" border stripe>
             <el-table-column prop="id" label="ID" width="70" />
             <el-table-column prop="name" label="名称" width="120" />
             <el-table-column prop="region" label="地区" width="110" />
             <el-table-column prop="aws_instance_id" label="实例 ID" width="180" show-overflow-tooltip />
+            <el-table-column label="链接" min-width="320">
+              <template #default="{ row }">
+                <div class="link-cell">
+                  <div class="link-text" :title="getProxyLink(row)">
+                    {{ row.public_ip ? getProxyLink(row) : '暂无IP' }}
+                  </div>
+                  <el-button
+                    link
+                    type="primary"
+                    size="small"
+                    class="copy-btn"
+                    :disabled="!row.public_ip"
+                    @click="copyLink(row)"
+                  >
+                    <el-icon><CopyDocument /></el-icon>
+                    复制
+                  </el-button>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column prop="state" label="状态" width="100" />
             <el-table-column label="运行时长(小时)" width="120">
               <template #default="{ row }">
@@ -237,6 +267,20 @@ function copyAllLinks() {
   })
 }
 
+function copyAllDeletedLinks() {
+  const links = deletedList.value.map(getProxyLink).filter(Boolean)
+  if (!links.length) {
+    ElMessage.warning('当前页暂无链接')
+    return
+  }
+  const text = links.join('\n')
+  navigator.clipboard.writeText(text).then(() => {
+    ElMessage.success(`已复制 ${links.length} 条链接`)
+  }).catch(() => {
+    ElMessage.error('复制失败')
+  })
+}
+
 function formatDate(v) {
   if (!v) return '-'
   const d = new Date(v)
@@ -360,6 +404,7 @@ onMounted(() => {
   align-items: center;
 }
 .search-form { margin-bottom: 16px; }
+.deleted-toolbar { margin-bottom: 16px; }
 .link-cell {
   display: flex;
   flex-direction: column;
