@@ -21,6 +21,14 @@
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="loadList">查询</el-button>
+              <el-button
+                type="success"
+                :disabled="!list.length || !list.some((r) => r.public_ip)"
+                @click="copyAllLinks"
+              >
+                <el-icon><CopyDocument /></el-icon>
+                一键复制所有链接
+              </el-button>
             </el-form-item>
           </el-form>
           <el-table v-loading="loading" :data="list" border stripe>
@@ -210,6 +218,20 @@ function copyLink(row) {
   if (!link) return
   navigator.clipboard.writeText(link).then(() => {
     ElMessage.success('已复制链接')
+  }).catch(() => {
+    ElMessage.error('复制失败')
+  })
+}
+
+function copyAllLinks() {
+  const links = list.value.map(getProxyLink).filter(Boolean)
+  if (!links.length) {
+    ElMessage.warning('当前页暂无链接')
+    return
+  }
+  const text = links.join('\n')
+  navigator.clipboard.writeText(text).then(() => {
+    ElMessage.success(`已复制 ${links.length} 条链接`)
   }).catch(() => {
     ElMessage.error('复制失败')
   })
