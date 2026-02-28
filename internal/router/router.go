@@ -294,7 +294,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			speedProbe.GET("/results", speedProbeHandler.ListProbeResults)         // 探测结果列表（带筛选）
 			speedProbe.GET("/results/:ip", speedProbeHandler.GetProbeResultsByIP)  // 按 IP 查询
 			speedProbe.DELETE("/results/:id", speedProbeHandler.DeleteProbeResult) // 删除单条探测结果
-			speedProbe.GET("/alerts", speedProbeHandler.ListAlertLogs)              // 告警记录列表（带筛选）
+			speedProbe.GET("/alerts", speedProbeHandler.ListAlertLogs)             // 告警记录列表（带筛选）
 			speedProbe.POST("/check", speedProbeHandler.TriggerCheck)              // 手动触发检查
 		}
 
@@ -311,7 +311,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			cfWorkers.POST("/:id/unbind-domain", cfWorkerHandler.UnbindWorkerDomain)
 		}
 
-		// EC2 实例管理
+		// EC2 代理管理
 		ec2Instances := protected.Group("/ec2-instances")
 		{
 			ec2Instances.GET("/region-config", ec2InstanceHandler.GetRegionConfig)

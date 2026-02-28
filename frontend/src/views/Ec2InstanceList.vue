@@ -3,16 +3,16 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>EC2 实例管理</span>
+          <span>代理管理</span>
           <el-button type="primary" @click="showCreateDialog" :disabled="activeTab !== 'list'">
             <el-icon><Plus /></el-icon>
-            创建实例
+            创建代理
           </el-button>
         </div>
       </template>
 
       <el-tabs v-model="activeTab" @tab-change="onTabChange">
-        <el-tab-pane label="实例列表" name="list">
+        <el-tab-pane label="代理列表" name="list">
           <el-form :inline="true" class="search-form">
             <el-form-item label="地区">
               <el-select v-model="searchRegion" clearable placeholder="全部" style="width: 160px" @change="loadList">

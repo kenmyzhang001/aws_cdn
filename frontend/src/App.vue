@@ -45,7 +45,7 @@
             </el-menu-item>
             <el-menu-item index="/ec2-instances">
               <el-icon><Monitor /></el-icon>
-              <span>实例管理</span>
+              <span>代理管理</span>
             </el-menu-item>
           </el-sub-menu>
 
