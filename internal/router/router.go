@@ -307,6 +307,8 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			cfWorkers.POST("", cfWorkerHandler.CreateWorker)
 			cfWorkers.PUT("/:id", cfWorkerHandler.UpdateWorker)
 			cfWorkers.DELETE("/:id", cfWorkerHandler.DeleteWorker)
+			cfWorkers.POST("/:id/bind-domain", cfWorkerHandler.BindWorkerDomain)
+			cfWorkers.POST("/:id/unbind-domain", cfWorkerHandler.UnbindWorkerDomain)
 		}
 
 		// EC2 实例管理

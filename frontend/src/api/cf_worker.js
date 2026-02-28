@@ -76,3 +76,31 @@ export function checkWorkerDomain(domain) {
     params: { domain: domain || '' }
   });
 }
+
+/**
+ * 为 Worker 绑定新域名
+ * @param {number} id - Worker ID
+ * @param {string} domain - 要绑定的域名
+ * @returns {Promise}
+ */
+export function bindWorkerDomain(id, domain) {
+  return request({
+    url: `/cf-workers/${id}/bind-domain`,
+    method: 'post',
+    data: { domain }
+  });
+}
+
+/**
+ * 解绑 Worker 的指定域名
+ * @param {number} id - Worker ID
+ * @param {string} domain - 要解绑的域名
+ * @returns {Promise}
+ */
+export function unbindWorkerDomain(id, domain) {
+  return request({
+    url: `/cf-workers/${id}/unbind-domain`,
+    method: 'post',
+    data: { domain }
+  });
+}

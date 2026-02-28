@@ -72,7 +72,7 @@ func (h *CFWorkerHandler) CheckDomain(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"available": true, "used_by": "", "ref_id": 0, "ref_name": ""})
 		return
 	}
-	available, usedBy, refID, refName := h.workerService.CheckWorkerDomainAvailable(domain)
+	available, usedBy, refID, refName := h.workerService.CheckWorkerDomainAvailable(domain, 0)
 	c.JSON(http.StatusOK, gin.H{
 		"available": available,
 		"used_by":   usedBy,
@@ -230,4 +230,64 @@ func (h *CFWorkerHandler) DeleteWorker(c *gin.Context) {
 	}).Info("Worker 删除成功")
 
 	c.JSON(http.StatusOK, gin.H{"message": "Worker 删除成功"})
+}
+
+// BindWorkerDomain 为 Worker 绑定新域名
+// @Summary 绑定域名
+// @Tags Worker
+// @Accept json
+// @Produce json
+// @Param id path int true "Worker ID"
+// @Param body body object{domain=string} true "域名"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/cf-workers/{id}/bind-domain [post]
+func (h *CFWorkerHandler) BindWorkerDomain(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 Worker ID"})
+		return
+	}
+	var body struct {
+		Domain string `json:"domain" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供 domain"})
+		return
+	}
+	worker, err := h.workerService.BindWorkerDomain(uint(id), body.Domain)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "域名绑定成功", "data": worker})
+}
+
+// UnbindWorkerDomain 解绑 Worker 的指定域名
+// @Summary 解绑域名
+// @Tags Worker
+// @Accept json
+// @Produce json
+// @Param id path int true "Worker ID"
+// @Param body body object{domain=string} true "域名"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/cf-workers/{id}/unbind-domain [post]
+func (h *CFWorkerHandler) UnbindWorkerDomain(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 Worker ID"})
+		return
+	}
+	var body struct {
+		Domain string `json:"domain" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供 domain"})
+		return
+	}
+	worker, err := h.workerService.UnbindWorkerDomain(uint(id), body.Domain)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "域名解绑成功", "data": worker})
 }

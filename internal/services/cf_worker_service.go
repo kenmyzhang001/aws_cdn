@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -27,30 +28,30 @@ func NewCFWorkerService(db *gorm.DB) *CFWorkerService {
 
 // CreateWorkerRequest 创建 Worker 请求
 type CreateWorkerRequest struct {
-	CFAccountID   uint     `json:"cf_account_id" binding:"required"`
+	CFAccountID  uint     `json:"cf_account_id" binding:"required"`
 	WorkerName   string   `json:"worker_name" binding:"required"`
 	WorkerDomain string   `json:"worker_domain" binding:"required"`
-	TargetDomain string   `json:"target_domain"`   // 单链接时使用；与 targets 二选一
-	Targets      []string `json:"targets"`          // 多目标链接（轮播/探针时使用）
-	FallbackURL  string   `json:"fallback_url"`    // 兜底链接（可选）
-	Mode         string   `json:"mode"`            // single / time / random / probe
-	BusinessMode string   `json:"business_mode"`   // 业务模式：下载、推广
-	RotateDays   int      `json:"rotate_days"`    // 时间轮播每 N 天
-	BaseDate     string   `json:"base_date"`       // 时间轮播基准日期 ISO
+	TargetDomain string   `json:"target_domain"` // 单链接时使用；与 targets 二选一
+	Targets      []string `json:"targets"`       // 多目标链接（轮播/探针时使用）
+	FallbackURL  string   `json:"fallback_url"`  // 兜底链接（可选）
+	Mode         string   `json:"mode"`          // single / time / random / probe
+	BusinessMode string   `json:"business_mode"` // 业务模式：下载、推广
+	RotateDays   int      `json:"rotate_days"`   // 时间轮播每 N 天
+	BaseDate     string   `json:"base_date"`     // 时间轮播基准日期 ISO
 	Description  string   `json:"description"`
 }
 
 // UpdateWorkerRequest 更新 Worker 请求
 type UpdateWorkerRequest struct {
-	TargetDomain  string   `json:"target_domain"`
-	Targets       []string `json:"targets"`
-	FallbackURL   string   `json:"fallback_url"`
-	Mode          string   `json:"mode"`
-	BusinessMode  string   `json:"business_mode"` // 业务模式：下载、推广
-	RotateDays    int      `json:"rotate_days"`
-	BaseDate      string   `json:"base_date"`
-	Description   string   `json:"description"`
-	Status        string   `json:"status"`
+	TargetDomain string   `json:"target_domain"`
+	Targets      []string `json:"targets"`
+	FallbackURL  string   `json:"fallback_url"`
+	Mode         string   `json:"mode"`
+	BusinessMode string   `json:"business_mode"` // 业务模式：下载、推广
+	RotateDays   int      `json:"rotate_days"`
+	BaseDate     string   `json:"base_date"`
+	Description  string   `json:"description"`
+	Status       string   `json:"status"`
 }
 
 // buildTargetsFromRequest 从请求中得到目标链接列表（至少一个）
@@ -99,17 +100,39 @@ func generateScript(targets []string, fallbackURL, mode string, rotateDays int, 
 	return adv, err
 }
 
+// escapeLike 转义 LIKE 中的 % 和 _
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "%", `\%`)
+	s = strings.ReplaceAll(s, "_", `\_`)
+	return s
+}
+
 // CheckWorkerDomainAvailable 检查 Worker 域名是否已被占用。若被占用返回 used_by（domain_redirect/cf_worker）、ref_id、ref_name。
-func (s *CFWorkerService) CheckWorkerDomainAvailable(domain string) (available bool, usedBy string, refID uint, refName string) {
+// excludeWorkerID 不为 0 时，若仅被该 Worker 占用则视为可用（同一 Worker 绑定/保留该域名）。
+func (s *CFWorkerService) CheckWorkerDomainAvailable(domain string, excludeWorkerID uint) (available bool, usedBy string, refID uint, refName string) {
 	if domain == "" {
 		return true, "", 0, ""
 	}
-	var w models.CFWorker
-	if err := s.db.Where("LOWER(worker_domain) = LOWER(?)", domain).First(&w).Error; err == nil {
-		return false, "cf_worker", w.ID, w.WorkerName
+	domain = strings.TrimSpace(strings.ToLower(domain))
+	likePattern := "%\"" + escapeLike(domain) + "\"%"
+	var workers []models.CFWorker
+	if err := s.db.Where("LOWER(worker_domain) = ? OR (worker_domains != '' AND worker_domains LIKE ?)", domain, likePattern).Find(&workers).Error; err != nil {
+		return true, "", 0, ""
+	}
+	for i := range workers {
+		w := &workers[i]
+		for _, d := range w.DomainsList() {
+			if strings.ToLower(d) == domain {
+				if excludeWorkerID != 0 && w.ID == excludeWorkerID {
+					return true, "", 0, ""
+				}
+				return false, "cf_worker", w.ID, w.WorkerName
+			}
+		}
 	}
 	var dr models.DomainRedirect
-	if err := s.db.Where("LOWER(source_domain) = LOWER(?)", domain).First(&dr).Error; err == nil {
+	if err := s.db.Where("LOWER(source_domain) = ?", domain).First(&dr).Error; err == nil {
 		return false, "domain_redirect", dr.ID, dr.SourceDomain
 	}
 	return true, "", 0, ""
@@ -125,7 +148,7 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 	}
 
 	// 预先检查 Worker 域名是否已被占用（Worker 或 302 重定向）
-	if ok, usedBy, refID, refName := s.CheckWorkerDomainAvailable(req.WorkerDomain); !ok {
+	if ok, usedBy, refID, refName := s.CheckWorkerDomainAvailable(req.WorkerDomain, 0); !ok {
 		switch usedBy {
 		case "cf_worker":
 			return nil, fmt.Errorf("域名 %s 已被「Cloudflare Worker」使用（%s，ID: %d），请先删除该 Worker 后再创建", req.WorkerDomain, refName, refID)
@@ -241,6 +264,13 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 		Status:         "active",
 		Description:    req.Description,
 	}
+	worker.WorkerDomainsArray = []string{req.WorkerDomain}
+	worker.DomainBindingsArray = []models.WorkerDomainBinding{{
+		Domain:         req.WorkerDomain,
+		ZoneID:         zoneID,
+		WorkerRoute:    workerRoute,
+		CustomDomainID: customDomainID,
+	}}
 
 	if err := s.db.Create(worker).Error; err != nil {
 		// 如果数据库保存失败，删除已创建的 Worker 和路由
@@ -271,7 +301,7 @@ func (s *CFWorkerService) GetWorkerList(page, pageSize int, cfAccountID uint, do
 	}
 	if domain != "" {
 		like := "%" + domain + "%"
-		query = query.Where("worker_domain LIKE ? OR target_domain LIKE ?", like, like)
+		query = query.Where("worker_domain LIKE ? OR target_domain LIKE ? OR worker_domains LIKE ?", like, like, like)
 	}
 	if businessMode != "" && (businessMode == "下载" || businessMode == "推广") {
 		query = query.Where("business_mode = ?", businessMode)
@@ -402,24 +432,38 @@ func (s *CFWorkerService) DeleteWorker(id uint) error {
 	// 4. 创建 Cloudflare Service 实例
 	cfService := cloudflare.NewWorkerAPIService(apiToken, cfAccount.AccountID)
 
-	// 5. 删除 Worker 路由（如果存在）
-	if worker.ZoneID != "" && worker.WorkerRoute != "" {
-		if err := cfService.DeleteWorkerRoute(worker.ZoneID, worker.WorkerRoute); err != nil {
-			log.WithError(err).WithFields(map[string]interface{}{
-				"worker_id":    worker.ID,
-				"zone_id":      worker.ZoneID,
-				"worker_route": worker.WorkerRoute,
-			}).Warn("删除 Worker 路由失败，继续删除 Worker 脚本")
+	// 5. 删除所有域名的 Worker 路由与自定义域名（优先使用 DomainBindingsArray，兼容旧数据）
+	if len(worker.DomainBindingsArray) > 0 {
+		for _, b := range worker.DomainBindingsArray {
+			if b.ZoneID != "" && b.WorkerRoute != "" {
+				if err := cfService.DeleteWorkerRoute(b.ZoneID, b.WorkerRoute); err != nil {
+					log.WithError(err).WithFields(map[string]interface{}{
+						"worker_id": worker.ID, "domain": b.Domain, "zone_id": b.ZoneID, "worker_route": b.WorkerRoute,
+					}).Warn("删除 Worker 路由失败，继续")
+				}
+			}
+			if b.CustomDomainID != "" {
+				if err := cfService.DeleteWorkerCustomDomain(b.CustomDomainID); err != nil {
+					log.WithError(err).WithFields(map[string]interface{}{
+						"worker_id": worker.ID, "domain": b.Domain, "custom_domain_id": b.CustomDomainID,
+					}).Warn("删除 Worker 自定义域名失败，继续")
+				}
+			}
 		}
-	}
-
-	// 6. 删除自定义域名（如果存在）
-	if worker.CustomDomainID != "" {
-		if err := cfService.DeleteWorkerCustomDomain(worker.CustomDomainID); err != nil {
-			log.WithError(err).WithFields(map[string]interface{}{
-				"worker_id":        worker.ID,
-				"custom_domain_id": worker.CustomDomainID,
-			}).Warn("删除 Worker 自定义域名失败，继续删除 Worker 脚本")
+	} else {
+		if worker.ZoneID != "" && worker.WorkerRoute != "" {
+			if err := cfService.DeleteWorkerRoute(worker.ZoneID, worker.WorkerRoute); err != nil {
+				log.WithError(err).WithFields(map[string]interface{}{
+					"worker_id": worker.ID, "zone_id": worker.ZoneID, "worker_route": worker.WorkerRoute,
+				}).Warn("删除 Worker 路由失败，继续删除 Worker 脚本")
+			}
+		}
+		if worker.CustomDomainID != "" {
+			if err := cfService.DeleteWorkerCustomDomain(worker.CustomDomainID); err != nil {
+				log.WithError(err).WithFields(map[string]interface{}{
+					"worker_id": worker.ID, "custom_domain_id": worker.CustomDomainID,
+				}).Warn("删除 Worker 自定义域名失败，继续删除 Worker 脚本")
+			}
 		}
 	}
 
@@ -443,6 +487,132 @@ func (s *CFWorkerService) DeleteWorker(id uint) error {
 	}).Info("Worker 删除成功")
 
 	return nil
+}
+
+// BindWorkerDomain 为 Worker 绑定新域名（CF 添加路由/自定义域名 + 写入库）
+func (s *CFWorkerService) BindWorkerDomain(workerID uint, domain string) (*models.CFWorker, error) {
+	log := logger.GetLogger()
+	domain = strings.TrimSpace(strings.ToLower(domain))
+	if domain == "" {
+		return nil, fmt.Errorf("域名不能为空")
+	}
+
+	worker, err := s.GetWorkerByID(workerID)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range worker.DomainsList() {
+		if d == domain {
+			return worker, nil // 已绑定，幂等
+		}
+	}
+
+	if ok, usedBy, refID, refName := s.CheckWorkerDomainAvailable(domain, workerID); !ok {
+		switch usedBy {
+		case "cf_worker":
+			return nil, fmt.Errorf("域名 %s 已被「Cloudflare Worker」使用（%s，ID: %d）", domain, refName, refID)
+		case "domain_redirect":
+			return nil, fmt.Errorf("域名 %s 已被「域名302重定向」使用（%s）", domain, refName)
+		default:
+			return nil, fmt.Errorf("域名 %s 已被占用", domain)
+		}
+	}
+
+	var cfAccount models.CFAccount
+	if err := s.db.First(&cfAccount, worker.CFAccountID).Error; err != nil {
+		return nil, fmt.Errorf("CF 账号不存在: %w", err)
+	}
+	cfService := cloudflare.NewWorkerAPIService(cfAccount.APIToken, cfAccount.AccountID)
+
+	rootDomain := extractRootDomain(domain)
+	zoneID, zoneErr := s.getZoneID(cfAccount.APIToken, rootDomain)
+	if zoneErr != nil {
+		log.WithError(zoneErr).WithField("domain", domain).Warn("获取 Zone ID 失败")
+	}
+
+	var customDomainID, workerRoute string
+	if zoneID != "" {
+		if domainID, err := cfService.AddWorkerCustomDomain(worker.WorkerName, domain, zoneID); err != nil {
+			log.WithError(err).WithField("domain", domain).Warn("添加 Worker 自定义域名失败")
+		} else {
+			customDomainID = domainID
+		}
+		pattern := fmt.Sprintf("%s/*", domain)
+		routeID, routeErr := cfService.CreateWorkerRoute(zoneID, pattern, worker.WorkerName)
+		if routeErr != nil {
+			return nil, fmt.Errorf("Worker 域名绑定失败: %w", routeErr)
+		}
+		workerRoute = routeID
+	}
+
+	worker.BindDomain(domain)
+	worker.SetBinding(models.WorkerDomainBinding{
+		Domain:         domain,
+		ZoneID:         zoneID,
+		WorkerRoute:    workerRoute,
+		CustomDomainID: customDomainID,
+	})
+	if err := s.db.Save(worker).Error; err != nil {
+		if zoneID != "" && workerRoute != "" {
+			_ = cfService.DeleteWorkerRoute(zoneID, workerRoute)
+		}
+		if customDomainID != "" {
+			_ = cfService.DeleteWorkerCustomDomain(customDomainID)
+		}
+		return nil, fmt.Errorf("保存 Worker 失败: %w", err)
+	}
+	log.WithFields(map[string]interface{}{"worker_id": workerID, "domain": domain}).Info("Worker 域名绑定成功")
+	return worker, nil
+}
+
+// UnbindWorkerDomain 解绑 Worker 的指定域名（CF 删除路由/自定义域名 + 更新库）
+func (s *CFWorkerService) UnbindWorkerDomain(workerID uint, domain string) (*models.CFWorker, error) {
+	domain = strings.TrimSpace(strings.ToLower(domain))
+	if domain == "" {
+		return nil, fmt.Errorf("域名不能为空")
+	}
+
+	worker, err := s.GetWorkerByID(workerID)
+	if err != nil {
+		return nil, err
+	}
+	binding, ok := worker.GetBinding(domain)
+	if !ok {
+		// 可能只存在于 DomainsList 但无 binding（旧数据）
+		for _, d := range worker.DomainsList() {
+			if d == domain {
+				worker.UnbindDomain(domain)
+				_ = s.db.Save(worker).Error
+				return worker, nil
+			}
+		}
+		return nil, fmt.Errorf("该 Worker 未绑定域名 %s", domain)
+	}
+
+	cfAccount := new(models.CFAccount)
+	if err := s.db.First(cfAccount, worker.CFAccountID).Error; err != nil {
+		return nil, fmt.Errorf("CF 账号不存在: %w", err)
+	}
+	cfService := cloudflare.NewWorkerAPIService(cfAccount.APIToken, cfAccount.AccountID)
+
+	log := logger.GetLogger()
+	if binding.ZoneID != "" && binding.WorkerRoute != "" {
+		if err := cfService.DeleteWorkerRoute(binding.ZoneID, binding.WorkerRoute); err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{"worker_id": workerID, "domain": domain}).Warn("删除 Worker 路由失败")
+		}
+	}
+	if binding.CustomDomainID != "" {
+		if err := cfService.DeleteWorkerCustomDomain(binding.CustomDomainID); err != nil {
+			log.WithError(err).WithFields(map[string]interface{}{"worker_id": workerID, "domain": domain}).Warn("删除 Worker 自定义域名失败")
+		}
+	}
+
+	worker.UnbindDomain(domain)
+	if err := s.db.Save(worker).Error; err != nil {
+		return nil, fmt.Errorf("保存 Worker 失败: %w", err)
+	}
+	log.WithFields(map[string]interface{}{"worker_id": workerID, "domain": domain}).Info("Worker 域名解绑成功")
+	return worker, nil
 }
 
 // getZoneID 获取 Zone ID

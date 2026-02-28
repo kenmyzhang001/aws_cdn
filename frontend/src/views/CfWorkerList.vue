@@ -70,20 +70,35 @@
           </template>
         </el-table-column>
         <el-table-column prop="worker_name" label="Worker 名称" width="180" />
-        <el-table-column label="Worker 域名" width="260">
+        <el-table-column label="Worker 域名" min-width="280">
           <template #default="{ row }">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <el-link :href="`https://${row.worker_domain}`" target="_blank" type="primary">
-                {{ row.worker_domain }}
-              </el-link>
-              <el-button
-                link
-                type="primary"
-                :icon="DocumentCopy"
-                size="small"
-                @click="copyToClipboard(row.worker_domain, 'Worker 域名')"
-                title="复制域名"
-              />
+            <div class="worker-domains-cell">
+              <template v-for="(d, idx) in workerDomainsList(row)" :key="idx">
+                <div class="worker-domain-item">
+                  <el-link :href="`https://${d}`" target="_blank" type="primary">{{ d }}</el-link>
+                  <el-button
+                    link
+                    type="primary"
+                    :icon="DocumentCopy"
+                    size="small"
+                    @click="copyToClipboard(d, 'Worker 域名')"
+                    title="复制域名"
+                  />
+                  <el-button
+                    v-if="workerDomainsList(row).length > 1"
+                    link
+                    type="danger"
+                    size="small"
+                    @click="handleUnbindDomain(row, d)"
+                  >
+                    解绑
+                  </el-button>
+                </div>
+              </template>
+              <el-button link type="primary" size="small" @click="showBindDomainDialog(row)">
+                <el-icon><Plus /></el-icon>
+                绑定域名
+              </el-button>
             </div>
           </template>
         </el-table-column>
@@ -130,10 +145,13 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="showEditDialog(row)">
               编辑
+            </el-button>
+            <el-button link type="success" size="small" @click="showBindDomainDialog(row)">
+              绑定域名
             </el-button>
             <el-button link type="danger" size="small" @click="handleDelete(row)">
               删除
@@ -515,6 +533,85 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 绑定域名对话框 -->
+    <el-dialog
+      v-model="bindDomainDialogVisible"
+      title="绑定域名"
+      width="500px"
+      @close="onBindDomainDialogClose"
+    >
+      <p v-if="bindDomainWorker" class="bind-domain-tip">
+        为 Worker <strong>{{ bindDomainWorker.worker_name }}</strong> 绑定新域名（可填可选子域名前缀 + 选择/输入基础域名）。
+      </p>
+      <el-form :model="bindDomainForm" label-width="100px">
+        <el-form-item label="子域名前缀">
+          <el-input
+            v-model="bindDomainForm.prefix"
+            placeholder="可选：如 www, api, cdn"
+            clearable
+            style="width: 160px"
+          >
+            <template #append>.</template>
+          </el-input>
+          <div class="form-tip">子域名前缀（可选），与基础域名组合为完整域名</div>
+        </el-form-item>
+        <el-form-item label="基础域名" required>
+          <el-select
+            v-model="bindDomainForm.domain"
+            placeholder="搜索或选择 CF 账号下的域名，也可直接输入"
+            filterable
+            allow-create
+            default-first-option
+            clearable
+            style="width: 100%"
+            :loading="bindDomainLoadingZones"
+            :filter-method="filterBindDomainZones"
+            @keydown.enter.prevent="handleBindDomainSubmit"
+          >
+            <template #empty>
+              <div v-if="bindDomainSearchQuery" class="bind-domain-empty">
+                未找到匹配的域名
+                <el-button size="small" type="primary" @click="useBindDomainCustom()">
+                  使用 "{{ bindDomainSearchQuery }}" 作为域名
+                </el-button>
+              </div>
+              <div v-else-if="!bindDomainLoadingZones && bindDomainZoneList.length === 0" class="bind-domain-empty">
+                该 CF 账号暂无托管域名，请直接输入完整域名
+              </div>
+              <div v-else class="bind-domain-empty">输入域名或从上方选择</div>
+            </template>
+            <el-option
+              v-for="d in bindDomainFilteredZones"
+              :key="d"
+              :label="d"
+              :value="d"
+            >
+              <span>{{ d }}</span>
+              <el-tag size="small" type="success" style="margin-left: 8px;">已托管</el-tag>
+            </el-option>
+          </el-select>
+          <div class="form-tip" v-if="bindDomainLoadingZones" style="color: #409EFF;">
+            <el-icon class="is-loading"><Loading /></el-icon>
+            正在加载 CF 账号下的域名列表...
+          </div>
+          <div class="form-tip" v-else-if="bindDomainZoneList.length > 0">
+            已加载 {{ bindDomainZoneList.length }} 个托管域名，可输入关键词搜索或直接输入新域名
+          </div>
+        </el-form-item>
+        <div v-if="bindDomainFullDomain" class="bind-domain-preview">
+          <el-icon color="#1890ff" :size="16"><Link /></el-icon>
+          <span class="bind-domain-preview-label">完整域名：</span>
+          <span class="bind-domain-preview-value">{{ bindDomainFullDomain }}</span>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="bindDomainDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleBindDomainSubmit" :loading="bindDomainSubmitting">
+          绑定
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -527,7 +624,9 @@ import {
   createWorker,
   updateWorker,
   deleteWorker,
-  checkWorkerDomain
+  checkWorkerDomain,
+  bindWorkerDomain,
+  unbindWorkerDomain
 } from '@/api/cf_worker';
 import { cfAccountApi } from '@/api/cf_account';
 import { r2Api } from '@/api/r2';
@@ -621,6 +720,16 @@ const workerForm = reactive({
 
 // 当前编辑的 Worker ID
 const currentWorkerId = ref(null);
+
+// 绑定域名对话框
+const bindDomainDialogVisible = ref(false);
+const bindDomainWorker = ref(null);
+const bindDomainForm = reactive({ domain: '', prefix: '' });
+const bindDomainSubmitting = ref(false);
+const bindDomainZoneList = ref([]);
+const bindDomainLoadingZones = ref(false);
+const bindDomainFilteredZones = ref([]);
+const bindDomainSearchQuery = ref('');
 
 // 表单验证规则
 const workerFormRules = {
@@ -1236,6 +1345,139 @@ const handleDelete = async (row) => {
   }
 };
 
+// 当前 Worker 的域名列表（兼容 worker_domain 与 worker_domains）
+const workerDomainsList = (row) => {
+  const list = row.worker_domains && Array.isArray(row.worker_domains) ? row.worker_domains : [];
+  if (list.length > 0) return list;
+  if (row.worker_domain) return [row.worker_domain];
+  return [];
+};
+
+// 打开绑定域名对话框并加载该 Worker 所属 CF 账号的域名列表
+const showBindDomainDialog = async (row) => {
+  bindDomainWorker.value = row;
+  bindDomainForm.domain = '';
+  bindDomainForm.prefix = '';
+  bindDomainZoneList.value = [];
+  bindDomainFilteredZones.value = [];
+  bindDomainSearchQuery.value = '';
+  bindDomainDialogVisible.value = true;
+  if (row.cf_account_id) {
+    await loadBindDomainZones(row.cf_account_id, row);
+  }
+};
+
+// 加载绑定域名对话框用的 CF 账号域名列表（排除该 Worker 已绑定的域名）
+const loadBindDomainZones = async (cfAccountId, workerRow) => {
+  bindDomainLoadingZones.value = true;
+  try {
+    const result = await cfAccountApi.getCFAccountZones(cfAccountId, {
+      page: 1,
+      per_page: 200
+    });
+    let zoneList = [];
+    if (Array.isArray(result)) {
+      zoneList = result;
+    } else {
+      zoneList = result.zones || [];
+    }
+    const names = zoneList.map(z => z.name || z);
+    const bound = workerDomainsList(workerRow || bindDomainWorker.value);
+    const boundSet = new Set(bound.map(d => d.toLowerCase()));
+    bindDomainZoneList.value = names.filter(n => !boundSet.has((n || '').toLowerCase()));
+    filterBindDomainZones(bindDomainSearchQuery.value);
+  } catch (err) {
+    console.error('加载 CF 域名列表失败:', err);
+    ElMessage.error('加载域名列表失败: ' + (err.message || ''));
+    bindDomainZoneList.value = [];
+    bindDomainFilteredZones.value = [];
+  } finally {
+    bindDomainLoadingZones.value = false;
+  }
+};
+
+// 绑定域名下拉的搜索过滤
+const filterBindDomainZones = (query) => {
+  bindDomainSearchQuery.value = query || '';
+  if (!query || !query.trim()) {
+    bindDomainFilteredZones.value = [...bindDomainZoneList.value];
+    return;
+  }
+  const q = query.trim().toLowerCase();
+  bindDomainFilteredZones.value = bindDomainZoneList.value.filter(d =>
+    (d || '').toLowerCase().includes(q)
+  );
+};
+
+// 使用自定义输入作为绑定域名
+const useBindDomainCustom = () => {
+  const d = (bindDomainSearchQuery.value || '').trim();
+  if (d) {
+    bindDomainForm.domain = d;
+    bindDomainSearchQuery.value = '';
+  }
+};
+
+// 绑定域名：根据前缀 + 基础域名计算完整域名
+const bindDomainFullDomain = computed(() => {
+  const base = (bindDomainForm.domain || '').trim();
+  const prefix = (bindDomainForm.prefix || '').trim();
+  if (!base) return '';
+  return prefix ? `${prefix}.${base}` : base;
+});
+
+// 绑定域名对话框关闭时清理
+const onBindDomainDialogClose = () => {
+  bindDomainForm.domain = '';
+  bindDomainForm.prefix = '';
+  bindDomainWorker.value = null;
+  bindDomainZoneList.value = [];
+  bindDomainFilteredZones.value = [];
+  bindDomainSearchQuery.value = '';
+};
+
+// 提交绑定域名（子域名前缀 + 基础域名 组合为完整域名）
+const handleBindDomainSubmit = async () => {
+  const base = (bindDomainForm.domain || '').trim();
+  if (!base) {
+    ElMessage.warning('请选择或输入基础域名');
+    return;
+  }
+  const prefix = (bindDomainForm.prefix || '').trim();
+  const fullDomain = prefix ? `${prefix}.${base}` : base;
+  if (!bindDomainWorker.value) return;
+  try {
+    bindDomainSubmitting.value = true;
+    await bindWorkerDomain(bindDomainWorker.value.id, fullDomain);
+    ElMessage.success('域名绑定成功');
+    bindDomainDialogVisible.value = false;
+    loadWorkers();
+  } catch (error) {
+    const msg = error.response?.data?.error || error.message;
+    ElMessage.error('绑定失败: ' + msg);
+  } finally {
+    bindDomainSubmitting.value = false;
+  }
+};
+
+// 解绑域名
+const handleUnbindDomain = async (row, domain) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要解绑域名 "${domain}" 吗？解绑后该域名将不再指向此 Worker。`,
+      '确认解绑',
+      { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' }
+    );
+    await unbindWorkerDomain(row.id, domain);
+    ElMessage.success('域名已解绑');
+    loadWorkers();
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('解绑失败: ' + (error.response?.data?.error || error.message));
+    }
+  }
+};
+
 // 复制到剪贴板
 const copyToClipboard = async (text, label = '内容') => {
   try {
@@ -1356,6 +1598,64 @@ onMounted(async () => {
 .domain-file-info {
   font-size: 12px;
   color: #909399;
+}
+
+.worker-domains-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.worker-domain-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.bind-domain-tip {
+  margin-bottom: 16px;
+  color: #606266;
+  font-size: 14px;
+}
+
+.bind-domain-tip strong {
+  color: #303133;
+}
+
+.bind-domain-empty {
+  padding: 10px;
+  text-align: center;
+  color: #909399;
+  font-size: 13px;
+}
+
+.bind-domain-empty .el-button {
+  margin-top: 8px;
+}
+
+.bind-domain-preview {
+  margin: 0 0 16px 0;
+  padding: 10px 14px;
+  background: #f0f9ff;
+  border: 1px solid #91caff;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bind-domain-preview-label {
+  color: #1890ff;
+  font-weight: 500;
+}
+
+.bind-domain-preview-value {
+  color: #262626;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 :deep(.el-loading-mask) {

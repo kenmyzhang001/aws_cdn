@@ -6,6 +6,7 @@ import (
 	"aws_cdn/internal/models"
 	"aws_cdn/internal/services/cloudflare"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -75,13 +76,15 @@ func (s *DomainRedirectService) CheckSourceDomainAvailable(domain string) (avail
 	if domain == "" {
 		return true, "", 0, ""
 	}
+	domain = strings.TrimSpace(strings.ToLower(domain))
 	var dr models.DomainRedirect
-	if err := s.db.Where("LOWER(source_domain) = LOWER(?)", domain).First(&dr).Error; err == nil {
+	if err := s.db.Where("LOWER(source_domain) = ?", domain).First(&dr).Error; err == nil {
 		return false, "domain_redirect", dr.ID, dr.SourceDomain
 	}
-	var w models.CFWorker
-	if err := s.db.Where("LOWER(worker_domain) = LOWER(?)", domain).First(&w).Error; err == nil {
-		return false, "cf_worker", w.ID, w.WorkerName
+	likePattern := "%\"" + escapeLike(domain) + "\"%"
+	var workers []models.CFWorker
+	if err := s.db.Where("LOWER(worker_domain) = ? OR (worker_domains != '' AND worker_domains LIKE ?)", domain, likePattern).Limit(1).Find(&workers).Error; err == nil && len(workers) > 0 {
+		return false, "cf_worker", workers[0].ID, workers[0].WorkerName
 	}
 	return true, "", 0, ""
 }
