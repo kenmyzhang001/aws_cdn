@@ -40,7 +40,8 @@ func (s *WorkerAPIService) getAuthHeaders() map[string]string {
 
 // WorkerUploadMetadata 用于带绑定的 Worker 上传（multipart）
 type WorkerUploadMetadata struct {
-	MainModule         string          `json:"main_module"`
+	MainModule         string          `json:"main_module,omitempty"`  // ES 模块入口（与 body_part 二选一）
+	BodyPart           string          `json:"body_part,omitempty"`     // 经典 Worker 脚本 part 名（与 main_module 二选一）
 	CompatibilityDate  string          `json:"compatibility_date"`
 	CompatibilityFlags []string        `json:"compatibility_flags,omitempty"`
 	Bindings           []BindingItem   `json:"bindings"`
@@ -59,10 +60,10 @@ func (s *WorkerAPIService) CreateWorkerWithBindings(workerName, script, r2Bucket
 	log := logger.GetLogger()
 	apiURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/workers/scripts/%s", s.AccountID, workerName)
 
+	// 下载模式使用经典 Service Worker 格式（addEventListener），用 body_part 上传，避免 main_module 导致 "Unexpected token 'export'"
 	metadata := WorkerUploadMetadata{
-		MainModule:         "main.js",
-		CompatibilityDate:  "2024-01-01",
-		CompatibilityFlags: []string{"nodejs_compat"}, // 明确使用模块运行时，避免 "Unexpected token 'export'"（被当经典脚本解析）
+		BodyPart:          "script",
+		CompatibilityDate: "2024-01-01",
 		Bindings: []BindingItem{
 			{Type: "r2_bucket", Name: "R2_BUCKET", BucketName: r2BucketName},
 			{Type: "kv_namespace", Name: "DOMAIN_KV", NamespaceID: kvNamespaceID},
@@ -75,13 +76,13 @@ func (s *WorkerAPIService) CreateWorkerWithBindings(workerName, script, r2Bucket
 
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
-	// 先传 main.js part，再传 metadata，便于 CF 正确识别为 ES module 入口
+	// 经典格式：part 名须与 metadata.body_part 一致
 	h := make(textproto.MIMEHeader)
-	h.Set("Content-Disposition", `form-data; name="main.js"; filename="main.js"`)
+	h.Set("Content-Disposition", `form-data; name="script"; filename="script.js"`)
 	h.Set("Content-Type", "application/javascript; charset=utf-8")
 	fw, err := w.CreatePart(h)
 	if err != nil {
-		return fmt.Errorf("创建 main.js part 失败: %w", err)
+		return fmt.Errorf("创建 script part 失败: %w", err)
 	}
 	if _, err := fw.Write([]byte(script)); err != nil {
 		return fmt.Errorf("写入脚本失败: %w", err)
@@ -130,30 +131,33 @@ func (s *WorkerAPIService) CreateWorkerWithBindings(workerName, script, r2Bucket
 }
 
 // GenerateDownloadModeWorkerScript 生成「下载模式」Worker 脚本（KV 查域名→路径，R2 取对象并流式返回，URL 不变直接下载）
+// 使用经典 Service Worker 格式（addEventListener），避免 multipart 上传时被解析为经典脚本导致 "Unexpected token 'export'"；
+// 绑定 DOMAIN_KV、R2_BUCKET 在经典格式下以全局变量注入，见 https://developers.cloudflare.com/workers/reference/migrate-to-module-workers/
 func GenerateDownloadModeWorkerScript() string {
-	return `export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    const hostname = url.hostname;
-    const pathInKV = await env.DOMAIN_KV.get(hostname);
-    if (!pathInKV || pathInKV === "") {
-      return new Response("Not Found", { status: 404, headers: { "Content-Type": "text/plain" } });
-    }
-    const path = pathInKV.startsWith("/") ? pathInKV.slice(1) : pathInKV;
-    const object = await env.R2_BUCKET.get(path);
-    if (!object) {
-      return new Response("Not Found", { status: 404, headers: { "Content-Type": "text/plain" } });
-    }
-    const filename = path.split("/").pop() || "download";
-    const contentType = (object.httpMetadata && object.httpMetadata.contentType) || "application/octet-stream";
-    const headers = new Headers({
-      "Content-Type": contentType,
-      "Content-Disposition": "attachment; filename=\"" + filename + "\"",
-      "Cache-Control": "public, max-age=86400",
-    });
-    return new Response(object.body, { status: 200, headers });
+	return `addEventListener("fetch", function(event) {
+  event.respondWith(handleRequest(event.request));
+});
+async function handleRequest(request) {
+  const url = new URL(request.url);
+  const hostname = url.hostname;
+  const pathInKV = await DOMAIN_KV.get(hostname);
+  if (!pathInKV || pathInKV === "") {
+    return new Response("Not Found", { status: 404, headers: { "Content-Type": "text/plain" } });
   }
-};
+  const path = pathInKV.startsWith("/") ? pathInKV.slice(1) : pathInKV;
+  const object = await R2_BUCKET.get(path);
+  if (!object) {
+    return new Response("Not Found", { status: 404, headers: { "Content-Type": "text/plain" } });
+  }
+  const filename = path.split("/").pop() || "download";
+  const contentType = (object.httpMetadata && object.httpMetadata.contentType) || "application/octet-stream";
+  const headers = new Headers({
+    "Content-Type": contentType,
+    "Content-Disposition": "attachment; filename=\"" + filename + "\"",
+    "Cache-Control": "public, max-age=86400",
+  });
+  return new Response(object.body, { status: 200, headers });
+}
 `
 }
 
