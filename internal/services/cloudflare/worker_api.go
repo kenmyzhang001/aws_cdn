@@ -40,9 +40,10 @@ func (s *WorkerAPIService) getAuthHeaders() map[string]string {
 
 // WorkerUploadMetadata 用于带绑定的 Worker 上传（multipart）
 type WorkerUploadMetadata struct {
-	MainModule        string        `json:"main_module"`
-	CompatibilityDate string        `json:"compatibility_date"`
-	Bindings          []BindingItem `json:"bindings"`
+	MainModule         string          `json:"main_module"`
+	CompatibilityDate  string          `json:"compatibility_date"`
+	CompatibilityFlags []string        `json:"compatibility_flags,omitempty"`
+	Bindings           []BindingItem   `json:"bindings"`
 }
 
 // BindingItem Worker 绑定项（KV / R2）
@@ -59,8 +60,9 @@ func (s *WorkerAPIService) CreateWorkerWithBindings(workerName, script, r2Bucket
 	apiURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/workers/scripts/%s", s.AccountID, workerName)
 
 	metadata := WorkerUploadMetadata{
-		MainModule:        "main.js",
-		CompatibilityDate: "2024-01-01",
+		MainModule:         "main.js",
+		CompatibilityDate:  "2024-01-01",
+		CompatibilityFlags: []string{"nodejs_compat"}, // 明确使用模块运行时，避免 "Unexpected token 'export'"（被当经典脚本解析）
 		Bindings: []BindingItem{
 			{Type: "r2_bucket", Name: "R2_BUCKET", BucketName: r2BucketName},
 			{Type: "kv_namespace", Name: "DOMAIN_KV", NamespaceID: kvNamespaceID},
@@ -73,11 +75,7 @@ func (s *WorkerAPIService) CreateWorkerWithBindings(workerName, script, r2Bucket
 
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
-	// part: metadata
-	if err := w.WriteField("metadata", string(metaJSON)); err != nil {
-		return fmt.Errorf("写入 metadata 失败: %w", err)
-	}
-	// part: main.js（须用 application/javascript 以便 CF 识别为 ES module，否则会报 "Main module must be an ES module"）
+	// 先传 main.js part，再传 metadata，便于 CF 正确识别为 ES module 入口
 	h := make(textproto.MIMEHeader)
 	h.Set("Content-Disposition", `form-data; name="main.js"; filename="main.js"`)
 	h.Set("Content-Type", "application/javascript; charset=utf-8")
@@ -87,6 +85,9 @@ func (s *WorkerAPIService) CreateWorkerWithBindings(workerName, script, r2Bucket
 	}
 	if _, err := fw.Write([]byte(script)); err != nil {
 		return fmt.Errorf("写入脚本失败: %w", err)
+	}
+	if err := w.WriteField("metadata", string(metaJSON)); err != nil {
+		return fmt.Errorf("写入 metadata 失败: %w", err)
 	}
 	if err := w.Close(); err != nil {
 		return fmt.Errorf("关闭 multipart 失败: %w", err)
