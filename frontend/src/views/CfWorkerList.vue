@@ -703,13 +703,24 @@
           <span class="bind-domain-preview-value">{{ bindDomainFullDomain }}</span>
         </div>
         <el-form-item v-if="bindDomainWorker?.business_mode === '下载'" label="文件路径" required>
-          <el-input
+          <el-select
             v-model="bindDomainForm.file_path"
-            placeholder="该域名访问时下载的 R2 文件路径，如 releases/app.apk"
+            placeholder="选择或输入该域名对应的 R2 对象路径"
+            filterable
+            allow-create
+            default-first-option
             clearable
             style="width: 100%"
-          />
-          <div class="form-tip">下载模式绑定域名时必须指定该域名对应的 R2 对象路径</div>
+            :loading="bindDomainLoadingFiles"
+          >
+            <el-option
+              v-for="path in bindDomainFilePaths"
+              :key="path"
+              :label="path"
+              :value="path"
+            />
+          </el-select>
+          <div class="form-tip">下载模式绑定域名时必须指定该域名对应的 R2 对象路径，可从下拉选择或手动输入</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -728,6 +739,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { Plus, Delete, RefreshRight, Loading, Link, DocumentCopy } from '@element-plus/icons-vue';
 import {
   getWorkerList,
+  getWorker,
   createWorker,
   updateWorker,
   deleteWorker,
@@ -851,6 +863,9 @@ const bindDomainZoneList = ref([]);
 const bindDomainLoadingZones = ref(false);
 const bindDomainFilteredZones = ref([]);
 const bindDomainSearchQuery = ref('');
+// 下载模式绑定域名：当前 Worker 所用 R2 桶内的文件路径列表（供下拉选择）
+const bindDomainFilePaths = ref([]);
+const bindDomainLoadingFiles = ref(false);
 
 // 表单验证规则
 const workerFormRules = {
@@ -1631,6 +1646,28 @@ const workerDomainsList = (row) => {
   return [];
 };
 
+// 下载模式：加载绑定域名对话框所用 Worker 的 R2 桶内文件路径列表（供文件路径下拉）
+// bucketId 显式传入，确保即使用列表行缺少 r2_bucket_id 时也能通过详情接口拿到后调用
+const loadBindDomainFilePaths = async (bucketId) => {
+  const id = bucketId ?? bindDomainWorker.value?.r2_bucket_id;
+  if (!id) {
+    bindDomainFilePaths.value = [];
+    return;
+  }
+  bindDomainLoadingFiles.value = true;
+  try {
+    const res = await r2Api.listFiles(id, '');
+    const raw = res?.files || [];
+    const paths = [...new Set(raw)].filter(k => k && !String(k).endsWith('/')).sort();
+    bindDomainFilePaths.value = paths;
+  } catch (e) {
+    console.error('加载 R2 桶内文件列表失败', e);
+    bindDomainFilePaths.value = [];
+  } finally {
+    bindDomainLoadingFiles.value = false;
+  }
+};
+
 // 打开绑定域名对话框并加载该 Worker 所属 CF 账号的域名列表
 const showBindDomainDialog = async (row) => {
   bindDomainWorker.value = row;
@@ -1640,9 +1677,29 @@ const showBindDomainDialog = async (row) => {
   bindDomainZoneList.value = [];
   bindDomainFilteredZones.value = [];
   bindDomainSearchQuery.value = '';
+  bindDomainFilePaths.value = [];
   bindDomainDialogVisible.value = true;
   if (row.cf_account_id) {
     await loadBindDomainZones(row.cf_account_id, row);
+  }
+  const isDownload = row.business_mode === '下载';
+  let bucketId = row.r2_bucket_id;
+  if (isDownload) {
+    if (!bucketId && row.id) {
+      try {
+        const detail = await getWorker(row.id);
+        const full = detail?.data ?? detail;
+        if (full?.r2_bucket_id) {
+          bucketId = full.r2_bucket_id;
+          bindDomainWorker.value = { ...row, ...full };
+        }
+      } catch (e) {
+        console.warn('获取 Worker 详情失败', e);
+      }
+    }
+    if (bucketId) {
+      loadBindDomainFilePaths(bucketId);
+    }
   }
 };
 
@@ -1709,11 +1766,13 @@ const bindDomainFullDomain = computed(() => {
 const onBindDomainDialogClose = () => {
   bindDomainForm.domain = '';
   bindDomainForm.prefix = '';
+  bindDomainForm.file_path = '';
   bindDomainWorker.value = null;
   bindDomainZoneList.value = [];
-  bindDomainForm.file_path = '';
   bindDomainFilteredZones.value = [];
   bindDomainSearchQuery.value = '';
+  bindDomainFilePaths.value = [];
+  bindDomainLoadingFiles.value = false;
 };
 
 // 提交绑定域名（子域名前缀 + 基础域名 组合为完整域名；下载模式需填文件路径）
