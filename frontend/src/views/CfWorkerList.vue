@@ -180,7 +180,7 @@
     <el-dialog
       v-model="dialogVisible"
       :title="dialogTitle"
-      width="600px"
+      width="900px"
       @close="handleDialogClose"
     >
       <el-form
@@ -221,26 +221,27 @@
           <div class="form-tip">推广：域名跳转/轮播；下载：多域名对应 R2 文件，访问即下载</div>
         </el-form-item>
 
-        <!-- 下载模式：R2 存储桶 + 域名→路径 -->
+        <!-- 下载模式：R2 存储桶 + 域名→路径（仅显示当前 CF 账号下的桶） -->
         <template v-if="workerForm.business_mode === '下载'">
           <el-form-item label="R2 存储桶" prop="r2_bucket_id" :required="workerForm.business_mode === '下载' && !isEdit">
             <el-select
               v-model="workerForm.r2_bucket_id"
-              placeholder="请选择 R2 存储桶"
+              :placeholder="workerForm.cf_account_id ? '请选择 R2 存储桶' : '请先选择 CF 账号'"
               style="width: 100%"
               clearable
-              :disabled="isEdit"
+              :disabled="isEdit || !workerForm.cf_account_id"
               @focus="loadR2BucketsIfNeeded"
             >
               <el-option
-                v-for="bucket in r2Buckets"
+                v-for="bucket in r2BucketsForCurrentAccount"
                 :key="bucket.id"
-                :label="`${bucket.bucket_name} (${bucket.cf_account?.email || ''})`"
+                :label="bucket.bucket_name"
                 :value="bucket.id"
               />
             </el-select>
             <div class="form-tip" v-if="isEdit">创建后不可更换存储桶</div>
-            <div class="form-tip" v-else>该 Worker 将绑定此桶，多域名对应桶内文件路径</div>
+            <div class="form-tip" v-else-if="!workerForm.cf_account_id">请先选择上方的 CF 账号</div>
+            <div class="form-tip" v-else>仅显示该 CF 账号下的存储桶，共 {{ r2BucketsForCurrentAccount.length }} 个</div>
           </el-form-item>
           <el-form-item label="域名与文件路径" required>
             <div class="domain-paths-editor">
@@ -249,13 +250,65 @@
                 :key="idx"
                 class="domain-path-row"
               >
-                <el-input v-model="row.domain" placeholder="域名，如 download1.example.com" clearable style="width: 220px;" />
-                <el-input v-model="row.file_path" placeholder="R2 路径，如 releases/app.apk" clearable style="width: 220px;" />
+                <div class="domain-path-domain-group">
+                  <el-input
+                    v-model="row.domain_prefix"
+                    placeholder="子域名前缀（可选）"
+                    clearable
+                    style="width: 150px;"
+                    @input="syncDomainPathRowDomain(idx)"
+                  >
+                    <template #append>.</template>
+                  </el-input>
+                  <el-select
+                    v-model="row.domain_base"
+                    filterable
+                    allow-create
+                    default-first-option
+                    placeholder="请先选择 CF 账号"
+                    clearable
+                    style="width: 200px;"
+                    :disabled="!workerForm.cf_account_id"
+                    :loading="loadingWorkerDomains"
+                    :filter-method="(q) => filterWorkerDomains(q)"
+                    @focus="loadDownloadZonesIfNeeded"
+                    @change="syncDomainPathRowDomain(idx)"
+                  >
+                    <el-option
+                      v-for="d in filteredWorkerDomains"
+                      :key="d"
+                      :label="d"
+                      :value="d"
+                    />
+                    <el-option v-if="workerZonesPagination.hasMore && filteredWorkerDomains.length > 0" :value="null" disabled>
+                      <span style="color: #409EFF; cursor: pointer;" @click.stop="loadMoreWorkerZones">加载更多域名</span>
+                    </el-option>
+                  </el-select>
+                </div>
+                <el-select
+                  v-model="row.file_path"
+                  filterable
+                  allow-create
+                  default-first-option
+                  placeholder="请先选择 R2 存储桶后可搜索/选择文件"
+                  clearable
+                  style="width: 300px;"
+                  :disabled="!workerForm.r2_bucket_id"
+                  :loading="loadingBucketFiles"
+                  @focus="loadBucketFilePathsIfNeeded"
+                >
+                  <el-option
+                    v-for="path in bucketFilePaths"
+                    :key="path"
+                    :label="path"
+                    :value="path"
+                  />
+                </el-select>
                 <el-button type="danger" link :icon="Delete" @click="removeDomainPathRow(idx)" :disabled="workerForm.domain_paths_rows.length <= 1" />
               </div>
               <el-button type="primary" link :icon="Plus" @click="addDomainPathRow">添加一行</el-button>
             </div>
-            <div class="form-tip">每行一个「域名 → 该域名访问时下载的 R2 文件路径」，至少一行</div>
+            <div class="form-tip">域名可填可选子域名前缀 + 从当前 CF 账号托管域名中选择；文件路径可下拉选择当前桶内文件或手动输入</div>
           </el-form-item>
         </template>
 
@@ -702,6 +755,10 @@ const cfAccounts = ref([]);
 // R2 存储桶列表
 const r2Buckets = ref([]);
 
+// 下载模式：当前所选 R2 桶内的文件路径列表（用于域名→路径下拉）
+const bucketFilePaths = ref([]);
+const loadingBucketFiles = ref(false);
+
 // 当前选择的存储桶对应的下载域名列表
 const selectedBucketDomains = ref([]);
 
@@ -751,6 +808,13 @@ const pagination = reactive({
 const dialogVisible = ref(false);
 const isEdit = ref(false);
 const dialogTitle = computed(() => (isEdit.value ? '编辑 Worker' : '创建 Worker'));
+
+// 下载模式：仅显示当前所选 CF 账号下的 R2 存储桶
+const r2BucketsForCurrentAccount = computed(() => {
+  const accountId = workerForm.cf_account_id;
+  if (!accountId) return [];
+  return (r2Buckets.value || []).filter(b => b.cf_account_id === accountId);
+});
 const submitting = ref(false);
 
 // Worker 表单
@@ -976,6 +1040,10 @@ const handleCFAccountChange = async (cfAccountId) => {
   workerDomains.value = [];
   filteredWorkerDomains.value = [];
   workerDomainSearchQuery.value = '';
+  // 下载模式：切换 CF 账号后清空已选 R2 存储桶，避免选到其他账号的桶
+  if (workerForm.business_mode === '下载') {
+    workerForm.r2_bucket_id = null;
+  }
   
   // 重置分页状态
   workerZonesPagination.page = 1;
@@ -990,6 +1058,13 @@ const handleCFAccountChange = async (cfAccountId) => {
   // 加载该账号下的域名列表（第一页）
   await loadCFAccountZones(cfAccountId, false);
 };
+
+// 下载模式：R2 存储桶变化时重新加载该桶的文件列表
+watch(() => workerForm.r2_bucket_id, (bucketId) => {
+  if (!dialogVisible.value || workerForm.business_mode !== '下载') return;
+  if (bucketId) loadBucketFilePaths();
+  else bucketFilePaths.value = [];
+});
 
 // 监听 CF 账号变化，自动重新加载域名列表
 watch(() => workerForm.cf_account_id, async (newAccountId, oldAccountId) => {
@@ -1221,8 +1296,11 @@ const showEditDialog = (row) => {
   const targets = row.targets && Array.isArray(row.targets) ? row.targets : (row.target_domain ? [row.target_domain] : []);
   const dp = row.domain_paths && typeof row.domain_paths === 'object' ? row.domain_paths : {};
   const domainPathsRows = Object.keys(dp).length > 0
-    ? Object.entries(dp).map(([domain, file_path]) => ({ domain, file_path }))
-    : [{ domain: '', file_path: '' }];
+    ? Object.entries(dp).map(([domain, file_path]) => {
+        const { prefix, base } = parseDomainToPrefixBase(domain);
+        return { domain, domain_prefix: prefix, domain_base: base, file_path };
+      })
+    : [{ domain: '', domain_prefix: '', domain_base: '', file_path: '' }];
   Object.assign(workerForm, {
     cf_account_id: row.cf_account_id,
     worker_name: row.worker_name,
@@ -1241,7 +1319,10 @@ const showEditDialog = (row) => {
     r2_bucket_id: row.r2_bucket_id || null,
     domain_paths_rows: domainPathsRows
   });
-  if (row.business_mode === '下载') loadR2BucketsIfNeeded();
+  if (row.business_mode === '下载') {
+    loadR2BucketsIfNeeded();
+    if (row.r2_bucket_id) loadBucketFilePaths();
+  }
   dialogVisible.value = true;
 };
 
@@ -1264,7 +1345,7 @@ const handleDialogClose = () => {
     status: 'active',
     description: '',
     r2_bucket_id: null,
-    domain_paths_rows: [{ domain: '', file_path: '' }]
+    domain_paths_rows: [{ domain: '', domain_prefix: '', domain_base: '', file_path: '' }]
   });
   currentWorkerId.value = null;
   domainInputMode.value = 'manual';
@@ -1273,27 +1354,78 @@ const handleDialogClose = () => {
   workerDomains.value = [];
   filteredWorkerDomains.value = [];
   workerDomainSearchQuery.value = '';
+  bucketFilePaths.value = [];
   resetDomainPagination();
 };
 
-// 下载模式：域名→路径行动态增删
+// 下载模式：将一行的 prefix + base 同步到 domain
+const syncDomainPathRowDomain = (idx) => {
+  const row = workerForm.domain_paths_rows[idx];
+  if (!row) return;
+  const prefix = (row.domain_prefix || '').trim();
+  const base = (row.domain_base || '').trim();
+  row.domain = base ? (prefix ? `${prefix}.${base}` : base) : '';
+};
+
+// 下载模式：打开域名下拉时加载当前 CF 账号的托管域名列表
+const loadDownloadZonesIfNeeded = () => {
+  if (workerForm.business_mode !== '下载' || !workerForm.cf_account_id) return;
+  if (workerDomains.value.length === 0) loadCFAccountZones(workerForm.cf_account_id, false);
+};
+
+// 下载模式：域名→路径行动态增删（每行含 domain_prefix、domain_base，同步到 domain）
 const addDomainPathRow = () => {
-  workerForm.domain_paths_rows.push({ domain: '', file_path: '' });
+  workerForm.domain_paths_rows.push({ domain: '', domain_prefix: '', domain_base: '', file_path: '' });
 };
 const removeDomainPathRow = (idx) => {
   if (workerForm.domain_paths_rows.length <= 1) return;
   workerForm.domain_paths_rows.splice(idx, 1);
 };
+
+// 将完整域名解析为子域名前缀 + 基础域名（如 download.example.com -> prefix=download, base=example.com）
+const parseDomainToPrefixBase = (domain) => {
+  const d = (domain || '').trim();
+  if (!d) return { prefix: '', base: '' };
+  const idx = d.indexOf('.');
+  if (idx <= 0) return { prefix: '', base: d };
+  return { prefix: d.slice(0, idx), base: d.slice(idx + 1) };
+};
 const loadR2BucketsIfNeeded = () => {
   if (r2Buckets.value.length === 0) loadR2Buckets();
+};
+
+// 下载模式：加载当前所选 R2 桶的文件路径列表（供下拉选择）
+const loadBucketFilePaths = async () => {
+  const bucketId = workerForm.r2_bucket_id;
+  if (!bucketId) {
+    bucketFilePaths.value = [];
+    return;
+  }
+  loadingBucketFiles.value = true;
+  try {
+    const res = await r2Api.listFiles(bucketId, '');
+    const raw = res?.files || [];
+    // 只保留对象路径（排除目录，即不以 / 结尾的 key）
+    const paths = [...new Set(raw)].filter(k => k && !String(k).endsWith('/')).sort();
+    bucketFilePaths.value = paths;
+  } catch (e) {
+    console.error('加载桶内文件列表失败', e);
+    bucketFilePaths.value = [];
+  } finally {
+    loadingBucketFiles.value = false;
+  }
+};
+
+const loadBucketFilePathsIfNeeded = () => {
+  if (workerForm.business_mode === '下载' && workerForm.r2_bucket_id) loadBucketFilePaths();
 };
 const handleBusinessModeChange = (mode) => {
   if (mode === '下载') {
     loadR2BucketsIfNeeded();
-    if (!workerForm.domain_paths_rows?.length) workerForm.domain_paths_rows = [{ domain: '', file_path: '' }];
+    if (!workerForm.domain_paths_rows?.length) workerForm.domain_paths_rows = [{ domain: '', domain_prefix: '', domain_base: '', file_path: '' }];
   } else {
     workerForm.r2_bucket_id = null;
-    workerForm.domain_paths_rows = [{ domain: '', file_path: '' }];
+    workerForm.domain_paths_rows = [{ domain: '', domain_prefix: '', domain_base: '', file_path: '' }];
   }
 };
 
@@ -1326,10 +1458,16 @@ const handleSubmit = async () => {
     const isDownload = workerForm.business_mode === '下载';
 
     if (isDownload) {
+      if (!isEdit.value && !workerForm.cf_account_id) {
+        ElMessage.error('请先选择 CF 账号');
+        return;
+      }
       if (!workerForm.r2_bucket_id && !isEdit.value) {
         ElMessage.error('请选择 R2 存储桶');
         return;
       }
+      // 提交前同步每行的 prefix+base 到 domain
+      (workerForm.domain_paths_rows || []).forEach((_, idx) => syncDomainPathRowDomain(idx));
       const rows = (workerForm.domain_paths_rows || []).filter(r => (r.domain || '').trim() && (r.file_path || '').trim());
       if (rows.length === 0) {
         ElMessage.error('请至少填写一行有效的「域名 + 文件路径」');
@@ -1763,7 +1901,13 @@ onMounted(async () => {
   gap: 10px;
   margin-bottom: 8px;
 }
-.domain-paths-editor .domain-path-row .el-input { flex: 0 0 auto; }
+.domain-paths-editor .domain-path-row .el-input,
+.domain-paths-editor .domain-path-row .el-select { flex: 0 0 auto; }
+.domain-path-domain-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 .text-muted {
   color: #909399;

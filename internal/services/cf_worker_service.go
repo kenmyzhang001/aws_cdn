@@ -519,20 +519,33 @@ func (s *CFWorkerService) UpdateWorker(id uint, req *UpdateWorkerRequest) (*mode
 		worker.BusinessMode = req.BusinessMode
 	}
 
-	// 下载模式：同步 domain_paths 到 KV
+	// 下载模式：仅当请求带了 domain_paths 时同步到 KV（先删掉已移除的 key，再写入新/更新的）
 	if worker.BusinessMode == "下载" && worker.KVNamespaceID != "" && len(req.DomainPaths) > 0 {
 		kvService := cloudflare.NewKVAPIService(cfAccount.APIToken, cfAccount.AccountID)
+		newMap := make(map[string]string)
 		for domain, path := range req.DomainPaths {
-			domain = strings.TrimSpace(strings.ToLower(domain))
-			path = strings.TrimSpace(path)
-			if domain == "" || path == "" {
+			d := strings.TrimSpace(strings.ToLower(domain))
+			p := strings.TrimSpace(path)
+			if d == "" || p == "" {
 				continue
 			}
+			newMap[d] = p
+		}
+		// 从 KV 中删除本次更新后不再存在的域名
+		for oldDomain := range worker.DomainPathsMap {
+			if _, stillExists := newMap[oldDomain]; !stillExists {
+				if err := kvService.DeleteKVKey(worker.KVNamespaceID, oldDomain); err != nil {
+					log.WithError(err).WithField("domain", oldDomain).Warn("删除 KV 键失败，继续")
+				}
+			}
+		}
+		// 写入新/更新的 域名→路径
+		for domain, path := range newMap {
 			if err := kvService.WriteKVEntry(worker.KVNamespaceID, domain, path); err != nil {
 				log.WithError(err).WithFields(map[string]interface{}{"domain": domain, "path": path}).Warn("同步 KV 条目失败")
 			}
 		}
-		worker.DomainPathsMap = req.DomainPaths
+		worker.DomainPathsMap = newMap
 	}
 
 	if needScriptUpdate && len(newTargets) > 0 {
@@ -795,6 +808,17 @@ func (s *CFWorkerService) UnbindWorkerDomain(workerID uint, domain string) (*mod
 	if binding.CustomDomainID != "" {
 		if err := cfService.DeleteWorkerCustomDomain(binding.CustomDomainID); err != nil {
 			log.WithError(err).WithFields(map[string]interface{}{"worker_id": workerID, "domain": domain}).Warn("删除 Worker 自定义域名失败")
+		}
+	}
+
+	// 下载模式：从 KV 中删除该域名的 key，并从 DomainPathsMap 移除
+	if worker.BusinessMode == "下载" && worker.KVNamespaceID != "" {
+		kvService := cloudflare.NewKVAPIService(cfAccount.APIToken, cfAccount.AccountID)
+		if err := kvService.DeleteKVKey(worker.KVNamespaceID, domain); err != nil {
+			log.WithError(err).WithField("domain", domain).Warn("删除 KV 键失败，继续")
+		}
+		if worker.DomainPathsMap != nil {
+			delete(worker.DomainPathsMap, domain)
 		}
 	}
 

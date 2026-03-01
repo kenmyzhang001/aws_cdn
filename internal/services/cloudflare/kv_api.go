@@ -106,6 +106,33 @@ func (s *KVAPIService) WriteKVEntry(namespaceID, key, value string) error {
 	return nil
 }
 
+// DeleteKVKey 删除 KV 中指定 key（解绑域名或更新 domain_paths 时清理）
+func (s *KVAPIService) DeleteKVKey(namespaceID, key string) error {
+	if namespaceID == "" || key == "" {
+		return nil
+	}
+	encodedKey := url.PathEscape(key)
+	apiURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/storage/kv/namespaces/%s/values/%s",
+		s.AccountID, namespaceID, encodedKey)
+	req, err := http.NewRequest("DELETE", apiURL, nil)
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+s.APIToken)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("删除 KV 键失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
 // DeleteKVNamespace 删除 KV 命名空间（可选，用于 Worker 删除时清理）
 func (s *KVAPIService) DeleteKVNamespace(namespaceID string) error {
 	log := logger.GetLogger()
