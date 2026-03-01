@@ -68,10 +68,17 @@ func (h *Ec2InstanceHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": inst})
 }
 
+// createInstancePassword 创建实例所需的校验密码（硬编码，仅用于防误操作）
+const createInstancePassword = "create_2026"
+
 func (h *Ec2InstanceHandler) Create(c *gin.Context) {
 	var req services.CreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误: " + err.Error()})
+		return
+	}
+	if req.Password != createInstancePassword {
+		c.JSON(http.StatusForbidden, gin.H{"error": "创建密码错误"})
 		return
 	}
 	inst, err := h.svc.Create(&req)

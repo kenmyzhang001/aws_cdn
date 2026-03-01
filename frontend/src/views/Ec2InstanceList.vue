@@ -168,6 +168,15 @@
         <el-form-item label="备注">
           <el-input v-model="createForm.note" type="textarea" :rows="2" placeholder="可选" />
         </el-form-item>
+        <el-form-item label="创建密码" prop="password">
+          <el-input
+            v-model="createForm.password"
+            type="password"
+            placeholder="请输入创建密码"
+            show-password
+            autocomplete="off"
+          />
+        </el-form-item>
         <div style="color: #909399; font-size: 12px">实例规格固定为 t3.micro，AMI 与安全组由所选地区自动匹配。</div>
       </el-form>
       <template #footer>
@@ -220,11 +229,12 @@ const paginationDeleted = ref({ page: 1, page_size: 10, total: 0 })
 
 const createVisible = ref(false)
 const createLoading = ref(false)
-const createForm = ref({ region: '', name: '', note: '' })
+const createForm = ref({ region: '', name: '', note: '', password: '' })
 const createFormRef = ref(null)
 const createRules = {
   region: [{ required: true, message: '请选择地区', trigger: 'change' }],
-  name: [{ required: true, message: '请输入名称', trigger: 'blur' }]
+  name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入创建密码', trigger: 'blur' }]
 }
 
 const editVisible = ref(false)
@@ -330,7 +340,7 @@ function showCreateDialog() {
 }
 
 function resetCreateForm() {
-  createForm.value = { region: '', name: '', note: '' }
+  createForm.value = { region: '', name: '', note: '', password: '' }
   createFormRef.value?.clearValidate()
 }
 

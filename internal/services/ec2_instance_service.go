@@ -46,9 +46,10 @@ func (s *Ec2InstanceService) GetRegionConfig() []RegionConfig {
 }
 
 type CreateRequest struct {
-	Region string `json:"region" binding:"required"`
-	Name   string `json:"name" binding:"required"`
-	Note   string `json:"note"`
+	Region   string `json:"region" binding:"required"`
+	Name     string `json:"name" binding:"required"`
+	Note     string `json:"note"`
+	Password string `json:"password" binding:"required"` // 创建实例时的校验密码，handler 中校验后不落库
 }
 
 type UpdateRequest struct {
