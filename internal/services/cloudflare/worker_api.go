@@ -134,14 +134,34 @@ func (s *WorkerAPIService) CreateWorkerWithBindings(workerName, script, r2Bucket
 // 使用经典 Service Worker 格式（addEventListener），避免 multipart 上传时被解析为经典脚本导致 "Unexpected token 'export'"；
 // 绑定 DOMAIN_KV、R2_BUCKET 在经典格式下以全局变量注入，见 https://developers.cloudflare.com/workers/reference/migrate-to-module-workers/
 // 使用 Cache API 先查 caches.default，命中则直接返回（响应会带 cf-cache-status: HIT）；未命中则从 R2 取并 cache.put 后返回。
+// 响应增加 CORS 头以支持跨域：Access-Control-Allow-Origin: *、Allow-Headers: *、Expose-Headers 等，并处理 OPTIONS 预检。
 func GenerateDownloadModeWorkerScript() string {
 	return `addEventListener("fetch", function(event) {
   event.respondWith(handleRequest(event.request, event));
 });
+function addCorsHeaders(response) {
+  const r = new Response(response.body, { status: response.status, statusText: response.statusText, headers: response.headers });
+  r.headers.set("Access-Control-Allow-Origin", "*");
+  r.headers.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+  r.headers.set("Access-Control-Allow-Headers", "*");
+  r.headers.set("Access-Control-Max-Age", "3600");
+  r.headers.set("Access-Control-Expose-Headers", "ETag, Content-Length, Content-Type, Content-Range, Content-Disposition");
+  return r;
+}
 async function handleRequest(request, event) {
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+      "Access-Control-Allow-Headers": "*",
+      "Access-Control-Max-Age": "3600",
+      "Access-Control-Expose-Headers": "ETag, Content-Length, Content-Type, Content-Range, Content-Disposition",
+    } });
+  }
+
   const cache = caches.default;
   const cached = await cache.match(request);
-  if (cached) return cached;
+  if (cached) return addCorsHeaders(cached);
 
   const url = new URL(request.url);
   const hostname = url.hostname;
@@ -163,7 +183,7 @@ async function handleRequest(request, event) {
   });
   const response = new Response(object.body, { status: 200, headers });
   event.waitUntil(cache.put(request, response.clone()));
-  return response;
+  return addCorsHeaders(response);
 }
 `
 }
