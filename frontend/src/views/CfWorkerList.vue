@@ -1516,6 +1516,7 @@ const handleSubmit = async () => {
           return;
         }
         const createPayload = {
+          cf_account_id: workerForm.cf_account_id,
           worker_name: workerName,
           worker_domain: firstDomain,
           business_mode: '下载',
