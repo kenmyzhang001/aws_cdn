@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"time"
 )
 
@@ -76,8 +77,11 @@ func (s *WorkerAPIService) CreateWorkerWithBindings(workerName, script, r2Bucket
 	if err := w.WriteField("metadata", string(metaJSON)); err != nil {
 		return fmt.Errorf("写入 metadata 失败: %w", err)
 	}
-	// part: main.js（脚本内容，part 名须与 main_module 一致）
-	fw, err := w.CreateFormFile("main.js", "main.js")
+	// part: main.js（须用 application/javascript 以便 CF 识别为 ES module，否则会报 "Main module must be an ES module"）
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", `form-data; name="main.js"; filename="main.js"`)
+	h.Set("Content-Type", "application/javascript; charset=utf-8")
+	fw, err := w.CreatePart(h)
 	if err != nil {
 		return fmt.Errorf("创建 main.js part 失败: %w", err)
 	}
