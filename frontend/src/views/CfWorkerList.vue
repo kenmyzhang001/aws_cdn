@@ -120,7 +120,10 @@
         </el-table-column>
         <el-table-column label="目标" width="220">
           <template #default="{ row }">
-            <template v-if="row.targets && row.targets.length > 1">
+            <template v-if="row.business_mode === '下载'">
+              <span class="text-muted">R2 桶 + 域名→路径</span>
+            </template>
+            <template v-else-if="row.targets && row.targets.length > 1">
               <el-tooltip :content="row.targets.join('\n')" placement="top" max-width="400">
                 <span>{{ row.target_domain || row.targets[0] }}</span>
               </el-tooltip>
@@ -211,12 +214,53 @@
         </el-form-item>
 
         <el-form-item label="业务模式">
-          <el-radio-group v-model="workerForm.business_mode">
+          <el-radio-group v-model="workerForm.business_mode" @change="handleBusinessModeChange">
             <el-radio label="推广">推广</el-radio>
             <el-radio label="下载">下载</el-radio>
           </el-radio-group>
-          <div class="form-tip">用于区分 Worker 用途：推广或下载</div>
+          <div class="form-tip">推广：域名跳转/轮播；下载：多域名对应 R2 文件，访问即下载</div>
         </el-form-item>
+
+        <!-- 下载模式：R2 存储桶 + 域名→路径 -->
+        <template v-if="workerForm.business_mode === '下载'">
+          <el-form-item label="R2 存储桶" prop="r2_bucket_id" :required="workerForm.business_mode === '下载' && !isEdit">
+            <el-select
+              v-model="workerForm.r2_bucket_id"
+              placeholder="请选择 R2 存储桶"
+              style="width: 100%"
+              clearable
+              :disabled="isEdit"
+              @focus="loadR2BucketsIfNeeded"
+            >
+              <el-option
+                v-for="bucket in r2Buckets"
+                :key="bucket.id"
+                :label="`${bucket.bucket_name} (${bucket.cf_account?.email || ''})`"
+                :value="bucket.id"
+              />
+            </el-select>
+            <div class="form-tip" v-if="isEdit">创建后不可更换存储桶</div>
+            <div class="form-tip" v-else>该 Worker 将绑定此桶，多域名对应桶内文件路径</div>
+          </el-form-item>
+          <el-form-item label="域名与文件路径" required>
+            <div class="domain-paths-editor">
+              <div
+                v-for="(row, idx) in workerForm.domain_paths_rows"
+                :key="idx"
+                class="domain-path-row"
+              >
+                <el-input v-model="row.domain" placeholder="域名，如 download1.example.com" clearable style="width: 220px;" />
+                <el-input v-model="row.file_path" placeholder="R2 路径，如 releases/app.apk" clearable style="width: 220px;" />
+                <el-button type="danger" link :icon="Delete" @click="removeDomainPathRow(idx)" :disabled="workerForm.domain_paths_rows.length <= 1" />
+              </div>
+              <el-button type="primary" link :icon="Plus" @click="addDomainPathRow">添加一行</el-button>
+            </div>
+            <div class="form-tip">每行一个「域名 → 该域名访问时下载的 R2 文件路径」，至少一行</div>
+          </el-form-item>
+        </template>
+
+        <!-- 推广模式：轮播模式 + Worker 域名 + 目标 -->
+        <template v-if="workerForm.business_mode === '推广'">
         <el-form-item label="轮播模式">
           <el-radio-group v-model="workerForm.mode" @change="handleWorkerModeChange">
             <el-radio label="single">单链接(无兜底)</el-radio>
@@ -494,6 +538,7 @@
             </el-form-item>
           </template>
         </template>
+        </template>
 
         <el-form-item label="状态" prop="status" v-if="isEdit">
           <el-select v-model="workerForm.status" style="width: 100%">
@@ -604,6 +649,15 @@
           <span class="bind-domain-preview-label">完整域名：</span>
           <span class="bind-domain-preview-value">{{ bindDomainFullDomain }}</span>
         </div>
+        <el-form-item v-if="bindDomainWorker?.business_mode === '下载'" label="文件路径" required>
+          <el-input
+            v-model="bindDomainForm.file_path"
+            placeholder="该域名访问时下载的 R2 文件路径，如 releases/app.apk"
+            clearable
+            style="width: 100%"
+          />
+          <div class="form-tip">下载模式绑定域名时必须指定该域名对应的 R2 对象路径</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="bindDomainDialogVisible = false">取消</el-button>
@@ -618,7 +672,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Plus, RefreshRight, Loading, Link, DocumentCopy } from '@element-plus/icons-vue';
+import { Plus, Delete, RefreshRight, Loading, Link, DocumentCopy } from '@element-plus/icons-vue';
 import {
   getWorkerList,
   createWorker,
@@ -715,7 +769,10 @@ const workerForm = reactive({
   rotate_days: 7,
   base_date: '',
   status: 'active',
-  description: ''
+  description: '',
+  // 下载模式
+  r2_bucket_id: null,
+  domain_paths_rows: [{ domain: '', file_path: '' }]
 });
 
 // 当前编辑的 Worker ID
@@ -724,7 +781,7 @@ const currentWorkerId = ref(null);
 // 绑定域名对话框
 const bindDomainDialogVisible = ref(false);
 const bindDomainWorker = ref(null);
-const bindDomainForm = reactive({ domain: '', prefix: '' });
+const bindDomainForm = reactive({ domain: '', prefix: '', file_path: '' });
 const bindDomainSubmitting = ref(false);
 const bindDomainZoneList = ref([]);
 const bindDomainLoadingZones = ref(false);
@@ -1162,6 +1219,10 @@ const showEditDialog = (row) => {
   isEdit.value = true;
   currentWorkerId.value = row.id;
   const targets = row.targets && Array.isArray(row.targets) ? row.targets : (row.target_domain ? [row.target_domain] : []);
+  const dp = row.domain_paths && typeof row.domain_paths === 'object' ? row.domain_paths : {};
+  const domainPathsRows = Object.keys(dp).length > 0
+    ? Object.entries(dp).map(([domain, file_path]) => ({ domain, file_path }))
+    : [{ domain: '', file_path: '' }];
   Object.assign(workerForm, {
     cf_account_id: row.cf_account_id,
     worker_name: row.worker_name,
@@ -1176,8 +1237,11 @@ const showEditDialog = (row) => {
     rotate_days: row.rotate_days || 7,
     base_date: row.base_date || '',
     status: row.status || 'active',
-    description: row.description || ''
+    description: row.description || '',
+    r2_bucket_id: row.r2_bucket_id || null,
+    domain_paths_rows: domainPathsRows
   });
+  if (row.business_mode === '下载') loadR2BucketsIfNeeded();
   dialogVisible.value = true;
 };
 
@@ -1198,7 +1262,9 @@ const handleDialogClose = () => {
     rotate_days: 7,
     base_date: '',
     status: 'active',
-    description: ''
+    description: '',
+    r2_bucket_id: null,
+    domain_paths_rows: [{ domain: '', file_path: '' }]
   });
   currentWorkerId.value = null;
   domainInputMode.value = 'manual';
@@ -1208,6 +1274,27 @@ const handleDialogClose = () => {
   filteredWorkerDomains.value = [];
   workerDomainSearchQuery.value = '';
   resetDomainPagination();
+};
+
+// 下载模式：域名→路径行动态增删
+const addDomainPathRow = () => {
+  workerForm.domain_paths_rows.push({ domain: '', file_path: '' });
+};
+const removeDomainPathRow = (idx) => {
+  if (workerForm.domain_paths_rows.length <= 1) return;
+  workerForm.domain_paths_rows.splice(idx, 1);
+};
+const loadR2BucketsIfNeeded = () => {
+  if (r2Buckets.value.length === 0) loadR2Buckets();
+};
+const handleBusinessModeChange = (mode) => {
+  if (mode === '下载') {
+    loadR2BucketsIfNeeded();
+    if (!workerForm.domain_paths_rows?.length) workerForm.domain_paths_rows = [{ domain: '', file_path: '' }];
+  } else {
+    workerForm.r2_bucket_id = null;
+    workerForm.domain_paths_rows = [{ domain: '', file_path: '' }];
+  }
 };
 
 const targetHref = (u) => {
@@ -1236,77 +1323,129 @@ const parseTargetsText = (text) => {
 // 提交表单
 const handleSubmit = async () => {
   try {
-    await workerFormRef.value?.validate();
-    const isSingle = workerForm.mode === 'single';
-    if (isSingle && !(workerForm.target_domain || '').trim()) {
-      ElMessage.error('请输入目标域名');
-      return;
-    }
-    if (!isSingle) {
-      const targets = parseTargetsText(workerForm.targets_text);
-      if (targets.length === 0) {
-        ElMessage.error('请至少输入一个以 http:// 或 https:// 开头的目标链接');
+    const isDownload = workerForm.business_mode === '下载';
+
+    if (isDownload) {
+      if (!workerForm.r2_bucket_id && !isEdit.value) {
+        ElMessage.error('请选择 R2 存储桶');
         return;
+      }
+      const rows = (workerForm.domain_paths_rows || []).filter(r => (r.domain || '').trim() && (r.file_path || '').trim());
+      if (rows.length === 0) {
+        ElMessage.error('请至少填写一行有效的「域名 + 文件路径」');
+        return;
+      }
+    } else {
+      await workerFormRef.value?.validate();
+      const isSingle = workerForm.mode === 'single';
+      if (isSingle && !(workerForm.target_domain || '').trim()) {
+        ElMessage.error('请输入目标域名');
+        return;
+      }
+      if (!isSingle) {
+        const targets = parseTargetsText(workerForm.targets_text);
+        if (targets.length === 0) {
+          ElMessage.error('请至少输入一个以 http:// 或 https:// 开头的目标链接');
+          return;
+        }
       }
     }
 
     submitting.value = true;
 
-    const payload = {
-      status: workerForm.status,
-      description: workerForm.description,
-      mode: workerForm.mode || 'single',
-      business_mode: workerForm.business_mode || '推广',
-      fallback_url: workerForm.fallback_url || '',
-      rotate_days: workerForm.rotate_days || 0,
-      base_date: workerForm.base_date || ''
-    };
-    if (isSingle) {
-      payload.target_domain = workerForm.target_domain.trim();
-    } else {
-      payload.targets = parseTargetsText(workerForm.targets_text);
-    }
-
-    if (isEdit.value) {
-      await updateWorker(currentWorkerId.value, payload);
-      ElMessage.success('Worker 更新成功');
-    } else {
-      const workerName = generateWorkerName(workerForm.worker_domain);
-      if (!workerName) {
-        ElMessage.error('请先填写 Worker 域名');
-        submitting.value = false;
-        return;
-      }
-      const createPayload = {
-        cf_account_id: workerForm.cf_account_id,
-        worker_name: workerName,
-        worker_domain: workerForm.worker_domain,
-        description: workerForm.description,
-        mode: payload.mode,
-        business_mode: payload.business_mode,
-        fallback_url: payload.fallback_url,
-        rotate_days: payload.rotate_days,
-        base_date: payload.base_date
-      };
-      if (isSingle) {
-        createPayload.target_domain = workerForm.target_domain.trim();
+    if (isDownload) {
+      const domainPaths = {};
+      (workerForm.domain_paths_rows || []).forEach(r => {
+        const d = (r.domain || '').trim();
+        const p = (r.file_path || '').trim();
+        if (d && p) domainPaths[d] = p;
+      });
+      if (isEdit.value) {
+        const payload = {
+          status: workerForm.status,
+          description: workerForm.description,
+          business_mode: '下载',
+          domain_paths: domainPaths
+        };
+        await updateWorker(currentWorkerId.value, payload);
+        ElMessage.success('Worker 更新成功');
       } else {
-        createPayload.targets = payload.targets;
-      }
-      try {
-        const check = await checkWorkerDomain(workerForm.worker_domain);
-        const res = check?.data ?? check;
-        if (res && res.available === false) {
-          const usedBy = res.used_by === 'domain_redirect' ? '域名302重定向' : 'Cloudflare Worker';
-          ElMessage.error(`域名 ${workerForm.worker_domain} 已被「${usedBy}」使用${res.ref_name ? `（${res.ref_name}）` : ''}，请先删除后再创建`);
+        const firstDomain = Object.keys(domainPaths)[0] || '';
+        const workerName = generateWorkerName(firstDomain);
+        if (!workerName) {
+          ElMessage.error('请至少填写一个有效域名');
           submitting.value = false;
           return;
         }
-      } catch (e) {
-        // 检查接口失败不阻塞，由创建时后端再次校验
+        const createPayload = {
+          worker_name: workerName,
+          worker_domain: firstDomain,
+          business_mode: '下载',
+          r2_bucket_id: workerForm.r2_bucket_id,
+          domain_paths: domainPaths,
+          description: workerForm.description || ''
+        };
+        await createWorker(createPayload);
+        ElMessage.success('Worker 创建成功');
       }
-      await createWorker(createPayload);
-      ElMessage.success('Worker 创建成功');
+    } else {
+      const isSingle = workerForm.mode === 'single';
+      const payload = {
+        status: workerForm.status,
+        description: workerForm.description,
+        mode: workerForm.mode || 'single',
+        business_mode: '推广',
+        fallback_url: workerForm.fallback_url || '',
+        rotate_days: workerForm.rotate_days || 0,
+        base_date: workerForm.base_date || ''
+      };
+      if (isSingle) {
+        payload.target_domain = workerForm.target_domain.trim();
+      } else {
+        payload.targets = parseTargetsText(workerForm.targets_text);
+      }
+
+      if (isEdit.value) {
+        await updateWorker(currentWorkerId.value, payload);
+        ElMessage.success('Worker 更新成功');
+      } else {
+        const workerName = generateWorkerName(workerForm.worker_domain);
+        if (!workerName) {
+          ElMessage.error('请先填写 Worker 域名');
+          submitting.value = false;
+          return;
+        }
+        const createPayload = {
+          cf_account_id: workerForm.cf_account_id,
+          worker_name: workerName,
+          worker_domain: workerForm.worker_domain,
+          description: workerForm.description,
+          mode: payload.mode,
+          business_mode: payload.business_mode,
+          fallback_url: payload.fallback_url,
+          rotate_days: payload.rotate_days,
+          base_date: payload.base_date
+        };
+        if (isSingle) {
+          createPayload.target_domain = workerForm.target_domain.trim();
+        } else {
+          createPayload.targets = payload.targets;
+        }
+        try {
+          const check = await checkWorkerDomain(workerForm.worker_domain);
+          const res = check?.data ?? check;
+          if (res && res.available === false) {
+            const usedBy = res.used_by === 'domain_redirect' ? '域名302重定向' : 'Cloudflare Worker';
+            ElMessage.error(`域名 ${workerForm.worker_domain} 已被「${usedBy}」使用${res.ref_name ? `（${res.ref_name}）` : ''}，请先删除后再创建`);
+            submitting.value = false;
+            return;
+          }
+        } catch (e) {
+          // 检查接口失败不阻塞，由创建时后端再次校验
+        }
+        await createWorker(createPayload);
+        ElMessage.success('Worker 创建成功');
+      }
     }
 
     dialogVisible.value = false;
@@ -1358,6 +1497,7 @@ const showBindDomainDialog = async (row) => {
   bindDomainWorker.value = row;
   bindDomainForm.domain = '';
   bindDomainForm.prefix = '';
+  bindDomainForm.file_path = '';
   bindDomainZoneList.value = [];
   bindDomainFilteredZones.value = [];
   bindDomainSearchQuery.value = '';
@@ -1432,11 +1572,12 @@ const onBindDomainDialogClose = () => {
   bindDomainForm.prefix = '';
   bindDomainWorker.value = null;
   bindDomainZoneList.value = [];
+  bindDomainForm.file_path = '';
   bindDomainFilteredZones.value = [];
   bindDomainSearchQuery.value = '';
 };
 
-// 提交绑定域名（子域名前缀 + 基础域名 组合为完整域名）
+// 提交绑定域名（子域名前缀 + 基础域名 组合为完整域名；下载模式需填文件路径）
 const handleBindDomainSubmit = async () => {
   const base = (bindDomainForm.domain || '').trim();
   if (!base) {
@@ -1446,9 +1587,18 @@ const handleBindDomainSubmit = async () => {
   const prefix = (bindDomainForm.prefix || '').trim();
   const fullDomain = prefix ? `${prefix}.${base}` : base;
   if (!bindDomainWorker.value) return;
+  const isDownload = bindDomainWorker.value.business_mode === '下载';
+  if (isDownload && !(bindDomainForm.file_path || '').trim()) {
+    ElMessage.warning('下载模式绑定域名时请填写该域名对应的 R2 文件路径');
+    return;
+  }
   try {
     bindDomainSubmitting.value = true;
-    await bindWorkerDomain(bindDomainWorker.value.id, fullDomain);
+    await bindWorkerDomain(
+      bindDomainWorker.value.id,
+      fullDomain,
+      isDownload ? (bindDomainForm.file_path || '').trim() : ''
+    );
     ElMessage.success('域名绑定成功');
     bindDomainDialogVisible.value = false;
     loadWorkers();
@@ -1605,6 +1755,19 @@ onMounted(async () => {
   flex-direction: column;
   gap: 6px;
   align-items: flex-start;
+}
+
+.domain-paths-editor .domain-path-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.domain-paths-editor .domain-path-row .el-input { flex: 0 0 auto; }
+
+.text-muted {
+  color: #909399;
+  font-size: 13px;
 }
 
 .worker-domain-item {

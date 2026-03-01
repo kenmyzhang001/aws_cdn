@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,14 +32,17 @@ type CreateWorkerRequest struct {
 	CFAccountID  uint     `json:"cf_account_id" binding:"required"`
 	WorkerName   string   `json:"worker_name" binding:"required"`
 	WorkerDomain string   `json:"worker_domain" binding:"required"`
-	TargetDomain string   `json:"target_domain"` // 单链接时使用；与 targets 二选一
-	Targets      []string `json:"targets"`       // 多目标链接（轮播/探针时使用）
+	TargetDomain string   `json:"target_domain"` // 单链接时使用；与 targets 二选一（推广模式）
+	Targets      []string `json:"targets"`       // 多目标链接（推广模式轮播/探针）
 	FallbackURL  string   `json:"fallback_url"`  // 兜底链接（可选）
 	Mode         string   `json:"mode"`          // single / time / random / probe
 	BusinessMode string   `json:"business_mode"` // 业务模式：下载、推广
 	RotateDays   int      `json:"rotate_days"`   // 时间轮播每 N 天
 	BaseDate     string   `json:"base_date"`     // 时间轮播基准日期 ISO
 	Description  string   `json:"description"`
+	// 下载模式：R2 存储桶 ID，且域名→路径映射（一个 Worker 多域名，每域名对应一个文件）
+	R2BucketID  uint              `json:"r2_bucket_id"`
+	DomainPaths map[string]string `json:"domain_paths"` // 例：{"download1.example.com":"releases/app1.apk"}
 }
 
 // UpdateWorkerRequest 更新 Worker 请求
@@ -47,15 +51,20 @@ type UpdateWorkerRequest struct {
 	Targets      []string `json:"targets"`
 	FallbackURL  string   `json:"fallback_url"`
 	Mode         string   `json:"mode"`
-	BusinessMode string   `json:"business_mode"` // 业务模式：下载、推广
+	BusinessMode string   `json:"business_mode"`
 	RotateDays   int      `json:"rotate_days"`
 	BaseDate     string   `json:"base_date"`
 	Description  string   `json:"description"`
 	Status       string   `json:"status"`
+	// 下载模式：更新域名→路径映射（会同步到 KV）
+	DomainPaths map[string]string `json:"domain_paths"`
 }
 
-// buildTargetsFromRequest 从请求中得到目标链接列表（至少一个）
+// buildTargetsFromRequest 从请求中得到目标链接列表（至少一个）；下载模式不需要
 func buildTargetsFromCreate(req *CreateWorkerRequest) ([]string, error) {
+	if req.BusinessMode == "下载" {
+		return nil, nil // 下载模式用 R2+KV，不校验 targets
+	}
 	if len(req.Targets) > 0 {
 		return req.Targets, nil
 	}
@@ -138,16 +147,150 @@ func (s *CFWorkerService) CheckWorkerDomainAvailable(domain string, excludeWorke
 	return true, "", 0, ""
 }
 
-// CreateWorker 创建 Worker
+// CreateWorker 创建 Worker（推广模式：重定向逻辑；下载模式：R2+KV 多域名→文件）
 func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWorker, error) {
-	log := logger.GetLogger()
+	businessMode := req.BusinessMode
+	if businessMode != "下载" && businessMode != "推广" {
+		businessMode = "推广"
+	}
 
+	if businessMode == "下载" {
+		return s.createWorkerDownloadMode(req)
+	}
+	return s.createWorkerPromotionMode(req)
+}
+
+// createWorkerDownloadMode 创建「下载模式」Worker：一个 R2 桶 + 一个 KV，多域名每域名对应一个文件路径，Worker 代理 R2 对象
+func (s *CFWorkerService) createWorkerDownloadMode(req *CreateWorkerRequest) (*models.CFWorker, error) {
+	log := logger.GetLogger()
+	if req.R2BucketID == 0 {
+		return nil, fmt.Errorf("下载模式必须指定 r2_bucket_id")
+	}
+	if len(req.DomainPaths) == 0 {
+		return nil, fmt.Errorf("下载模式必须提供 domain_paths（至少一个域名→文件路径）")
+	}
+	// 域名规范化并检查占用
+	domainPaths := make(map[string]string)
+	for domain, path := range req.DomainPaths {
+		domain = strings.TrimSpace(strings.ToLower(domain))
+		path = strings.TrimSpace(path)
+		if domain == "" || path == "" {
+			continue
+		}
+		domainPaths[domain] = path
+	}
+	if len(domainPaths) == 0 {
+		return nil, fmt.Errorf("domain_paths 中至少需要一对有效的 域名→路径")
+	}
+	for domain := range domainPaths {
+		if ok, usedBy, refID, refName := s.CheckWorkerDomainAvailable(domain, 0); !ok {
+			return nil, fmt.Errorf("域名 %s 已被占用（%s，ref: %s ID %d）", domain, usedBy, refName, refID)
+		}
+	}
+
+	var bucket models.R2Bucket
+	if err := s.db.First(&bucket, req.R2BucketID).Error; err != nil {
+		return nil, fmt.Errorf("R2 存储桶不存在: %w", err)
+	}
+	var cfAccount models.CFAccount
+	if err := s.db.First(&cfAccount, bucket.CFAccountID).Error; err != nil {
+		return nil, fmt.Errorf("CF 账号不存在: %w", err)
+	}
+	apiToken := cfAccount.APIToken
+	accountID := cfAccount.AccountID
+	cfService := cloudflare.NewWorkerAPIService(apiToken, accountID)
+	kvService := cloudflare.NewKVAPIService(apiToken, accountID)
+
+	// 创建 KV 命名空间
+	kvTitle := "r2-download-" + req.WorkerName
+	kvNamespaceID, err := kvService.CreateKVNamespace(kvTitle)
+	if err != nil {
+		return nil, fmt.Errorf("创建 KV 命名空间失败: %w", err)
+	}
+	// 写入 域名→路径 到 KV
+	for domain, path := range domainPaths {
+		if err := kvService.WriteKVEntry(kvNamespaceID, domain, path); err != nil {
+			_ = kvService.DeleteKVNamespace(kvNamespaceID)
+			return nil, fmt.Errorf("写入 KV 条目 %s→%s 失败: %w", domain, path, err)
+		}
+	}
+
+	script := cloudflare.GenerateDownloadModeWorkerScript()
+	if err := cfService.CreateWorkerWithBindings(req.WorkerName, script, bucket.BucketName, kvNamespaceID); err != nil {
+		_ = kvService.DeleteKVNamespace(kvNamespaceID)
+		return nil, fmt.Errorf("上传 Worker（带 R2+KV 绑定）失败: %w", err)
+	}
+
+	// 为每个域名绑定路由/自定义域名（域名列表排序以保证顺序一致）
+	domainsList := make([]string, 0, len(domainPaths))
+	for d := range domainPaths {
+		domainsList = append(domainsList, d)
+	}
+	sort.Strings(domainsList)
+	worker := &models.CFWorker{
+		CFAccountID:    bucket.CFAccountID,
+		WorkerName:     req.WorkerName,
+		WorkerDomain:   domainsList[0],
+		TargetDomain:   "",
+		Targets:        "",
+		Mode:           "single",
+		BusinessMode:   "下载",
+		R2BucketID:     req.R2BucketID,
+		KVNamespaceID:  kvNamespaceID,
+		DomainPathsMap: domainPaths,
+		Status:         "active",
+		Description:    req.Description,
+	}
+	worker.WorkerDomainsArray = domainsList
+	var bindings []models.WorkerDomainBinding
+	for _, domain := range domainsList {
+		rootDomain := extractRootDomain(domain)
+		zoneID, _ := s.getZoneID(apiToken, rootDomain)
+		var customDomainID, workerRoute string
+		if zoneID != "" {
+			if did, err := cfService.AddWorkerCustomDomain(req.WorkerName, domain, zoneID); err == nil {
+				customDomainID = did
+			}
+			pattern := domain + "/*"
+			if routeID, err := cfService.CreateWorkerRoute(zoneID, pattern, req.WorkerName); err == nil {
+				workerRoute = routeID
+			}
+		}
+		bindings = append(bindings, models.WorkerDomainBinding{
+			Domain:         domain,
+			ZoneID:         zoneID,
+			WorkerRoute:    workerRoute,
+			CustomDomainID: customDomainID,
+		})
+	}
+	worker.DomainBindingsArray = bindings
+	if err := s.db.Create(worker).Error; err != nil {
+		_ = cfService.DeleteWorker(req.WorkerName)
+		_ = kvService.DeleteKVNamespace(kvNamespaceID)
+		for _, b := range bindings {
+			if b.ZoneID != "" && b.WorkerRoute != "" {
+				_ = cfService.DeleteWorkerRoute(b.ZoneID, b.WorkerRoute)
+			}
+			if b.CustomDomainID != "" {
+				_ = cfService.DeleteWorkerCustomDomain(b.CustomDomainID)
+			}
+		}
+		return nil, fmt.Errorf("保存 Worker 到数据库失败: %w", err)
+	}
+	log.WithFields(map[string]interface{}{
+		"worker_id": worker.ID, "worker_name": worker.WorkerName, "business_mode": "下载",
+	}).Info("Worker（下载模式）创建完成")
+	return worker, nil
+}
+
+// createWorkerPromotionMode 创建「推广模式」Worker（原有重定向/轮播逻辑）
+func (s *CFWorkerService) createWorkerPromotionMode(req *CreateWorkerRequest) (*models.CFWorker, error) {
+	log := logger.GetLogger()
 	targets, err := buildTargetsFromCreate(req)
 	if err != nil {
 		return nil, err
 	}
 
-	// 预先检查 Worker 域名是否已被占用（Worker 或 302 重定向）
 	if ok, usedBy, refID, refName := s.CheckWorkerDomainAvailable(req.WorkerDomain, 0); !ok {
 		switch usedBy {
 		case "cf_worker":
@@ -159,20 +302,13 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 		}
 	}
 
-	// 1. 获取 CF 账号信息
 	var cfAccount models.CFAccount
 	if err := s.db.First(&cfAccount, req.CFAccountID).Error; err != nil {
 		return nil, fmt.Errorf("CF 账号不存在: %w", err)
 	}
-
-	// 2. 使用 API Token（已明文存储）
 	apiToken := cfAccount.APIToken
-
-	// 3. 创建 Cloudflare Service 实例
 	cfService := cloudflare.NewWorkerAPIService(apiToken, cfAccount.AccountID)
 
-	// 4. 获取 Worker 域名的 Zone ID
-	var zoneID string
 	rootDomain := extractRootDomain(req.WorkerDomain)
 	zoneID, zoneErr := s.getZoneID(apiToken, rootDomain)
 	if zoneErr != nil {
@@ -182,13 +318,11 @@ func (s *CFWorkerService) CreateWorker(req *CreateWorkerRequest) (*models.CFWork
 		}).Warn("获取 Zone ID 失败")
 	}
 
-	// 5. 生成 Worker 脚本
 	script, err := generateScript(targets, req.FallbackURL, req.Mode, req.RotateDays, req.BaseDate)
 	if err != nil {
 		return nil, err
 	}
 
-	// 6. 创建 Worker 脚本
 	if err := cfService.CreateWorker(req.WorkerName, script); err != nil {
 		return nil, fmt.Errorf("创建 Worker 脚本失败: %w", err)
 	}
@@ -385,6 +519,22 @@ func (s *CFWorkerService) UpdateWorker(id uint, req *UpdateWorkerRequest) (*mode
 		worker.BusinessMode = req.BusinessMode
 	}
 
+	// 下载模式：同步 domain_paths 到 KV
+	if worker.BusinessMode == "下载" && worker.KVNamespaceID != "" && len(req.DomainPaths) > 0 {
+		kvService := cloudflare.NewKVAPIService(cfAccount.APIToken, cfAccount.AccountID)
+		for domain, path := range req.DomainPaths {
+			domain = strings.TrimSpace(strings.ToLower(domain))
+			path = strings.TrimSpace(path)
+			if domain == "" || path == "" {
+				continue
+			}
+			if err := kvService.WriteKVEntry(worker.KVNamespaceID, domain, path); err != nil {
+				log.WithError(err).WithFields(map[string]interface{}{"domain": domain, "path": path}).Warn("同步 KV 条目失败")
+			}
+		}
+		worker.DomainPathsMap = req.DomainPaths
+	}
+
 	if needScriptUpdate && len(newTargets) > 0 {
 		script, err := generateScript(newTargets, worker.FallbackURL, worker.Mode, worker.RotateDays, worker.BaseDate)
 		if err != nil {
@@ -467,6 +617,14 @@ func (s *CFWorkerService) DeleteWorker(id uint) error {
 		}
 	}
 
+	// 6. 下载模式：删除 KV 命名空间
+	if worker.KVNamespaceID != "" {
+		kvService := cloudflare.NewKVAPIService(apiToken, cfAccount.AccountID)
+		if err := kvService.DeleteKVNamespace(worker.KVNamespaceID); err != nil {
+			log.WithError(err).WithField("kv_namespace_id", worker.KVNamespaceID).Warn("删除 KV 命名空间失败，继续")
+		}
+	}
+
 	// 7. 删除 Worker 脚本
 	if err := cfService.DeleteWorker(worker.WorkerName); err != nil {
 		log.WithError(err).WithFields(map[string]interface{}{
@@ -489,8 +647,8 @@ func (s *CFWorkerService) DeleteWorker(id uint) error {
 	return nil
 }
 
-// BindWorkerDomain 为 Worker 绑定新域名（CF 添加路由/自定义域名 + 写入库）
-func (s *CFWorkerService) BindWorkerDomain(workerID uint, domain string) (*models.CFWorker, error) {
+// BindWorkerDomain 为 Worker 绑定新域名（CF 添加路由/自定义域名 + 写入库）。下载模式时 filePath 必填，会写入 KV。
+func (s *CFWorkerService) BindWorkerDomain(workerID uint, domain, filePath string) (*models.CFWorker, error) {
 	log := logger.GetLogger()
 	domain = strings.TrimSpace(strings.ToLower(domain))
 	if domain == "" {
@@ -503,8 +661,25 @@ func (s *CFWorkerService) BindWorkerDomain(workerID uint, domain string) (*model
 	}
 	for _, d := range worker.DomainsList() {
 		if d == domain {
-			return worker, nil // 已绑定，幂等
+			// 已绑定：下载模式下若提供了 filePath 则更新 KV
+			if worker.BusinessMode == "下载" && worker.KVNamespaceID != "" && strings.TrimSpace(filePath) != "" {
+				var cfAccount models.CFAccount
+				if s.db.First(&cfAccount, worker.CFAccountID).Error == nil {
+					kvService := cloudflare.NewKVAPIService(cfAccount.APIToken, cfAccount.AccountID)
+					_ = kvService.WriteKVEntry(worker.KVNamespaceID, domain, strings.TrimSpace(filePath))
+				}
+				if worker.DomainPathsMap == nil {
+					worker.DomainPathsMap = make(map[string]string)
+				}
+				worker.DomainPathsMap[domain] = strings.TrimSpace(filePath)
+				_ = s.db.Save(worker).Error
+			}
+			return worker, nil
 		}
+	}
+
+	if worker.BusinessMode == "下载" && worker.KVNamespaceID != "" && strings.TrimSpace(filePath) == "" {
+		return nil, fmt.Errorf("下载模式绑定域名时必须提供 file_path（该域名对应的 R2 文件路径）")
 	}
 
 	if ok, usedBy, refID, refName := s.CheckWorkerDomainAvailable(domain, workerID); !ok {
@@ -523,6 +698,22 @@ func (s *CFWorkerService) BindWorkerDomain(workerID uint, domain string) (*model
 		return nil, fmt.Errorf("CF 账号不存在: %w", err)
 	}
 	cfService := cloudflare.NewWorkerAPIService(cfAccount.APIToken, cfAccount.AccountID)
+
+	// 下载模式：写入 KV 域名→路径
+	if worker.BusinessMode == "下载" && worker.KVNamespaceID != "" {
+		path := strings.TrimSpace(filePath)
+		if path == "" {
+			return nil, fmt.Errorf("下载模式绑定域名时必须提供 file_path")
+		}
+		kvService := cloudflare.NewKVAPIService(cfAccount.APIToken, cfAccount.AccountID)
+		if err := kvService.WriteKVEntry(worker.KVNamespaceID, domain, path); err != nil {
+			return nil, fmt.Errorf("写入 KV 域名→路径失败: %w", err)
+		}
+		if worker.DomainPathsMap == nil {
+			worker.DomainPathsMap = make(map[string]string)
+		}
+		worker.DomainPathsMap[domain] = path
+	}
 
 	rootDomain := extractRootDomain(domain)
 	zoneID, zoneErr := s.getZoneID(cfAccount.APIToken, rootDomain)

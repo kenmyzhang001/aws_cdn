@@ -81,13 +81,16 @@ export function checkWorkerDomain(domain) {
  * 为 Worker 绑定新域名
  * @param {number} id - Worker ID
  * @param {string} domain - 要绑定的域名
+ * @param {string} [filePath] - 下载模式必填：该域名对应的 R2 文件路径
  * @returns {Promise}
  */
-export function bindWorkerDomain(id, domain) {
+export function bindWorkerDomain(id, domain, filePath = '') {
+  const data = { domain };
+  if (filePath != null && filePath !== '') data.file_path = filePath;
   return request({
     url: `/cf-workers/${id}/bind-domain`,
     method: 'post',
-    data: { domain }
+    data
   });
 }
 

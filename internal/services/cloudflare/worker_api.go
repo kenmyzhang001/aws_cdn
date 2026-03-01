@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"time"
 )
@@ -34,6 +35,121 @@ func (s *WorkerAPIService) getAuthHeaders() map[string]string {
 		"Authorization": "Bearer " + s.APIToken,
 		"Content-Type":  "application/javascript",
 	}
+}
+
+// WorkerUploadMetadata 用于带绑定的 Worker 上传（multipart）
+type WorkerUploadMetadata struct {
+	MainModule        string        `json:"main_module"`
+	CompatibilityDate string        `json:"compatibility_date"`
+	Bindings          []BindingItem `json:"bindings"`
+}
+
+// BindingItem Worker 绑定项（KV / R2）
+type BindingItem struct {
+	Type         string `json:"type"` // "kv_namespace" | "r2_bucket"
+	Name         string `json:"name"`
+	NamespaceID  string `json:"namespace_id,omitempty"`  // KV
+	BucketName   string `json:"bucket_name,omitempty"`   // R2
+}
+
+// CreateWorkerWithBindings 创建或更新 Worker 脚本（带 R2 + KV 绑定，用于下载模式）
+func (s *WorkerAPIService) CreateWorkerWithBindings(workerName, script, r2BucketName, kvNamespaceID string) error {
+	log := logger.GetLogger()
+	apiURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/workers/scripts/%s", s.AccountID, workerName)
+
+	metadata := WorkerUploadMetadata{
+		MainModule:        "main.js",
+		CompatibilityDate: "2024-01-01",
+		Bindings: []BindingItem{
+			{Type: "r2_bucket", Name: "R2_BUCKET", BucketName: r2BucketName},
+			{Type: "kv_namespace", Name: "DOMAIN_KV", NamespaceID: kvNamespaceID},
+		},
+	}
+	metaJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("序列化 metadata 失败: %w", err)
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	// part: metadata
+	if err := w.WriteField("metadata", string(metaJSON)); err != nil {
+		return fmt.Errorf("写入 metadata 失败: %w", err)
+	}
+	// part: main.js（脚本内容，part 名须与 main_module 一致）
+	fw, err := w.CreateFormFile("main.js", "main.js")
+	if err != nil {
+		return fmt.Errorf("创建 main.js part 失败: %w", err)
+	}
+	if _, err := fw.Write([]byte(script)); err != nil {
+		return fmt.Errorf("写入脚本失败: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("关闭 multipart 失败: %w", err)
+	}
+
+	req, err := http.NewRequest("PUT", apiURL, &buf)
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+s.APIToken)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.WithFields(map[string]interface{}{
+		"worker_name": workerName,
+		"status_code": resp.StatusCode,
+		"response":    string(body),
+	}).Info("Worker (带绑定) 上传响应")
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Success bool `json:"success"`
+			Errors  []struct {
+				Message string `json:"message"`
+			} `json:"errors"`
+		}
+		_ = json.Unmarshal(body, &errResp)
+		if len(errResp.Errors) > 0 {
+			return fmt.Errorf("上传 Worker 失败: %s", errResp.Errors[0].Message)
+		}
+		return fmt.Errorf("上传 Worker 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// GenerateDownloadModeWorkerScript 生成「下载模式」Worker 脚本（KV 查域名→路径，R2 取对象并流式返回，URL 不变直接下载）
+func GenerateDownloadModeWorkerScript() string {
+	return `export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const hostname = url.hostname;
+    const pathInKV = await env.DOMAIN_KV.get(hostname);
+    if (!pathInKV || pathInKV === "") {
+      return new Response("Not Found", { status: 404, headers: { "Content-Type": "text/plain" } });
+    }
+    const path = pathInKV.startsWith("/") ? pathInKV.slice(1) : pathInKV;
+    const object = await env.R2_BUCKET.get(path);
+    if (!object) {
+      return new Response("Not Found", { status: 404, headers: { "Content-Type": "text/plain" } });
+    }
+    const filename = path.split("/").pop() || "download";
+    const contentType = (object.httpMetadata && object.httpMetadata.contentType) || "application/octet-stream";
+    const headers = new Headers({
+      "Content-Type": contentType,
+      "Content-Disposition": "attachment; filename=\"" + filename + "\"",
+      "Cache-Control": "public, max-age=86400",
+    });
+    return new Response(object.body, { status: 200, headers });
+  }
+};
+`
 }
 
 // CreateWorker 创建或更新 Worker 脚本

@@ -248,13 +248,14 @@ func (h *CFWorkerHandler) BindWorkerDomain(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Domain string `json:"domain" binding:"required"`
+		Domain   string `json:"domain" binding:"required"`
+		FilePath string `json:"file_path"` // 下载模式必填：该域名对应的 R2 文件路径
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供 domain"})
 		return
 	}
-	worker, err := h.workerService.BindWorkerDomain(uint(id), body.Domain)
+	worker, err := h.workerService.BindWorkerDomain(uint(id), body.Domain, body.FilePath)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

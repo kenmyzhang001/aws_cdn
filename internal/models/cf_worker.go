@@ -35,6 +35,9 @@ type CFWorker struct {
 	WorkerRoute      string         `json:"worker_route" gorm:"type:varchar(500)"`                 // 首个域名路由 ID（兼容旧数据）
 	CustomDomainID   string         `json:"custom_domain_id" gorm:"type:varchar(100)"`             // 首个域名自定义域名 ID（兼容旧数据）
 	DomainBindings   string         `json:"-" gorm:"type:longtext"`                                 // 各域名绑定信息 JSON []WorkerDomainBinding
+	R2BucketID       uint           `json:"r2_bucket_id" gorm:"default:0"`                         // 下载模式：关联的 R2 存储桶 ID，0 表示推广模式
+	KVNamespaceID    string         `json:"kv_namespace_id" gorm:"type:varchar(100)"`              // 下载模式：域名→路径映射的 KV 命名空间 ID
+	DomainPaths      string         `json:"-" gorm:"type:longtext"`                                 // 下载模式：域名→文件路径 JSON map[string]string，接口用 DomainPathsMap
 	Status           string         `json:"status" gorm:"type:varchar(50);default:'active'"`       // 状态：active, inactive
 	Description      string         `json:"description" gorm:"type:text"`                          // 描述
 	CreatedAt        time.Time      `json:"created_at"`
@@ -45,13 +48,15 @@ type CFWorker struct {
 	TargetsArray        []string              `json:"targets" gorm:"-"`
 	WorkerDomainsArray  []string              `json:"worker_domains" gorm:"-"`  // 绑定的域名列表
 	DomainBindingsArray []WorkerDomainBinding `json:"-" gorm:"-"`               // 业务用，不直接序列化到 API
+	DomainPathsMap      map[string]string     `json:"domain_paths,omitempty" gorm:"-"` // 下载模式：域名 → R2 文件路径
 }
 
-// AfterFind 查询后解析 Targets/WorkerDomains/DomainBindings 到对应 Array
+// AfterFind 查询后解析 Targets/WorkerDomains/DomainBindings/DomainPaths 到对应 Array/Map
 func (w *CFWorker) AfterFind(_ *gorm.DB) error {
 	w.TargetsArray = w.targetsList()
 	w.WorkerDomainsArray = w.domainsList()
 	w.DomainBindingsArray = w.bindingsList()
+	w.DomainPathsMap = w.domainPathsMap()
 	// 兼容：若仅有 WorkerDomain 无 WorkerDomains，则列表为首域名
 	if len(w.WorkerDomainsArray) == 0 && w.WorkerDomain != "" {
 		w.WorkerDomainsArray = []string{w.WorkerDomain}
@@ -62,7 +67,7 @@ func (w *CFWorker) AfterFind(_ *gorm.DB) error {
 	return nil
 }
 
-// BeforeSave 保存前将 WorkerDomainsArray 同步回 WorkerDomains，并同步首个到 WorkerDomain
+// BeforeSave 保存前将 WorkerDomainsArray/DomainPathsMap 同步回库字段
 func (w *CFWorker) BeforeSave(_ *gorm.DB) error {
 	if len(w.WorkerDomainsArray) > 0 {
 		data, _ := json.Marshal(w.WorkerDomainsArray)
@@ -76,6 +81,10 @@ func (w *CFWorker) BeforeSave(_ *gorm.DB) error {
 	if len(w.DomainBindingsArray) > 0 {
 		data, _ := json.Marshal(w.DomainBindingsArray)
 		w.DomainBindings = string(data)
+	}
+	if len(w.DomainPathsMap) > 0 {
+		data, _ := json.Marshal(w.DomainPathsMap)
+		w.DomainPaths = string(data)
 	}
 	return nil
 }
@@ -108,6 +117,15 @@ func (w *CFWorker) bindingsList() []WorkerDomainBinding {
 	var list []WorkerDomainBinding
 	_ = json.Unmarshal([]byte(w.DomainBindings), &list)
 	return list
+}
+
+func (w *CFWorker) domainPathsMap() map[string]string {
+	if w.DomainPaths == "" {
+		return nil
+	}
+	var m map[string]string
+	_ = json.Unmarshal([]byte(w.DomainPaths), &m)
+	return m
 }
 
 // TargetsList 用于业务逻辑的解析后目标列表
