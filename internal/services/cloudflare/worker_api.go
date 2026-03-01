@@ -133,11 +133,16 @@ func (s *WorkerAPIService) CreateWorkerWithBindings(workerName, script, r2Bucket
 // GenerateDownloadModeWorkerScript 生成「下载模式」Worker 脚本（KV 查域名→路径，R2 取对象并流式返回，URL 不变直接下载）
 // 使用经典 Service Worker 格式（addEventListener），避免 multipart 上传时被解析为经典脚本导致 "Unexpected token 'export'"；
 // 绑定 DOMAIN_KV、R2_BUCKET 在经典格式下以全局变量注入，见 https://developers.cloudflare.com/workers/reference/migrate-to-module-workers/
+// 使用 Cache API 先查 caches.default，命中则直接返回（响应会带 cf-cache-status: HIT）；未命中则从 R2 取并 cache.put 后返回。
 func GenerateDownloadModeWorkerScript() string {
 	return `addEventListener("fetch", function(event) {
-  event.respondWith(handleRequest(event.request));
+  event.respondWith(handleRequest(event.request, event));
 });
-async function handleRequest(request) {
+async function handleRequest(request, event) {
+  const cache = caches.default;
+  const cached = await cache.match(request);
+  if (cached) return cached;
+
   const url = new URL(request.url);
   const hostname = url.hostname;
   const pathInKV = await DOMAIN_KV.get(hostname);
@@ -156,7 +161,9 @@ async function handleRequest(request) {
     "Content-Disposition": "attachment; filename=\"" + filename + "\"",
     "Cache-Control": "public, max-age=86400",
   });
-  return new Response(object.body, { status: 200, headers });
+  const response = new Response(object.body, { status: 200, headers });
+  event.waitUntil(cache.put(request, response.clone()));
+  return response;
 }
 `
 }
