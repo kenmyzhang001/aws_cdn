@@ -67,7 +67,7 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 	var response AllLinksResponse
 	response.Links = []LinkItem{}
 
-	if c.Query("debug") == "true" {
+	/*if c.Query("debug") == "true" {
 		// 1. 获取所有下载包
 		downloadPackages, err := h.downloadPackageService.ListAllDownloadPackages()
 		if err != nil {
@@ -91,7 +91,8 @@ func (h *AllLinksHandler) GetAllLinks(c *gin.Context) {
 				response.Links = append(response.Links, item)
 			}
 		}
-	}
+	/*}
+	*/
 
 	// 2. 获取所有自定义下载链接
 	customLinks, err := h.customDownloadLinkService.ListAllCustomDownloadLinks()
