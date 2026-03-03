@@ -329,6 +329,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			domainRedirects.GET("", domainRedirectHandler.List)
 			domainRedirects.GET("/check-domain", domainRedirectHandler.CheckDomain)
 			domainRedirects.GET("/:id", domainRedirectHandler.Get)
+			ec2Instances.POST("/:id/refresh-ip", ec2InstanceHandler.RefreshIP)
 			domainRedirects.POST("", domainRedirectHandler.Create)
 			domainRedirects.PUT("/:id", domainRedirectHandler.Update)
 			domainRedirects.DELETE("/:id", domainRedirectHandler.Delete)
