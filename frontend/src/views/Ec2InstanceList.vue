@@ -70,9 +70,18 @@
             <el-table-column label="创建时间" width="170">
               <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="160" fixed="right">
+            <el-table-column label="操作" width="200" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" size="small" @click="editRow(row)">编辑</el-button>
+                <el-button
+                  link
+                  type="warning"
+                  size="small"
+                  :disabled="!row.public_ip"
+                  @click="handleRefreshIP(row)"
+                >
+                  换 IP
+                </el-button>
                 <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
               </template>
             </el-table-column>
@@ -214,7 +223,8 @@ import {
   getEc2InstanceDeletedList,
   createEc2Instance,
   updateEc2Instance,
-  deleteEc2Instance
+  deleteEc2Instance,
+  refreshEc2Instance
 } from '@/api/ec2_instance'
 
 const activeTab = ref('list')
@@ -408,6 +418,30 @@ function handleDelete(row) {
     loadList()
   }).catch((e) => {
     if (e !== 'cancel') ElMessage.error(e?.message || '删除失败')
+  })
+}
+
+function handleRefreshIP(row) {
+  ElMessageBox.confirm(
+    '将终止当前实例并使用相同配置创建一个新实例，可能需要数十秒后新 IP 才会就绪。是否继续？',
+    '确认换 IP',
+    {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  ).then(() => {
+    loading.value = true
+    return refreshEc2Instance(row.id)
+  }).then(() => {
+    ElMessage.success('已发起换 IP 操作')
+    loadList()
+  }).catch((e) => {
+    if (e !== 'cancel') {
+      ElMessage.error(e?.message || '换 IP 失败')
+    }
+  }).finally(() => {
+    loading.value = false
   })
 }
 

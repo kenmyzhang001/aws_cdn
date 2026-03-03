@@ -52,3 +52,10 @@ export function deleteEc2Instance(id) {
     method: 'delete'
   })
 }
+
+export function refreshEc2Instance(id) {
+  return request({
+    url: `/ec2-instances/${id}/refresh-ip`,
+    method: 'post'
+  })
+}
