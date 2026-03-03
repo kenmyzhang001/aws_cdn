@@ -33,6 +33,9 @@ func (h *Ec2InstanceHandler) List(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	for i := range list {
+		list[i].InstanceType = ""
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"data":       list,
 		"pagination": gin.H{"total": total, "page": page, "page_size": pageSize},
@@ -47,6 +50,9 @@ func (h *Ec2InstanceHandler) ListDeleted(c *gin.Context) {
 		logger.GetLogger().WithError(err).Error("EC2 回收站列表失败")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	for i := range list {
+		list[i].InstanceType = ""
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"data":       list,
@@ -65,6 +71,7 @@ func (h *Ec2InstanceHandler) Get(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "实例不存在"})
 		return
 	}
+	inst.InstanceType = ""
 	c.JSON(http.StatusOK, gin.H{"data": inst})
 }
 
@@ -87,6 +94,7 @@ func (h *Ec2InstanceHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	inst.InstanceType = ""
 	c.JSON(http.StatusOK, gin.H{"message": "创建成功", "data": inst})
 }
 
@@ -107,6 +115,7 @@ func (h *Ec2InstanceHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	inst.InstanceType = ""
 	c.JSON(http.StatusOK, gin.H{"message": "更新成功", "data": inst})
 }
 
