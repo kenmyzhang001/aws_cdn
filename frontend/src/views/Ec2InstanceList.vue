@@ -63,6 +63,11 @@
                 </el-tag>
               </template>
             </el-table-column-->
+            <el-table-column label="使用时长(小时)" width="120">
+              <template #default="{ row }">
+                {{ formatLifetimeHours(row.created_at) }}
+              </template>
+            </el-table-column>
             <el-table-column prop="note" label="备注" min-width="120" show-overflow-tooltip />
             <el-table-column label="创建时间" width="170">
               <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
@@ -295,6 +300,15 @@ function formatDate(v) {
   if (!v) return '-'
   const d = new Date(v)
   return isNaN(d.getTime()) ? v : d.toLocaleString()
+}
+
+/** 根据创建时间计算当前已运行时长（小时） */
+function formatLifetimeHours(createdAt) {
+  if (!createdAt) return '-'
+  const d = new Date(createdAt)
+  if (isNaN(d.getTime())) return '-'
+  const hours = (Date.now() - d.getTime()) / (1000 * 60 * 60)
+  return hours >= 0 ? hours.toFixed(2) : '-'
 }
 
 function loadRegionConfig() {
