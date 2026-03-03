@@ -75,6 +75,26 @@ func (h *Ec2InstanceHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": inst})
 }
 
+// RefreshIP 用于“换 IP”操作：终止原有实例并使用相同配置创建新实例
+func (h *Ec2InstanceHandler) RefreshIP(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的实例 ID"})
+		return
+	}
+	inst, err := h.svc.ReplaceInstance(uint(id))
+	if err != nil {
+		logger.GetLogger().WithError(err).Error("换 IP 操作失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	inst.InstanceType = ""
+	c.JSON(http.StatusOK, gin.H{
+		"message": "已终止原实例并创建新实例",
+		"data":    inst,
+	})
+}
+
 // createInstancePassword 创建实例所需的校验密码（硬编码，仅用于防误操作）
 const createInstancePassword = "create_2026"
 

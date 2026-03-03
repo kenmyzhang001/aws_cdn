@@ -57,6 +57,78 @@ type UpdateRequest struct {
 	Note string `json:"note"`
 }
 
+// ReplaceInstance 终止原有实例，并使用相同配置创建一个新实例（用于“换 IP”）
+func (s *Ec2InstanceService) ReplaceInstance(id uint) (*models.Ec2Instance, error) {
+	var inst models.Ec2Instance
+	if err := s.db.First(&inst, id).Error; err != nil {
+		return nil, err
+	}
+
+	if inst.Region == "" {
+		return nil, fmt.Errorf("实例未配置 region")
+	}
+
+	// 创建 EC2 客户端
+	client, err := aws.NewEC2Client(s.cfg, inst.Region)
+	if err != nil {
+		return nil, fmt.Errorf("创建 EC2 客户端失败: %w", err)
+	}
+
+	// 终止原实例（如果存在）
+	if inst.AWSInstanceID != "" {
+		if err := aws.TerminateInstance(client, inst.AWSInstanceID); err != nil {
+			return nil, fmt.Errorf("终止原实例失败: %w", err)
+		}
+	}
+
+	// 优先使用实例记录中的 AMI/安全组/规格，如未配置则回退到默认映射
+	amiID := inst.AMIID
+	if amiID == "" {
+		var ok bool
+		amiID, ok = RegionToAMI[inst.Region]
+		if !ok {
+			return nil, fmt.Errorf("不支持的地区: %s", inst.Region)
+		}
+	}
+
+	sgID := inst.SecurityGroupID
+	if sgID == "" {
+		sgID = RegionToSecurityGroup[inst.Region]
+		if sgID == "" {
+			return nil, fmt.Errorf("地区 %s 未配置安全组", inst.Region)
+		}
+	}
+
+	instanceType := inst.InstanceType
+	if instanceType == "" {
+		instanceType = DefaultInstanceType
+	}
+
+	// 使用相同配置创建新实例
+	newInstanceID, err := aws.RunInstance(client, amiID, instanceType, sgID, inst.Name)
+	if err != nil {
+		return nil, fmt.Errorf("创建新实例失败: %w", err)
+	}
+
+	// 更新数据库记录：指向新的 AWS 实例，并重置状态、IP 与运行时长
+	now := time.Now()
+	updates := map[string]interface{}{
+		"aws_instance_id": newInstanceID,
+		"state":           "pending",
+		"public_ip":       "",
+		"created_at":      now,
+		"lifetime_hours":  nil,
+	}
+	if err := s.db.Model(&inst).Updates(updates).Error; err != nil {
+		return nil, fmt.Errorf("更新实例记录失败: %w", err)
+	}
+
+	if err := s.db.First(&inst, id).Error; err != nil {
+		return nil, err
+	}
+	return &inst, nil
+}
+
 func (s *Ec2InstanceService) Create(req *CreateRequest) (*models.Ec2Instance, error) {
 	amiID, ok := RegionToAMI[req.Region]
 	if !ok {
