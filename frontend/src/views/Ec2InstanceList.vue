@@ -33,7 +33,7 @@
           </el-form>
           <el-table v-loading="loading" :data="list" border stripe>
             <el-table-column prop="id" label="ID" width="70" />
-            <el-table-column prop="name" label="名称" width="120" />
+            <el-table-column prop="name" label="名称" width="220" />
             <el-table-column prop="region" label="地区" width="120" />
             <el-table-column prop="aws_instance_id" label="实例 ID" width="180" show-overflow-tooltip />
             <el-table-column label="链接" min-width="320">
@@ -103,7 +103,7 @@
           </div>
           <el-table v-loading="loadingDeleted" :data="deletedList" border stripe>
             <el-table-column prop="id" label="ID" width="70" />
-            <el-table-column prop="name" label="名称" width="120" />
+            <el-table-column prop="name" label="名称" width="220" />
             <el-table-column prop="region" label="地区" width="110" />
             <el-table-column prop="aws_instance_id" label="实例 ID" width="180" show-overflow-tooltip />
             <el-table-column label="链接" min-width="320">
