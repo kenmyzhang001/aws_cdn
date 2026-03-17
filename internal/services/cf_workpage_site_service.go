@@ -63,6 +63,15 @@ func (s *CFWorkpageSiteService) Get(id uint) (*models.CFWorkpageSite, error) {
 func (s *CFWorkpageSiteService) Create(cfAccountID, templateID uint, zoneID, mainDomain, subdomain string) (*models.CFWorkpageSite, error) {
 	mainDomain = strings.TrimSpace(strings.ToLower(mainDomain))
 	subdomain = strings.TrimSpace(strings.ToLower(subdomain))
+	customDomain := mainDomain
+	if subdomain != "" {
+		// 兼容用户直接填写完整域名（如 www.example.com）
+		if strings.Contains(subdomain, ".") {
+			customDomain = subdomain
+		} else {
+			customDomain = subdomain + "." + mainDomain
+		}
+	}
 	site := &models.CFWorkpageSite{
 		CFAccountID: cfAccountID,
 		TemplateID:  templateID,
@@ -70,6 +79,7 @@ func (s *CFWorkpageSiteService) Create(cfAccountID, templateID uint, zoneID, mai
 		MainDomain:  mainDomain,
 		Subdomain:   subdomain,
 		Status:      "pending",
+		CustomDomain: customDomain,
 	}
 	if err := s.db.Create(site).Error; err != nil {
 		return nil, fmt.Errorf("创建站点失败: %w", err)
@@ -86,7 +96,21 @@ func (s *CFWorkpageSiteService) Update(id uint, subdomain *string) (*models.CFWo
 	if subdomain != nil {
 		site.Subdomain = strings.TrimSpace(strings.ToLower(*subdomain))
 	}
-	if err := s.db.Model(site).Update("subdomain", site.Subdomain).Error; err != nil {
+	// 同步更新 custom_domain
+	customDomain := strings.TrimSpace(strings.ToLower(site.MainDomain))
+	if site.Subdomain != "" {
+		if strings.Contains(site.Subdomain, ".") {
+			customDomain = site.Subdomain
+		} else {
+			customDomain = site.Subdomain + "." + customDomain
+		}
+	}
+	site.CustomDomain = customDomain
+
+	if err := s.db.Model(site).Select("subdomain", "custom_domain").Updates(map[string]any{
+		"subdomain":     site.Subdomain,
+		"custom_domain": site.CustomDomain,
+	}).Error; err != nil {
 		return nil, fmt.Errorf("更新站点失败: %w", err)
 	}
 	return s.Get(id)
@@ -181,9 +205,16 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 	}
 
 	// 绑定自定义域名（主域名或子域名）
-	customDomain := strings.TrimSpace(site.MainDomain)
-	if site.Subdomain != "" {
-		customDomain = strings.TrimSpace(site.Subdomain) + "." + customDomain
+	customDomain := strings.TrimSpace(site.CustomDomain)
+	if customDomain == "" {
+		customDomain = strings.TrimSpace(site.MainDomain)
+		if site.Subdomain != "" {
+			if strings.Contains(site.Subdomain, ".") {
+				customDomain = strings.TrimSpace(site.Subdomain)
+			} else {
+				customDomain = strings.TrimSpace(site.Subdomain) + "." + customDomain
+			}
+		}
 	}
 	var domainBindErr error
 	if customDomain != "" {
