@@ -387,7 +387,11 @@ export default {
       submitLoading,
       submit,
       resetForm,
-      formatDate
+      formatDate,
+      addRow,
+      removeRow,
+      autoPopupIndex,
+      syncAutoPopupToRows
     }
   }
 }
@@ -404,5 +408,8 @@ export default {
 }
 .filter-section {
   margin-bottom: 20px;
+}
+.table-rows-wrap {
+  margin-top: 8px;
 }
 </style>
