@@ -96,7 +96,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 
 	// CF-WorkPage 模版与站点服务
 	cfWorkpageTemplateService := services.NewCFWorkpageTemplateService(db)
-	cfWorkpageSiteService := services.NewCFWorkpageSiteService(db)
+	cfWorkpageSiteService := services.NewCFWorkpageSiteService(db, cfAccountService, cfWorkpageTemplateService)
 
 	// 初始化重点探测链接服务
 	focusProbeLinkService := services.NewFocusProbeLinkService(db)
@@ -358,6 +358,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 		cfWorkpageSites := protected.Group("/cf-workpage-sites")
 		{
 			cfWorkpageSites.GET("", cfWorkpageSiteHandler.List)
+			cfWorkpageSites.POST("/:id/deploy", cfWorkpageSiteHandler.Deploy)
 			cfWorkpageSites.GET("/:id", cfWorkpageSiteHandler.Get)
 			cfWorkpageSites.POST("", cfWorkpageSiteHandler.Create)
 			cfWorkpageSites.PUT("/:id", cfWorkpageSiteHandler.Update)

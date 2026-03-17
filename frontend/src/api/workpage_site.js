@@ -19,5 +19,9 @@ export const workpageSiteApi = {
 
   delete(id) {
     return request.delete(`/cf-workpage-sites/${id}`)
+  },
+
+  deploy(id) {
+    return request.post(`/cf-workpage-sites/${id}/deploy`)
   }
 }

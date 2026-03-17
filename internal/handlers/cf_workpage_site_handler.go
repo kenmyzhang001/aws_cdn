@@ -130,3 +130,20 @@ func (h *CFWorkpageSiteHandler) Delete(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
 }
+
+// Deploy 部署到 Cloudflare Pages（创建/复用项目 + Direct Upload 部署 + 绑定域名）
+func (h *CFWorkpageSiteHandler) Deploy(c *gin.Context) {
+	log := logger.GetLogger()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 ID"})
+		return
+	}
+	site, err := h.service.Deploy(uint(id))
+	if err != nil {
+		log.WithError(err).Error("部署站点失败")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, site)
+}

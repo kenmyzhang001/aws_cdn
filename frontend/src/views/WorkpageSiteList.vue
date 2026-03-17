@@ -74,9 +74,17 @@
             {{ row.subdomain || '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="100">
+        <el-table-column label="状态" width="120">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)">{{ statusText(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="访问地址" min-width="180">
+          <template #default="{ row }">
+            <a v-if="row.deployment_url" :href="row.deployment_url" target="_blank" rel="noreferrer">
+              {{ row.deployment_url }}
+            </a>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="180">
@@ -84,8 +92,17 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
+            <el-button
+              type="success"
+              link
+              size="small"
+              :disabled="row.status === 'deploying'"
+              @click="handleDeploy(row)"
+            >
+              {{ row.status === 'deployed' ? '重新部署' : '部署' }}
+            </el-button>
             <el-button type="primary" link size="small" @click="openEditDialog(row)">
               编辑
             </el-button>
@@ -296,12 +313,12 @@ export default {
     }
 
     const statusText = (s) => {
-      const m = { pending: '待部署', deployed: '已部署', failed: '失败' }
+      const m = { pending: '待部署', deploying: '部署中', deployed: '已部署', failed: '失败' }
       return m[s] || s
     }
 
     const statusType = (s) => {
-      const m = { pending: 'info', deployed: 'success', failed: 'danger' }
+      const m = { pending: 'info', deploying: 'warning', deployed: 'success', failed: 'danger' }
       return m[s] || 'info'
     }
 
@@ -363,14 +380,23 @@ export default {
             submitLoading.value = false
             return
           }
-          await workpageSiteApi.create({
+          const created = await workpageSiteApi.create({
             cf_account_id: form.value.cf_account_id,
             template_id: form.value.template_id,
             zone_id: form.value.zone_id,
             main_domain: mainDomain,
             subdomain: (form.value.subdomain || '').trim()
           })
-          ElMessage.success('创建成功')
+          ElMessage.success('创建成功，开始部署…')
+          const siteId = created?.id
+          if (siteId) {
+            try {
+              await workpageSiteApi.deploy(siteId)
+              ElMessage.success('部署已触发')
+            } catch (e) {
+              // error shown by request
+            }
+          }
         }
         dialogVisible.value = false
         fetchList()
@@ -378,6 +404,16 @@ export default {
         // error shown by request
       } finally {
         submitLoading.value = false
+      }
+    }
+
+    const handleDeploy = async (row) => {
+      try {
+        await workpageSiteApi.deploy(row.id)
+        ElMessage.success('已触发部署')
+        fetchList()
+      } catch (e) {
+        // error shown by request
       }
     }
 
@@ -413,6 +449,7 @@ export default {
       onFilterChange,
       openCreateDialog,
       openEditDialog,
+      handleDeploy,
       handleDelete,
       dialogVisible,
       editId,
