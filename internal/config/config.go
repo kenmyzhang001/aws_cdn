@@ -33,9 +33,11 @@ type DatabaseConfig struct {
 }
 
 type ServerConfig struct {
-	Port     string
-	Mode     string
-	Sitename string
+	Port             string
+	Mode             string
+	Sitename         string
+	BlockChinaIP     bool   // 是否禁止中国 IP 访问
+	GeoIPCountryDB   string // GeoLite2-Country.mmdb 或 GeoIP2-Country.mmdb 文件路径
 }
 
 type JWTConfig struct {
@@ -96,9 +98,11 @@ func Load() *Config {
 			DB:       getIntEnv("REDIS_DB", 0),
 		},
 		Server: ServerConfig{
-			Port:     getEnv("SERVER_PORT", "8080"),
-			Mode:     getEnv("SERVER_MODE", "debug"),
-			Sitename: getEnv("SITENAME", ""),
+			Port:             getEnv("SERVER_PORT", "8080"),
+			Mode:             getEnv("SERVER_MODE", "debug"),
+			Sitename:         getEnv("SITENAME", ""),
+			BlockChinaIP:     getBoolEnv("BLOCK_CHINA_IP", false),
+			GeoIPCountryDB:   getEnv("GEOIP_COUNTRY_DB", ""),
 		},
 		JWT: JWTConfig{
 			Secret:      getEnv("JWT_SECRET", "your-secret-key"),

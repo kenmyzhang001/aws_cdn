@@ -19,6 +19,8 @@ import GameChannelList from '@/views/GameChannelList.vue'
 import SiteDailyDataList from '@/views/SiteDailyDataList.vue'
 import FallbackRuleList from '@/views/FallbackRuleList.vue'
 import Ec2InstanceList from '@/views/Ec2InstanceList.vue'
+import WorkpageTemplateList from '@/views/WorkpageTemplateList.vue'
+import WorkpageSiteList from '@/views/WorkpageSiteList.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -130,6 +132,16 @@ const routes = [
     path: '/fallback-rules',
     name: 'FallbackRuleList',
     component: FallbackRuleList,
+  },
+  {
+    path: '/workpage-templates',
+    name: 'WorkpageTemplateList',
+    component: WorkpageTemplateList,
+  },
+  {
+    path: '/workpage-sites',
+    name: 'WorkpageSiteList',
+    component: WorkpageSiteList,
   },
 ]
 

@@ -94,6 +94,10 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	// 初始化域名 302 重定向服务
 	domainRedirectService := services.NewDomainRedirectService(db, cfAccountService)
 
+	// CF-WorkPage 模版与站点服务
+	cfWorkpageTemplateService := services.NewCFWorkpageTemplateService(db)
+	cfWorkpageSiteService := services.NewCFWorkpageSiteService(db)
+
 	// 初始化重点探测链接服务
 	focusProbeLinkService := services.NewFocusProbeLinkService(db)
 
@@ -113,6 +117,8 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 	cfWorkerHandler := handlers.NewCFWorkerHandler(cfWorkerService)
 	ec2InstanceHandler := handlers.NewEc2InstanceHandler(ec2InstanceService)
 	domainRedirectHandler := handlers.NewDomainRedirectHandler(domainRedirectService)
+	cfWorkpageTemplateHandler := handlers.NewCFWorkpageTemplateHandler(cfWorkpageTemplateService)
+	cfWorkpageSiteHandler := handlers.NewCFWorkpageSiteHandler(cfWorkpageSiteService)
 	focusProbeLinkHandler := handlers.NewFocusProbeLinkHandler(focusProbeLinkService)
 
 	// Redis 与游戏统计（若 main 未传入 redisClient 则在此创建）
@@ -334,6 +340,26 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			domainRedirects.PUT("/:id", domainRedirectHandler.Update)
 			domainRedirects.DELETE("/:id", domainRedirectHandler.Delete)
 			domainRedirects.POST("/:id/ensure-dns", domainRedirectHandler.EnsureDNS)
+		}
+
+		// CF-WorkPage 模版管理
+		cfWorkpageTemplates := protected.Group("/cf-workpage-templates")
+		{
+			cfWorkpageTemplates.GET("", cfWorkpageTemplateHandler.List)
+			cfWorkpageTemplates.GET("/:id", cfWorkpageTemplateHandler.Get)
+			cfWorkpageTemplates.POST("", cfWorkpageTemplateHandler.Create)
+			cfWorkpageTemplates.PUT("/:id", cfWorkpageTemplateHandler.Update)
+			cfWorkpageTemplates.DELETE("/:id", cfWorkpageTemplateHandler.Delete)
+		}
+
+		// CF-WorkPage 站点管理
+		cfWorkpageSites := protected.Group("/cf-workpage-sites")
+		{
+			cfWorkpageSites.GET("", cfWorkpageSiteHandler.List)
+			cfWorkpageSites.GET("/:id", cfWorkpageSiteHandler.Get)
+			cfWorkpageSites.POST("", cfWorkpageSiteHandler.Create)
+			cfWorkpageSites.PUT("/:id", cfWorkpageSiteHandler.Update)
+			cfWorkpageSites.DELETE("/:id", cfWorkpageSiteHandler.Delete)
 		}
 
 		// 重点探测链接管理
