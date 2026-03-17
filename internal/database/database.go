@@ -40,6 +40,7 @@ func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&models.CFWorkpageTemplate{},
 		&models.CFWorkpageSite{},
+		&models.CFWorkpageTemplateRow{},
 		&models.Group{},
 		&models.ChannelGroup{},
 		&models.Domain{},

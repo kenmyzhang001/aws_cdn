@@ -88,7 +88,7 @@ func (s *CFWorkpageTemplateService) Update(id uint, nameZh, nameMy, defaultLang 
 	return t, nil
 }
 
-// Delete 删除
+// Delete 删除（会级联删除模版下的所有表格行）
 func (s *CFWorkpageTemplateService) Delete(id uint) error {
 	var count int64
 	if err := s.db.Model(&models.CFWorkpageSite{}).Where("template_id = ?", id).Count(&count).Error; err != nil {
@@ -97,5 +97,51 @@ func (s *CFWorkpageTemplateService) Delete(id uint) error {
 	if count > 0 {
 		return fmt.Errorf("该模版已被 %d 个站点使用，请先解除关联再删除", count)
 	}
+	_ = s.db.Where("template_id = ?", id).Delete(&models.CFWorkpageTemplateRow{})
 	return s.db.Delete(&models.CFWorkpageTemplate{}, id).Error
+}
+
+// ListRows 获取模版下所有表格行（按 sort_order 排序）
+func (s *CFWorkpageTemplateService) ListRows(templateID uint) ([]models.CFWorkpageTemplateRow, error) {
+	var rows []models.CFWorkpageTemplateRow
+	if err := s.db.Where("template_id = ?", templateID).Order("sort_order ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("查询表格行失败: %w", err)
+	}
+	return rows, nil
+}
+
+// SaveRows 批量保存模版表格行（先删后增；若任一行 auto_popup=true，同模版下其余行会被设为 false）
+func (s *CFWorkpageTemplateService) SaveRows(templateID uint, rows []models.CFWorkpageTemplateRow) ([]models.CFWorkpageTemplateRow, error) {
+	if _, err := s.Get(templateID); err != nil {
+		return nil, err
+	}
+	if err := s.db.Where("template_id = ?", templateID).Delete(&models.CFWorkpageTemplateRow{}).Error; err != nil {
+		return nil, fmt.Errorf("清空原表格行失败: %w", err)
+	}
+	for i := range rows {
+		rows[i].ID = 0
+		rows[i].TemplateID = templateID
+		rows[i].SortOrder = i
+		if rows[i].AutoPopup {
+			// 同模版只允许一个 auto_popup，前面已删光，无需再清
+			break
+		}
+	}
+	// 若有多行 auto_popup，只保留第一个
+	hasAuto := false
+	for i := range rows {
+		if rows[i].AutoPopup {
+			if hasAuto {
+				rows[i].AutoPopup = false
+			} else {
+				hasAuto = true
+			}
+		}
+	}
+	for i := range rows {
+		if err := s.db.Create(&rows[i]).Error; err != nil {
+			return nil, fmt.Errorf("创建表格行失败: %w", err)
+		}
+	}
+	return s.ListRows(templateID)
 }

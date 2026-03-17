@@ -19,5 +19,14 @@ export const workpageTemplateApi = {
 
   delete(id) {
     return request.delete(`/cf-workpage-templates/${id}`)
+  },
+
+  /** 模版表格行（3列多行，每行一个下载链接；支持默认自动弹出其中一个包） */
+  getRows(templateId) {
+    return request.get(`/cf-workpage-templates/${templateId}/rows`)
+  },
+
+  saveRows(templateId, rows) {
+    return request.put(`/cf-workpage-templates/${templateId}/rows`, { rows })
   }
 }

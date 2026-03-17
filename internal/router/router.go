@@ -342,10 +342,12 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			domainRedirects.POST("/:id/ensure-dns", domainRedirectHandler.EnsureDNS)
 		}
 
-		// CF-WorkPage 模版管理
+		// CF-WorkPage 模版管理（/:id/rows 需在 /:id 前注册）
 		cfWorkpageTemplates := protected.Group("/cf-workpage-templates")
 		{
 			cfWorkpageTemplates.GET("", cfWorkpageTemplateHandler.List)
+			cfWorkpageTemplates.GET("/:id/rows", cfWorkpageTemplateHandler.ListRows)
+			cfWorkpageTemplates.PUT("/:id/rows", cfWorkpageTemplateHandler.SaveRows)
 			cfWorkpageTemplates.GET("/:id", cfWorkpageTemplateHandler.Get)
 			cfWorkpageTemplates.POST("", cfWorkpageTemplateHandler.Create)
 			cfWorkpageTemplates.PUT("/:id", cfWorkpageTemplateHandler.Update)
