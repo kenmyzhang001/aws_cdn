@@ -111,24 +111,29 @@ func (s *CFWorkpageTemplateService) ListRows(templateID uint) ([]models.CFWorkpa
 	return rows, nil
 }
 
-// SaveRows 批量保存模版表格行（先删后增；若任一行 auto_popup=true，同模版下其余行会被设为 false）
+// SaveRows 批量保存模版表格行：
+// - 传入的行如果已存在（按 id 匹配）则执行更新
+// - 传入的行如果不存在则插入
+// - 不在传入列表中的旧行会被删除
+// - 若有多行 auto_popup=true，仅保留第一行为 true，其余强制为 false
 func (s *CFWorkpageTemplateService) SaveRows(templateID uint, rows []models.CFWorkpageTemplateRow) ([]models.CFWorkpageTemplateRow, error) {
 	if _, err := s.Get(templateID); err != nil {
 		return nil, err
 	}
-	if err := s.db.Where("template_id = ?", templateID).Delete(&models.CFWorkpageTemplateRow{}).Error; err != nil {
-		return nil, fmt.Errorf("清空原表格行失败: %w", err)
-	}
-	for i := range rows {
-		rows[i].ID = 0
-		rows[i].TemplateID = templateID
-		rows[i].SortOrder = i
-		if rows[i].AutoPopup {
-			// 同模版只允许一个 auto_popup，前面已删光，无需再清
-			break
+	if len(rows) == 0 {
+		// 若前端传空数组，视为清空所有行
+		if err := s.db.Where("template_id = ?", templateID).Delete(&models.CFWorkpageTemplateRow{}).Error; err != nil {
+			return nil, fmt.Errorf("清空原表格行失败: %w", err)
 		}
+		return []models.CFWorkpageTemplateRow{}, nil
 	}
-	// 若有多行 auto_popup，只保留第一个
+
+	tx := s.db.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("开启事务失败: %w", tx.Error)
+	}
+
+	// 1. 规范 auto_popup：只保留第一条为 true
 	hasAuto := false
 	for i := range rows {
 		if rows[i].AutoPopup {
@@ -139,11 +144,80 @@ func (s *CFWorkpageTemplateService) SaveRows(templateID uint, rows []models.CFWo
 			}
 		}
 	}
-	for i := range rows {
-		if err := s.db.Create(&rows[i]).Error; err != nil {
-			return nil, fmt.Errorf("创建表格行失败: %w", err)
+
+	// 如果本次提交中有 auto_popup=true，先把库里该模板下所有行的 auto_popup 清零
+	if hasAuto {
+		if err := tx.Model(&models.CFWorkpageTemplateRow{}).
+			Where("template_id = ?", templateID).
+			Update("auto_popup", false).Error; err != nil {
+			tx.Rollback()
+			return nil, fmt.Errorf("重置自动弹出标记失败: %w", err)
 		}
 	}
+
+	// 2. 记录前端传来的行 id 集合，用于删除“已被移除的行”
+	var keepIDs []uint
+	for i := range rows {
+		if rows[i].ID != 0 {
+			keepIDs = append(keepIDs, rows[i].ID)
+		}
+	}
+
+	// 删除该模板下但不在 keepIDs 列表中的旧行（即前端已经删除的行）
+	if len(keepIDs) > 0 {
+		if err := tx.Where("template_id = ? AND id NOT IN ?", templateID, keepIDs).
+			Delete(&models.CFWorkpageTemplateRow{}).Error; err != nil {
+			tx.Rollback()
+			return nil, fmt.Errorf("删除已移除的表格行失败: %w", err)
+		}
+	} else {
+		// 所有旧行都被移除
+		if err := tx.Where("template_id = ?", templateID).
+			Delete(&models.CFWorkpageTemplateRow{}).Error; err != nil {
+			tx.Rollback()
+			return nil, fmt.Errorf("清空原表格行失败: %w", err)
+		}
+	}
+
+	// 3. 按当前顺序更新/插入各行，并写入 sort_order & template_id
+	for i := range rows {
+		rows[i].TemplateID = templateID
+		rows[i].SortOrder = i
+
+		if rows[i].ID == 0 {
+			// 新增行
+			if err := tx.Create(&rows[i]).Error; err != nil {
+				tx.Rollback()
+				return nil, fmt.Errorf("创建表格行失败: %w", err)
+			}
+			continue
+		}
+
+		// 已存在行：按 id + template_id 精确更新
+		updateData := map[string]any{
+			"sort_order":   rows[i].SortOrder,
+			"col1_zh":      rows[i].Col1Zh,
+			"col1_my":      rows[i].Col1My,
+			"col2_zh":      rows[i].Col2Zh,
+			"col2_my":      rows[i].Col2My,
+			"col3_zh":      rows[i].Col3Zh,
+			"col3_my":      rows[i].Col3My,
+			"download_url": rows[i].DownloadURL,
+			"auto_popup":   rows[i].AutoPopup,
+		}
+		if err := tx.Model(&models.CFWorkpageTemplateRow{}).
+			Where("id = ? AND template_id = ?", rows[i].ID, templateID).
+			Updates(updateData).Error; err != nil {
+			tx.Rollback()
+			return nil, fmt.Errorf("更新表格行失败: %w", err)
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("提交事务失败: %w", err)
+	}
+
 	return s.ListRows(templateID)
 }
 
