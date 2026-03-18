@@ -263,26 +263,39 @@
                   <el-select
                     v-model="row.domain_base"
                     filterable
+                    remote
+                    reserve-keyword
                     allow-create
                     default-first-option
                     placeholder="请先选择 CF 账号"
                     clearable
                     style="width: 200px;"
                     :disabled="!workerForm.cf_account_id"
-                    :loading="loadingWorkerDomains"
-                    :filter-method="(q) => filterWorkerDomains(q)"
-                    @focus="loadDownloadZonesIfNeeded"
+                    :loading="loadingDownloadZones"
+                    :remote-method="onDownloadDomainBaseSearch"
+                    @visible-change="onDownloadDomainBaseDropdownVisibleChange"
                     @change="syncDomainPathRowDomain(idx)"
                   >
                     <el-option
-                      v-for="d in filteredWorkerDomains"
+                      v-for="d in downloadZonesList"
                       :key="d"
                       :label="d"
                       :value="d"
                     />
-                    <el-option v-if="workerZonesPagination.hasMore && filteredWorkerDomains.length > 0" :value="null" disabled>
-                      <span style="color: #409EFF; cursor: pointer;" @click.stop="loadMoreWorkerZones">加载更多域名</span>
-                    </el-option>
+                    <template #footer>
+                      <div style="padding: 8px 12px; display: flex; justify-content: center;">
+                        <el-button
+                          v-if="downloadZonesPagination.hasMore"
+                          size="small"
+                          :loading="loadingDownloadZonesMore"
+                          :disabled="loadingDownloadZones"
+                          @click.stop="loadMoreDownloadZones"
+                        >
+                          加载更多
+                        </el-button>
+                        <span v-else style="color: #909399; font-size: 12px;">没有更多了</span>
+                      </div>
+                    </template>
                   </el-select>
                 </div>
                 <el-select
@@ -351,12 +364,15 @@
                 placeholder="选择或输入基础域名（必填）"
                 style="width: 100%"
                 filterable
+                remote
+                reserve-keyword
                 allow-create
                 clearable
                 default-first-option
                 :loading="loadingWorkerDomains"
                 :disabled="!workerForm.cf_account_id"
-                :filter-method="filterWorkerDomains"
+                :remote-method="onWorkerBaseDomainSearch"
+                @visible-change="onWorkerBaseDomainDropdownVisibleChange"
                 @change="updateWorkerDomain"
               >
                 <template #empty>
@@ -387,28 +403,20 @@
                   </div>
                 </el-option>
                 
-                <!-- 加载更多选项 -->
-                <el-option
-                  v-if="workerZonesPagination.hasMore && !workerDomainSearchQuery"
-                  :value="'__load_more__'"
-                  disabled
-                  style="background-color: #f5f7fa; cursor: pointer !important;"
-                >
-                  <div style="text-align: center; padding: 5px 0;">
-                    <el-button 
-                      type="primary" 
+                <template #footer>
+                  <div style="padding: 8px 12px; display: flex; justify-content: center;">
+                    <el-button
+                      v-if="workerZonesPagination.hasMore"
                       size="small"
+                      :loading="loadingWorkerDomainsMore"
+                      :disabled="loadingWorkerDomains"
                       @click.stop="loadMoreWorkerZones"
-                      :loading="loadingWorkerDomains"
-                      style="width: 90%;"
                     >
-                      <span v-if="!loadingWorkerDomains">
-                        加载更多域名 ({{ workerDomains.length }}/{{ workerZonesPagination.totalCount }})
-                      </span>
-                      <span v-else>加载中...</span>
+                      加载更多
                     </el-button>
+                    <span v-else style="color: #909399; font-size: 12px;">没有更多了</span>
                   </div>
-                </el-option>
+                </template>
               </el-select>
               <div class="form-tip" style="margin-top: 4px;">
                 基础域名（必填）
@@ -786,15 +794,32 @@ const loadingDomains = ref(false);
 // Worker 域名列表（从 CF 账号获取）
 const workerDomains = ref([]);
 const loadingWorkerDomains = ref(false);
+const loadingWorkerDomainsMore = ref(false);
 
 // 过滤后的 Worker 域名列表
 const filteredWorkerDomains = ref([]);
 
 // Worker 域名搜索查询
 const workerDomainSearchQuery = ref('');
+const workerZonesKeyword = ref('');
+let workerDomainSearchTimer = null;
 
 // Worker 域名分页状态
 const workerZonesPagination = reactive({
+  page: 1,
+  perPage: 50,
+  totalPages: 0,
+  totalCount: 0,
+  hasMore: false
+});
+
+// 下载模式：域名→路径 的基础域名远程搜索
+const downloadZonesList = ref([]);
+const loadingDownloadZones = ref(false);
+const loadingDownloadZonesMore = ref(false);
+const downloadZonesKeyword = ref('');
+let downloadZonesSearchTimer = null;
+const downloadZonesPagination = reactive({
   page: 1,
   perPage: 50,
   totalPages: 0,
@@ -1071,7 +1096,7 @@ const handleCFAccountChange = async (cfAccountId) => {
   }
   
   // 加载该账号下的域名列表（第一页）
-  await loadCFAccountZones(cfAccountId, false);
+  await loadCFAccountZones(cfAccountId, false, workerZonesKeyword.value);
 };
 
 // 下载模式：R2 存储桶变化时重新加载该桶的文件列表
@@ -1102,17 +1127,18 @@ watch(() => workerForm.cf_account_id, async (newAccountId, oldAccountId) => {
     workerZonesPagination.hasMore = false;
     
     // 加载新账号的域名列表
-    await loadCFAccountZones(newAccountId, false);
+    await loadCFAccountZones(newAccountId, false, workerZonesKeyword.value);
   }
 });
 
 // 加载 CF 账号的域名列表
 // isLoadMore: 是否为加载更多（true则追加，false则替换）
-const loadCFAccountZones = async (cfAccountId, isLoadMore = false) => {
-  if (loadingWorkerDomains.value) return;
+const loadCFAccountZones = async (cfAccountId, isLoadMore = false, keyword = '') => {
+  if (loadingWorkerDomains.value || loadingWorkerDomainsMore.value) return;
   
   try {
-    loadingWorkerDomains.value = true;
+    if (isLoadMore) loadingWorkerDomainsMore.value = true;
+    else loadingWorkerDomains.value = true;
     
     const page = isLoadMore ? workerZonesPagination.page + 1 : 1;
     
@@ -1120,7 +1146,8 @@ const loadCFAccountZones = async (cfAccountId, isLoadMore = false) => {
     
     const result = await cfAccountApi.getCFAccountZones(cfAccountId, {
       page: page,
-      per_page: workerZonesPagination.perPage
+      per_page: workerZonesPagination.perPage,
+      name: keyword || ''
     });
     
     console.log('CF 账号域名列表响应:', result);
@@ -1156,12 +1183,7 @@ const loadCFAccountZones = async (cfAccountId, isLoadMore = false) => {
     }
     
     // 更新过滤列表
-    if (!workerDomainSearchQuery.value) {
-      filteredWorkerDomains.value = [...workerDomains.value];
-    } else {
-      // 重新应用搜索过滤
-      filterWorkerDomains(workerDomainSearchQuery.value);
-    }
+    filteredWorkerDomains.value = [...workerDomains.value];
     
     if (!isLoadMore) {
       if (workerDomains.value.length === 0) {
@@ -1182,6 +1204,7 @@ const loadCFAccountZones = async (cfAccountId, isLoadMore = false) => {
     }
   } finally {
     loadingWorkerDomains.value = false;
+    loadingWorkerDomainsMore.value = false;
   }
 };
 
@@ -1190,7 +1213,7 @@ const loadMoreWorkerZones = async () => {
   if (!workerForm.cf_account_id || !workerZonesPagination.hasMore) {
     return;
   }
-  await loadCFAccountZones(workerForm.cf_account_id, true);
+  await loadCFAccountZones(workerForm.cf_account_id, true, workerZonesKeyword.value);
 };
 
 // 更新完整的 Worker 域名（组合前缀和基础域名）
@@ -1214,21 +1237,26 @@ const updateWorkerDomain = () => {
   console.log('更新 Worker 域名:', workerForm.worker_domain);
 };
 
-// 过滤 Worker 域名
-const filterWorkerDomains = (query) => {
-  workerDomainSearchQuery.value = query;
-  
-  if (!query) {
-    filteredWorkerDomains.value = [...workerDomains.value];
-    return;
-  }
-  
-  const lowerQuery = query.toLowerCase();
-  filteredWorkerDomains.value = workerDomains.value.filter(domain => {
-    return domain.toLowerCase().includes(lowerQuery);
-  });
-  
-  console.log('域名搜索:', query, '结果数:', filteredWorkerDomains.value.length);
+const onWorkerBaseDomainSearch = (q) => {
+  const keyword = String(q || '').trim();
+  workerDomainSearchQuery.value = keyword;
+  workerZonesKeyword.value = keyword;
+  if (!workerForm.cf_account_id) return;
+  workerZonesPagination.page = 1;
+  workerZonesPagination.totalPages = 0;
+  workerZonesPagination.totalCount = 0;
+  workerZonesPagination.hasMore = false;
+  if (workerDomainSearchTimer) clearTimeout(workerDomainSearchTimer);
+  workerDomainSearchTimer = setTimeout(() => {
+    loadCFAccountZones(workerForm.cf_account_id, false, workerZonesKeyword.value);
+  }, 300);
+};
+
+const onWorkerBaseDomainDropdownVisibleChange = (visible) => {
+  if (!visible) return;
+  if (!workerForm.cf_account_id) return;
+  if (workerDomains.value.length > 0) return;
+  loadCFAccountZones(workerForm.cf_account_id, false, workerZonesKeyword.value);
 };
 
 // 使用自定义域名
@@ -1382,10 +1410,72 @@ const syncDomainPathRowDomain = (idx) => {
   row.domain = base ? (prefix ? `${prefix}.${base}` : base) : '';
 };
 
-// 下载模式：打开域名下拉时加载当前 CF 账号的托管域名列表
-const loadDownloadZonesIfNeeded = () => {
-  if (workerForm.business_mode !== '下载' || !workerForm.cf_account_id) return;
-  if (workerDomains.value.length === 0) loadCFAccountZones(workerForm.cf_account_id, false);
+const loadDownloadZones = async (cfAccountId, isLoadMore = false, keyword = '') => {
+  if (!cfAccountId) return;
+  if (loadingDownloadZones.value || loadingDownloadZonesMore.value) return;
+  try {
+    if (isLoadMore) loadingDownloadZonesMore.value = true;
+    else loadingDownloadZones.value = true;
+
+    const page = isLoadMore ? downloadZonesPagination.page + 1 : 1;
+    const result = await cfAccountApi.getCFAccountZones(cfAccountId, {
+      page,
+      per_page: downloadZonesPagination.perPage,
+      name: keyword || ''
+    });
+
+    let zoneList = [];
+    if (Array.isArray(result)) {
+      zoneList = result;
+      downloadZonesPagination.page = 1;
+      downloadZonesPagination.totalPages = 1;
+      downloadZonesPagination.totalCount = result.length;
+      downloadZonesPagination.hasMore = false;
+    } else {
+      zoneList = result.zones || [];
+      downloadZonesPagination.page = result.page || page;
+      downloadZonesPagination.totalPages = result.total_pages || 0;
+      downloadZonesPagination.totalCount = result.total_count || 0;
+      downloadZonesPagination.hasMore = downloadZonesPagination.page < downloadZonesPagination.totalPages;
+    }
+
+    const newDomains = zoneList.map(z => z.name || z);
+    if (isLoadMore) downloadZonesList.value = Array.from(new Set([...downloadZonesList.value, ...newDomains]));
+    else downloadZonesList.value = newDomains;
+  } catch (err) {
+    console.error('下载模式加载域名失败:', err);
+    if (!isLoadMore) downloadZonesList.value = [];
+    downloadZonesPagination.hasMore = false;
+  } finally {
+    loadingDownloadZones.value = false;
+    loadingDownloadZonesMore.value = false;
+  }
+};
+
+const onDownloadDomainBaseSearch = (q) => {
+  const keyword = String(q || '').trim();
+  downloadZonesKeyword.value = keyword;
+  if (!workerForm.cf_account_id) return;
+  downloadZonesPagination.page = 1;
+  downloadZonesPagination.totalPages = 0;
+  downloadZonesPagination.totalCount = 0;
+  downloadZonesPagination.hasMore = false;
+  if (downloadZonesSearchTimer) clearTimeout(downloadZonesSearchTimer);
+  downloadZonesSearchTimer = setTimeout(() => {
+    loadDownloadZones(workerForm.cf_account_id, false, downloadZonesKeyword.value);
+  }, 300);
+};
+
+const onDownloadDomainBaseDropdownVisibleChange = (visible) => {
+  if (!visible) return;
+  if (!workerForm.cf_account_id) return;
+  if (downloadZonesList.value.length > 0) return;
+  loadDownloadZones(workerForm.cf_account_id, false, downloadZonesKeyword.value);
+};
+
+const loadMoreDownloadZones = async () => {
+  if (!workerForm.cf_account_id || !downloadZonesPagination.hasMore) return;
+  await loadDownloadZones(workerForm.cf_account_id, true, downloadZonesKeyword.value);
 };
 
 // 下载模式：域名→路径行动态增删（每行含 domain_prefix、domain_base，同步到 domain）
