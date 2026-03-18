@@ -159,6 +159,7 @@ func (h *CFWorkpageSiteHandler) DeployedIndexHTML(c *gin.Context) {
 	}
 	html, err := h.service.GetDeployedIndexHTML(uint(id))
 	if err != nil {
+		log.WithError(err).Error("获取部署文件失败")
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
