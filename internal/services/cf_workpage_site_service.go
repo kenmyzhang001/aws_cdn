@@ -286,17 +286,27 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 		lastErr = domainBindErr.Error()
 	}
 	if err := s.db.Model(&models.CFWorkpageSite{}).Where("id = ?", id).Updates(map[string]any{
-		"status":             "deployed",
-		"pages_project_name": projectName,
-		"deployment_id":      deploy.ID,
-		"deployment_url":     deployURL,
-		"custom_domain":      customDomain,
-		"last_error":         lastErr,
-		"deployed_at":        &deployedAt,
+		"status":               "deployed",
+		"pages_project_name":   projectName,
+		"deployment_id":        deploy.ID,
+		"deployment_url":       deployURL,
+		"custom_domain":        customDomain,
+		"last_error":           lastErr,
+		"deployed_at":          &deployedAt,
+		"deployed_index_html":  string(htmlBytes),
 	}).Error; err != nil {
 		return nil, err
 	}
 	return s.Get(id)
+}
+
+// GetDeployedIndexHTML 返回最近一次成功部署时保存的 index.html 原文
+func (s *CFWorkpageSiteService) GetDeployedIndexHTML(id uint) (string, error) {
+	var site models.CFWorkpageSite
+	if err := s.db.Select("id", "deployed_index_html").First(&site, id).Error; err != nil {
+		return "", fmt.Errorf("站点不存在: %w", err)
+	}
+	return site.DeployedIndexHTML, nil
 }
 
 // PreviewHTML 生成部署前预览 HTML（不上传到 Pages）

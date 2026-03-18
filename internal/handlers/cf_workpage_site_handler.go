@@ -5,6 +5,7 @@ import (
 	"aws_cdn/internal/services"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -146,6 +147,26 @@ func (h *CFWorkpageSiteHandler) Deploy(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, site)
+}
+
+// DeployedIndexHTML 查看最近一次成功部署上传的 index.html 原文
+func (h *CFWorkpageSiteHandler) DeployedIndexHTML(c *gin.Context) {
+	log := logger.GetLogger()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 ID"})
+		return
+	}
+	html, err := h.service.GetDeployedIndexHTML(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(html) == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "暂无已保存的部署文件，请先成功部署一次"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"html": html})
 }
 
 // Preview 部署前预览（返回 HTML）

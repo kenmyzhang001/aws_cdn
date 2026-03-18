@@ -92,10 +92,19 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="380" fixed="right">
           <template #default="{ row }">
             <el-button type="info" link size="small" @click="handlePreview(row)">
               预览
+            </el-button>
+            <el-button
+              type="warning"
+              link
+              size="small"
+              :disabled="row.status !== 'deployed'"
+              @click="handleViewDeployedHtml(row)"
+            >
+              部署HTML
             </el-button>
             <el-button
               type="success"
@@ -201,6 +210,32 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="deployedHtmlDialogVisible"
+      title="已部署 index.html 原文（与上次成功上传 Pages 一致）"
+      width="90%"
+      top="5vh"
+      destroy-on-close
+      @closed="deployedHtmlContent = ''"
+    >
+      <div v-loading="deployedHtmlLoading" style="min-height: 200px">
+        <el-input
+          v-model="deployedHtmlContent"
+          type="textarea"
+          :rows="22"
+          readonly
+          placeholder="加载中…"
+          class="deployed-html-textarea"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="deployedHtmlDialogVisible = false">关闭</el-button>
+        <el-button type="primary" :disabled="!deployedHtmlContent" @click="copyDeployedHtml">
+          复制全文
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -243,6 +278,10 @@ export default {
     })
 
     const zoneList = ref([])
+
+    const deployedHtmlDialogVisible = ref(false)
+    const deployedHtmlLoading = ref(false)
+    const deployedHtmlContent = ref('')
 
     const fetchCFAccounts = async () => {
       try {
@@ -425,6 +464,32 @@ export default {
       openAuthPreview(`/cf-workpage-sites/${row.id}/preview`)
     }
 
+    const handleViewDeployedHtml = async (row) => {
+      deployedHtmlDialogVisible.value = true
+      deployedHtmlContent.value = ''
+      deployedHtmlLoading.value = true
+      try {
+        const res = await workpageSiteApi.getDeployedIndexHtml(row.id)
+        deployedHtmlContent.value = res?.html ?? ''
+        if (!deployedHtmlContent.value) {
+          ElMessage.warning('暂无已保存的部署文件，请先成功部署一次')
+        }
+      } catch (e) {
+        deployedHtmlContent.value = ''
+      } finally {
+        deployedHtmlLoading.value = false
+      }
+    }
+
+    const copyDeployedHtml = async () => {
+      try {
+        await navigator.clipboard.writeText(deployedHtmlContent.value)
+        ElMessage.success('已复制到剪贴板')
+      } catch {
+        ElMessage.error('复制失败，请手动全选复制')
+      }
+    }
+
     const handleDelete = async (row) => {
       try {
         await ElMessageBox.confirm(
@@ -459,6 +524,11 @@ export default {
       openEditDialog,
       handleDeploy,
       handlePreview,
+      handleViewDeployedHtml,
+      copyDeployedHtml,
+      deployedHtmlDialogVisible,
+      deployedHtmlLoading,
+      deployedHtmlContent,
       handleDelete,
       dialogVisible,
       editId,
@@ -489,5 +559,10 @@ export default {
 }
 .filter-section {
   margin-bottom: 20px;
+}
+.deployed-html-textarea :deep(textarea) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
 }
 </style>

@@ -24,6 +24,8 @@ type CFWorkpageSite struct {
 	CustomDomain     string `json:"custom_domain" gorm:"type:varchar(255)"`       // 绑定的自定义域名（主域名或子域名）
 	LastError        string `json:"last_error" gorm:"type:text"`                  // 最近一次部署错误
 	DeployedAt       *time.Time `json:"deployed_at" gorm:"default:null"`          // 部署成功时间
+	// 最近一次成功上传到 Pages 的 index.html 原文（仅接口单独查询，列表/详情 JSON 不返回以减小体积）
+	DeployedIndexHTML string `json:"-" gorm:"type:longtext"`
 
 	CreatedAt    time.Time             `json:"created_at"`
 	UpdatedAt    time.Time             `json:"updated_at"`

@@ -23,5 +23,10 @@ export const workpageSiteApi = {
 
   deploy(id) {
     return request.post(`/cf-workpage-sites/${id}/deploy`)
+  },
+
+  /** 最近一次成功部署上传的 index.html 原文 */
+  getDeployedIndexHtml(id) {
+    return request.get(`/cf-workpage-sites/${id}/deployed-index-html`)
   }
 }
