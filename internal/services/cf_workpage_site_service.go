@@ -74,12 +74,12 @@ func (s *CFWorkpageSiteService) Create(cfAccountID, templateID uint, zoneID, mai
 		}
 	}
 	site := &models.CFWorkpageSite{
-		CFAccountID: cfAccountID,
-		TemplateID:  templateID,
-		ZoneID:      zoneID,
-		MainDomain:  mainDomain,
-		Subdomain:   subdomain,
-		Status:      "pending",
+		CFAccountID:  cfAccountID,
+		TemplateID:   templateID,
+		ZoneID:       zoneID,
+		MainDomain:   mainDomain,
+		Subdomain:    subdomain,
+		Status:       "pending",
 		CustomDomain: customDomain,
 	}
 	if err := s.db.Create(site).Error; err != nil {
@@ -210,7 +210,7 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 
 	rows, _ := s.templateService.ListRows(site.TemplateID)
 	htmlBytes := []byte(renderWorkpageHTML(site, rows))
-	deploy, err := cfSvc.CreatePagesDeployment(account.AccountID, projectName, "main", "Deploy CF-WorkPage site", ".", map[string][]byte{
+	deploy, err := cfSvc.CreatePagesDeployment(account.AccountID, projectName, "main", "main", ".", map[string][]byte{
 		"index.html": htmlBytes,
 	})
 	if err != nil {
@@ -286,14 +286,14 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 		lastErr = domainBindErr.Error()
 	}
 	if err := s.db.Model(&models.CFWorkpageSite{}).Where("id = ?", id).Updates(map[string]any{
-		"status":               "deployed",
-		"pages_project_name":   projectName,
-		"deployment_id":        deploy.ID,
-		"deployment_url":       deployURL,
-		"custom_domain":        customDomain,
-		"last_error":           lastErr,
-		"deployed_at":          &deployedAt,
-		"deployed_index_html":  string(htmlBytes),
+		"status":              "deployed",
+		"pages_project_name":  projectName,
+		"deployment_id":       deploy.ID,
+		"deployment_url":      deployURL,
+		"custom_domain":       customDomain,
+		"last_error":          lastErr,
+		"deployed_at":         &deployedAt,
+		"deployed_index_html": string(htmlBytes),
 	}).Error; err != nil {
 		return nil, err
 	}
