@@ -566,7 +566,7 @@ func (s *CloudflareService) DeletePagesDomainByName(accountID, projectName, doma
 				"old_domain_name": d.Name,
 				"status":          d.Status,
 			}).Info("删除 Pages 域名")
-			if err := s.DeletePagesDomainByID(accountID, projectName, d.ID); err != nil {
+			if err := s.DeletePagesDomainByID(accountID, projectName, domainName); err != nil {
 				log.WithError(err).Error("删除 Pages 域名失败")
 				return err
 			}
