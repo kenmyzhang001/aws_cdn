@@ -208,6 +208,18 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 		}
 	}
 
+	// 重新部署前，先解绑上一次绑定的自定义域名，避免重复绑定/冲突
+	oldCustomDomain := strings.TrimSpace(site.CustomDomain)
+	if oldCustomDomain != "" {
+		if err := cfSvc.DeletePagesDomainByName(account.AccountID, projectName, oldCustomDomain); err != nil {
+			log.WithError(err).WithFields(map[string]any{
+				"site_id":      site.ID,
+				"project_name": projectName,
+				"domain":       oldCustomDomain,
+			}).Warn("重新部署前解绑 Pages 自定义域名失败")
+		}
+	}
+
 	rows, _ := s.templateService.ListRows(site.TemplateID)
 	htmlBytes := []byte(renderWorkpageHTML(site, rows))
 	// 不传 pages_build_output_dir；manifest 键为 index.html（与 CF API 文档一致）
@@ -350,7 +362,7 @@ func renderWorkpageHTML(site *models.CFWorkpageSite, rows []models.CFWorkpageTem
 	b.WriteString("<meta http-equiv=\"Pragma\" content=\"no-cache\" />")
 	b.WriteString("<meta http-equiv=\"Expires\" content=\"0\" />")
 	b.WriteString("<title>Download</title>")
-	b.WriteString("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; padding:clamp(8px,3vw,16px); background:#f7f7fb;} .wrap{max-width:920px;margin:0 auto; overflow-x:hidden;} table{width:100%; border-collapse:collapse; background:#fff; table-layout:fixed;} td{border:1px solid #e5e7eb; padding:clamp(4px,1.6vw,10px); text-align:center; font-size:clamp(10px,3vw,16px); line-height:1.15; white-space:nowrap;} td:nth-child(1){width:34%;} td:nth-child(2){width:34%;} td:nth-child(3){width:32%;} a.btn{display:inline-block; box-sizing:border-box; padding:clamp(5px,1.8vw,9px) clamp(7px,2.4vw,12px); background:#2563eb; color:#fff; border-radius:10px; text-decoration:none; font-weight:600; white-space:nowrap;} a.btn:hover{background:#1d4ed8;} .hint{color:#6b7280; font-size:12px; margin-top:10px; white-space:nowrap;}</style>")
+	b.WriteString("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; padding:clamp(8px,3vw,16px); background:#f7f7fb;} .wrap{max-width:920px;margin:0 auto; overflow-x:hidden;} table{width:100%; border-collapse:collapse; background:#fff; table-layout:fixed;} td{border:1px solid #e5e7eb; padding:clamp(4px,1.6vw,10px); text-align:center; font-size:clamp(9px,2.7vw,15px); line-height:1.15; white-space:nowrap;} td:nth-child(1){width:30%;} td:nth-child(2){width:40%;} td:nth-child(3){width:30%;} a.btn{display:inline-block; box-sizing:border-box; padding:clamp(5px,1.8vw,9px) clamp(7px,2.4vw,12px); background:#2563eb; color:#fff; border-radius:10px; text-decoration:none; font-weight:600; white-space:nowrap;} a.btn:hover{background:#1d4ed8;} .hint{color:#6b7280; font-size:12px; margin-top:10px; white-space:nowrap;}</style>")
 	b.WriteString("</head><body><div class=\"wrap\">")
 	b.WriteString("<table>")
 	for _, r := range rows {

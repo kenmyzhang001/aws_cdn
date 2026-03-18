@@ -151,6 +151,11 @@ func pagesFileHash(content []byte, filename string) string {
 	return hex.EncodeToString(sum[:])[:32]
 }
 
+// pagesAssetContentHash 为历史测试兼容保留：输入可能带前导 / 的路径。
+func pagesAssetContentHash(content []byte, filename string) string {
+	return pagesFileHash(content, pagesNormalizeFilename(filename))
+}
+
 // mimeTypeByFilename 根据文件名后缀返回 MIME 类型。
 func mimeTypeByFilename(filename string) string {
 	switch strings.ToLower(path.Ext(filename)) {
@@ -449,6 +454,84 @@ func (s *CloudflareService) AddPagesDomain(accountID, projectName, domainName st
 		return nil, fmt.Errorf(msg)
 	}
 	return &env.Result, nil
+}
+
+func (s *CloudflareService) ListPagesDomains(accountID, projectName string) ([]PagesDomain, error) {
+	url := s.pagesAPIURL(accountID, "pages", "projects", projectName, "domains")
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("获取 Pages 域名列表失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+	var env pagesEnvelope[[]PagesDomain]
+	if err := json.Unmarshal(body, &env); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+	if !env.Success {
+		msg := "获取 Pages 域名列表失败"
+		if len(env.Errors) > 0 && env.Errors[0].Message != "" {
+			msg = env.Errors[0].Message
+		}
+		return nil, fmt.Errorf(msg)
+	}
+	return env.Result, nil
+}
+
+func (s *CloudflareService) DeletePagesDomainByID(accountID, projectName, domainID string) error {
+	domainID = strings.TrimSpace(domainID)
+	if domainID == "" {
+		return nil
+	}
+	url := s.pagesAPIURL(accountID, "pages", "projects", projectName, "domains", domainID)
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return err
+	}
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("删除 Pages 域名失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// DeletePagesDomainByName 按域名解绑 Pages 自定义域名（不存在时返回 nil）。
+func (s *CloudflareService) DeletePagesDomainByName(accountID, projectName, domainName string) error {
+	domainName = strings.TrimSpace(strings.ToLower(domainName))
+	if domainName == "" {
+		return nil
+	}
+	list, err := s.ListPagesDomains(accountID, projectName)
+	if err != nil {
+		return err
+	}
+	for _, d := range list {
+		if strings.TrimSpace(strings.ToLower(d.Name)) == domainName {
+			return s.DeletePagesDomainByID(accountID, projectName, d.ID)
+		}
+	}
+	return nil
 }
 
 func (s *CloudflareService) DeletePagesProject(accountID, projectName string) error {
