@@ -3,6 +3,7 @@ package cloudflare
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -11,10 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"path"
-	"path/filepath"
 	"strings"
-
-	"github.com/zeebo/blake3"
 )
 
 type pagesEnvelope[T any] struct {
@@ -132,98 +130,269 @@ func (s *CloudflareService) CreatePagesProject(accountID, projectName, productio
 	return &env.Result, nil
 }
 
-// pagesDeploymentAssetPath 与 Wrangler upload 返回的 manifest 键一致：以 / 开头的站点路径，如 /index.html。
-func pagesDeploymentAssetPath(rel string) string {
+// pagesNormalizeFilename 规范化文件名（去除前导斜杠/./，路径清理），用于内部 map key。
+func pagesNormalizeFilename(rel string) string {
 	rel = strings.TrimSpace(rel)
 	rel = strings.TrimPrefix(rel, "./")
 	rel = strings.TrimPrefix(rel, "/")
 	if rel == "" {
-		rel = "index.html"
+		return "index.html"
 	}
-	rel = path.Clean(rel)
-	if rel == "." || rel == "" {
-		rel = "index.html"
-	}
-	return "/" + rel
+	return path.Clean(rel)
 }
 
-// pagesAssetContentHash 与 Wrangler packages/wrangler/src/pages/hash.ts 一致：
-// blake3( base64(原始字节) + 扩展名 ) 的十六进制摘要取前 32 个字符（即前 16 字节的 hex）。
-// 使用 SHA1 等错误算法时，部署 API 仍可能成功，但静态资源无法解析，站点全局 404。
-func pagesAssetContentHash(content []byte, assetPath string) string {
-	base := strings.TrimPrefix(assetPath, "/")
-	ext := strings.TrimPrefix(filepath.Ext(base), ".")
-	input := base64.StdEncoding.EncodeToString(content) + ext
-	h := blake3.New()
-	_, _ = h.Write([]byte(input))
-	sum := h.Sum(nil)
-	if len(sum) < 16 {
-		return hex.EncodeToString(sum)
-	}
-	return hex.EncodeToString(sum[:16])
+// pagesFileHash 计算文件的 CF Pages 资产哈希。
+// 与 Wrangler 保持相同输入结构：SHA-256(base64(content) + extension)[:32]
+// （Wrangler 使用 BLAKE3，但 CF 仅将 hash 当作内容寻址 key，不做算法校验）
+func pagesFileHash(content []byte, filename string) string {
+	ext := strings.TrimPrefix(strings.ToLower(path.Ext(filename)), ".")
+	b64 := base64.StdEncoding.EncodeToString(content)
+	sum := sha256.Sum256([]byte(b64 + ext))
+	return hex.EncodeToString(sum[:])[:32]
 }
 
-// CreatePagesDeployment 通过 Direct Upload 方式创建部署。
-// files: key 为站点内路径（如 index.html）；manifest 键为 /index.html，值为 Wrangler 同款内容哈希。
-// pagesBuildOutputDir 非空时才会提交该字段；传空则与 Wrangler 纯静态部署行为一致（不强行写 "."）。
-func (s *CloudflareService) CreatePagesDeployment(accountID, projectName, branch, commitMessage, pagesBuildOutputDir string, files map[string][]byte) (*PagesDeployment, error) {
-	if len(files) == 0 {
-		return nil, fmt.Errorf("部署文件列表不能为空")
+// mimeTypeByFilename 根据文件名后缀返回 MIME 类型。
+func mimeTypeByFilename(filename string) string {
+	switch strings.ToLower(path.Ext(filename)) {
+	case ".html", ".htm":
+		return "text/html; charset=utf-8"
+	case ".css":
+		return "text/css"
+	case ".js", ".mjs":
+		return "application/javascript"
+	case ".json":
+		return "application/json"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".svg":
+		return "image/svg+xml"
+	case ".ico":
+		return "image/x-icon"
+	case ".woff":
+		return "font/woff"
+	case ".woff2":
+		return "font/woff2"
+	case ".txt":
+		return "text/plain; charset=utf-8"
+	default:
+		return "application/octet-stream"
 	}
-	normalized := make(map[string][]byte, len(files))
-	for name, content := range files {
-		key := pagesDeploymentAssetPath(name)
-		normalized[key] = content
-	}
-	manifest := make(map[string]string, len(normalized))
-	for assetPath, content := range normalized {
-		manifest[assetPath] = pagesAssetContentHash(content, assetPath)
-	}
-	manifestJSON, _ := json.Marshal(manifest)
+}
 
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	_ = w.WriteField("branch", branch)
-	_ = w.WriteField("commit_dirty", "false")
-	_ = w.WriteField("commit_hash", randomHex(12))
-	_ = w.WriteField("commit_message", commitMessage)
-	_ = w.WriteField("manifest", string(manifestJSON))
-	if strings.TrimSpace(pagesBuildOutputDir) != "" {
-		_ = w.WriteField("pages_build_output_dir", pagesBuildOutputDir)
-	}
-
-	// multipart 中每个文件段的 name 为 manifest 中的 hash（32 位 hex）；filename 为去掉前导 / 的路径。
-	for assetPath, content := range normalized {
-		fieldName := manifest[assetPath]
-		filename := strings.TrimPrefix(assetPath, "/")
-		if filename == "" || filename == "." {
-			filename = "index.html"
-		}
-		fw, err := w.CreateFormFile(fieldName, filename)
-		if err != nil {
-			_ = w.Close()
-			return nil, fmt.Errorf("创建文件字段失败: %w", err)
-		}
-		if _, err := fw.Write(content); err != nil {
-			_ = w.Close()
-			return nil, fmt.Errorf("写入文件内容失败: %w", err)
-		}
-	}
-	_ = w.Close()
-
-	url := s.pagesAPIURL(accountID, "pages", "projects", projectName, "deployments")
-	req, err := http.NewRequest("POST", url, &buf)
+// getPagesUploadJWT 从 CF 获取短期 JWT，用于资产上传接口鉴权。
+func (s *CloudflareService) getPagesUploadJWT(accountID, projectName string) (string, error) {
+	url := s.pagesAPIURL(accountID, "pages", "projects", projectName, "upload-token")
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	for k, v := range s.getAuthHeaders() {
-		// 覆盖 JSON 的 Content-Type
 		if strings.ToLower(k) == "content-type" {
 			continue
 		}
 		req.Header.Set(k, v)
 	}
-	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("获取 Pages 上传 JWT 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+	var env pagesEnvelope[struct {
+		JWT string `json:"jwt"`
+	}]
+	if err := json.Unmarshal(body, &env); err != nil {
+		return "", fmt.Errorf("解析 upload-token 响应失败: %w", err)
+	}
+	if !env.Success || env.Result.JWT == "" {
+		return "", fmt.Errorf("获取 Pages 上传 JWT 失败: 响应中无有效 jwt 字段，body=%s", string(body))
+	}
+	return env.Result.JWT, nil
+}
+
+// pagesCheckMissing 查询哪些文件哈希在 CF 资产存储中不存在（需要上传）。
+func (s *CloudflareService) pagesCheckMissing(jwt string, hashes []string) ([]string, error) {
+	b, _ := json.Marshal(map[string]any{"hashes": hashes})
+	req, err := http.NewRequest("POST", "https://api.cloudflare.com/client/v4/pages/assets/check-missing", bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("check-missing 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+	var env pagesEnvelope[[]string]
+	if err := json.Unmarshal(body, &env); err != nil {
+		return nil, fmt.Errorf("解析 check-missing 响应失败: %w", err)
+	}
+	if !env.Success {
+		return nil, fmt.Errorf("check-missing API 返回失败: %s", string(body))
+	}
+	return env.Result, nil
+}
+
+type pagesUploadPayload struct {
+	Key      string            `json:"key"`
+	Value    string            `json:"value"`
+	Metadata map[string]string `json:"metadata"`
+	Base64   bool              `json:"base64"`
+}
+
+// pagesUploadAssets 将文件内容上传到 CF Pages 资产存储（base64 编码，JWT 鉴权）。
+func (s *CloudflareService) pagesUploadAssets(jwt string, payloads []pagesUploadPayload) error {
+	b, _ := json.Marshal(payloads)
+	req, err := http.NewRequest("POST", "https://api.cloudflare.com/client/v4/pages/assets/upload", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("上传 Pages 资产失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// pagesUpsertHashes 通知 CF 当前部署包含的所有文件哈希（包括未变更的）。
+func (s *CloudflareService) pagesUpsertHashes(jwt string, hashes []string) error {
+	b, _ := json.Marshal(map[string]any{"hashes": hashes})
+	req, err := http.NewRequest("POST", "https://api.cloudflare.com/client/v4/pages/assets/upsert-hashes", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("upsert-hashes 失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// CreatePagesDeployment 通过 CF Pages Direct Upload 方式创建部署，遵循 Wrangler 的五步流程：
+//  1. 获取短期上传 JWT
+//  2. 检查哪些文件哈希缺失（避免重复上传）
+//  3. 上传缺失文件（base64 编码，JWT 鉴权）
+//  4. 注册全部哈希（upsert-hashes）
+//  5. 创建部署（仅含 manifest，不含文件内容；manifest key 带前导 /）
+func (s *CloudflareService) CreatePagesDeployment(accountID, projectName, branch, commitMessage, pagesBuildOutputDir string, files map[string][]byte) (*PagesDeployment, error) {
+	if len(files) == 0 {
+		return nil, fmt.Errorf("部署文件列表不能为空")
+	}
+
+	// 规范化文件名 → 计算哈希
+	normalized := make(map[string][]byte, len(files))
+	for name, content := range files {
+		normalized[pagesNormalizeFilename(name)] = content
+	}
+	fileHashes := make(map[string]string, len(normalized)) // filename → hash
+	for name, content := range normalized {
+		fileHashes[name] = pagesFileHash(content, name)
+	}
+
+	// Step 1: 获取上传 JWT
+	jwt, err := s.getPagesUploadJWT(accountID, projectName)
+	if err != nil {
+		return nil, fmt.Errorf("Pages 上传 JWT: %w", err)
+	}
+
+	// Step 2: 查询缺失哈希
+	allHashes := make([]string, 0, len(fileHashes))
+	for _, h := range fileHashes {
+		allHashes = append(allHashes, h)
+	}
+	missing, err := s.pagesCheckMissing(jwt, allHashes)
+	if err != nil {
+		return nil, fmt.Errorf("Pages check-missing: %w", err)
+	}
+	missingSet := make(map[string]bool, len(missing))
+	for _, h := range missing {
+		missingSet[h] = true
+	}
+
+	// Step 3: 上传缺失文件
+	var payloads []pagesUploadPayload
+	for name, content := range normalized {
+		hash := fileHashes[name]
+		if !missingSet[hash] {
+			continue
+		}
+		payloads = append(payloads, pagesUploadPayload{
+			Key:   hash,
+			Value: base64.StdEncoding.EncodeToString(content),
+			Metadata: map[string]string{
+				"contentType": mimeTypeByFilename(name),
+			},
+			Base64: true,
+		})
+	}
+	if len(payloads) > 0 {
+		if err := s.pagesUploadAssets(jwt, payloads); err != nil {
+			return nil, fmt.Errorf("Pages 资产上传: %w", err)
+		}
+	}
+
+	// Step 4: 注册全部哈希
+	if err := s.pagesUpsertHashes(jwt, allHashes); err != nil {
+		return nil, fmt.Errorf("Pages upsert-hashes: %w", err)
+	}
+
+	// Step 5: 创建部署（manifest key 带前导 /，与 Wrangler 保持一致）
+	manifest := make(map[string]string, len(fileHashes))
+	for name, hash := range fileHashes {
+		manifest["/"+name] = hash
+	}
+	manifestJSON, _ := json.Marshal(manifest)
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("branch", branch)
+	_ = mw.WriteField("commit_dirty", "false")
+	_ = mw.WriteField("commit_hash", randomHex(12))
+	_ = mw.WriteField("commit_message", commitMessage)
+	_ = mw.WriteField("manifest", string(manifestJSON))
+	if strings.TrimSpace(pagesBuildOutputDir) != "" {
+		_ = mw.WriteField("pages_build_output_dir", pagesBuildOutputDir)
+	}
+	_ = mw.Close()
+
+	deployURL := s.pagesAPIURL(accountID, "pages", "projects", projectName, "deployments")
+	req, err := http.NewRequest("POST", deployURL, &buf)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range s.getAuthHeaders() {
+		if strings.ToLower(k) == "content-type" {
+			continue
+		}
+		req.Header.Set(k, v)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -305,5 +474,3 @@ func (s *CloudflareService) DeletePagesProject(accountID, projectName string) er
 	}
 	return nil
 }
-
-

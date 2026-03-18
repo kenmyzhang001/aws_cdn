@@ -211,7 +211,7 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 	rows, _ := s.templateService.ListRows(site.TemplateID)
 	htmlBytes := []byte(renderWorkpageHTML(site, rows))
 	// 不传 pages_build_output_dir；manifest 键为 index.html（与 CF API 文档一致）
-	deploy, err := cfSvc.CreatePagesDeployment(account.AccountID, projectName, "main", "Deploy CF-WorkPage site", ".", map[string][]byte{
+	deploy, err := cfSvc.CreatePagesDeployment(account.AccountID, projectName, "main", "Deploy CF-WorkPage site", "", map[string][]byte{
 		"index.html": htmlBytes,
 	})
 	if err != nil {
