@@ -210,7 +210,7 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 
 	rows, _ := s.templateService.ListRows(site.TemplateID)
 	htmlBytes := []byte(renderWorkpageHTML(site, rows))
-	deploy, err := cfSvc.CreatePagesDeployment(account.AccountID, projectName, "main", "main", ".", map[string][]byte{
+	deploy, err := cfSvc.CreatePagesDeployment(account.AccountID, projectName, "main", "", ".", map[string][]byte{
 		"index.html": htmlBytes,
 	})
 	if err != nil {
