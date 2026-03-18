@@ -245,28 +245,38 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 				"domain":       customDomain,
 			}).Warn("绑定 Pages 自定义域名失败")
 		} else {
-			// 绑定成功后，尝试在同 Zone 内自动创建 CNAME 记录指向 Pages 域名
-			if deploy.URL != "" {
+			// 绑定成功后，尝试在同 Zone 内自动创建 CNAME 记录指向 Pages 域名。
+			// 优先使用 aliases（稳定的生产 URL，如 <project>.pages.dev），
+			// 避免用 deploy.URL（部署专属 hash URL，重新部署后 hash 变化会导致 CNAME 失效）。
+			pagesHost := ""
+			if len(deploy.Aliases) > 0 {
+				if u, parseErr := url.Parse(deploy.Aliases[0]); parseErr == nil && u.Host != "" {
+					pagesHost = strings.TrimSuffix(strings.ToLower(u.Host), ".")
+				}
+			}
+			if pagesHost == "" && deploy.URL != "" {
 				if u, parseErr := url.Parse(deploy.URL); parseErr == nil && u.Host != "" {
-					if zoneName, znErr := cfSvc.GetZoneByID(site.ZoneID); znErr == nil {
-						zoneName = strings.TrimSuffix(strings.ToLower(zoneName), ".")
-						cd := strings.TrimSuffix(strings.ToLower(customDomain), ".")
-						host := ""
-						if cd == zoneName {
-							host = zoneName
-						} else if strings.HasSuffix(cd, "."+zoneName) {
-							host = cd
-						}
-						target := strings.TrimSuffix(strings.ToLower(u.Host), ".")
-						if host != "" && target != "" {
-							if err := cfSvc.CreateCNAMERecord(site.ZoneID, host, target, true); err != nil {
-								log.WithError(err).WithFields(map[string]any{
-									"site_id": site.ID,
-									"zone_id": site.ZoneID,
-									"name":    host,
-									"value":   target,
-								}).Warn("为 Pages 域名创建 CNAME 记录失败")
-							}
+					pagesHost = strings.TrimSuffix(strings.ToLower(u.Host), ".")
+				}
+			}
+			if pagesHost != "" {
+				if zoneName, znErr := cfSvc.GetZoneByID(site.ZoneID); znErr == nil {
+					zoneName = strings.TrimSuffix(strings.ToLower(zoneName), ".")
+					cd := strings.TrimSuffix(strings.ToLower(customDomain), ".")
+					host := ""
+					if cd == zoneName {
+						host = zoneName
+					} else if strings.HasSuffix(cd, "."+zoneName) {
+						host = cd
+					}
+					if host != "" {
+						if err := cfSvc.CreateCNAMERecord(site.ZoneID, host, pagesHost, true); err != nil {
+							log.WithError(err).WithFields(map[string]any{
+								"site_id": site.ID,
+								"zone_id": site.ZoneID,
+								"name":    host,
+								"value":   pagesHost,
+							}).Warn("为 Pages 域名创建 CNAME 记录失败")
 						}
 					}
 				}
@@ -275,11 +285,11 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 	}
 
 	deployedAt := time.Now()
+	// 优先使用 aliases（稳定的生产 URL，如 <project>.pages.dev）作为对外展示的访问地址。
 	deployURL := ""
 	if len(deploy.Aliases) > 0 {
 		deployURL = deploy.Aliases[0]
-	}
-	if deploy.URL != "" {
+	} else if deploy.URL != "" {
 		deployURL = deploy.URL
 	}
 	lastErr := ""
