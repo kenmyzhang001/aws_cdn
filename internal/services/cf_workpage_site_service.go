@@ -358,11 +358,8 @@ func renderWorkpageHTML(site *models.CFWorkpageSite, rows []models.CFWorkpageTem
 	var b strings.Builder
 	b.WriteString("<!doctype html><html><head><meta charset=\"utf-8\" />")
 	b.WriteString("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />")
-	b.WriteString("<meta http-equiv=\"Cache-Control\" content=\"no-cache, no-store, must-revalidate\" />")
-	b.WriteString("<meta http-equiv=\"Pragma\" content=\"no-cache\" />")
-	b.WriteString("<meta http-equiv=\"Expires\" content=\"0\" />")
 	b.WriteString("<title>Download</title>")
-	b.WriteString("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; padding:clamp(8px,3vw,16px); background:#f7f7fb;} .wrap{max-width:920px;margin:0 auto; overflow-x:hidden;} table{width:100%; border-collapse:collapse; background:#fff; table-layout:fixed;} td{border:1px solid #e5e7eb; padding:clamp(4px,1.6vw,10px); text-align:center; font-size:clamp(9px,2.7vw,15px); line-height:1.15; white-space:nowrap;} td:nth-child(1){width:30%;} td:nth-child(2){width:40%;} td:nth-child(3){width:30%;} a.btn{display:inline-block; box-sizing:border-box; padding:clamp(5px,1.8vw,9px) clamp(7px,2.4vw,12px); background:#2563eb; color:#fff; border-radius:10px; text-decoration:none; font-weight:600; white-space:nowrap;} a.btn:hover{background:#1d4ed8;} .hint{color:#6b7280; font-size:12px; margin-top:10px; white-space:nowrap;}</style>")
+	b.WriteString("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; padding:clamp(8px,3vw,16px); background:#f7f7fb;} .wrap{max-width:920px;margin:0 auto; overflow-x:hidden;} table{width:100%; border-collapse:collapse; background:#fff; table-layout:fixed;} td{border:1px solid #e5e7eb; padding:clamp(4px,1.6vw,10px); text-align:center; font-size:clamp(9px,2.7vw,15px); line-height:1.15; white-space:normal; overflow-wrap:anywhere; word-break:break-word;} td:nth-child(1){width:20%;} td:nth-child(2){width:55%;} td:nth-child(3){width:25%;} a.btn{display:inline-block; box-sizing:border-box; padding:clamp(5px,1.8vw,9px) clamp(7px,2.4vw,12px); background:#2563eb; color:#fff; border-radius:10px; text-decoration:none; font-weight:600; white-space:nowrap;} a.btn:hover{background:#1d4ed8;} .hint{color:#6b7280; font-size:12px; margin-top:10px; white-space:normal; overflow-wrap:anywhere; word-break:break-word;}</style>")
 	b.WriteString("</head><body><div class=\"wrap\">")
 	b.WriteString("<table>")
 	for _, r := range rows {
