@@ -3,7 +3,7 @@ package cloudflare
 import (
 	"bytes"
 	"crypto/rand"
-	"crypto/sha1"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -11,7 +11,10 @@ import (
 	"mime/multipart"
 	"net/http"
 	"path"
+	"path/filepath"
 	"strings"
+
+	"github.com/zeebo/blake3"
 )
 
 type pagesEnvelope[T any] struct {
@@ -129,21 +132,39 @@ func (s *CloudflareService) CreatePagesProject(accountID, projectName, productio
 	return &env.Result, nil
 }
 
-// pagesAssetManifestKey 与 Cloudflare REST API 文档一致：manifest 键为无前导斜杠的站点路径。
-// 文档示例：manifest='{"index.html":"...","style.css":"..."}'。
-// 若写成 "/index.html"，部署接口常仍返回 success，但资源未正确映射，*.pages.dev 根路径会 404。
-func pagesAssetManifestKey(rel string) string {
+// pagesDeploymentAssetPath 与 Wrangler upload 返回的 manifest 键一致：以 / 开头的站点路径，如 /index.html。
+func pagesDeploymentAssetPath(rel string) string {
 	rel = strings.TrimSpace(rel)
 	rel = strings.TrimPrefix(rel, "./")
 	rel = strings.TrimPrefix(rel, "/")
 	if rel == "" {
-		return "index.html"
+		rel = "index.html"
 	}
-	return path.Clean(rel)
+	rel = path.Clean(rel)
+	if rel == "." || rel == "" {
+		rel = "index.html"
+	}
+	return "/" + rel
+}
+
+// pagesAssetContentHash 与 Wrangler packages/wrangler/src/pages/hash.ts 一致：
+// blake3( base64(原始字节) + 扩展名 ) 的十六进制摘要取前 32 个字符（即前 16 字节的 hex）。
+// 使用 SHA1 等错误算法时，部署 API 仍可能成功，但静态资源无法解析，站点全局 404。
+func pagesAssetContentHash(content []byte, assetPath string) string {
+	base := strings.TrimPrefix(assetPath, "/")
+	ext := strings.TrimPrefix(filepath.Ext(base), ".")
+	input := base64.StdEncoding.EncodeToString(content) + ext
+	h := blake3.New()
+	_, _ = h.Write([]byte(input))
+	sum := h.Sum(nil)
+	if len(sum) < 16 {
+		return hex.EncodeToString(sum)
+	}
+	return hex.EncodeToString(sum[:16])
 }
 
 // CreatePagesDeployment 通过 Direct Upload 方式创建部署。
-// files: key 为站点内路径（如 index.html、css/a.css），manifest 中为同名规范键。
+// files: key 为站点内路径（如 index.html）；manifest 键为 /index.html，值为 Wrangler 同款内容哈希。
 // pagesBuildOutputDir 非空时才会提交该字段；传空则与 Wrangler 纯静态部署行为一致（不强行写 "."）。
 func (s *CloudflareService) CreatePagesDeployment(accountID, projectName, branch, commitMessage, pagesBuildOutputDir string, files map[string][]byte) (*PagesDeployment, error) {
 	if len(files) == 0 {
@@ -151,13 +172,12 @@ func (s *CloudflareService) CreatePagesDeployment(accountID, projectName, branch
 	}
 	normalized := make(map[string][]byte, len(files))
 	for name, content := range files {
-		key := pagesAssetManifestKey(name)
+		key := pagesDeploymentAssetPath(name)
 		normalized[key] = content
 	}
 	manifest := make(map[string]string, len(normalized))
-	for name, content := range normalized {
-		sum := sha1.Sum(content)
-		manifest[name] = hex.EncodeToString(sum[:])
+	for assetPath, content := range normalized {
+		manifest[assetPath] = pagesAssetContentHash(content, assetPath)
 	}
 	manifestJSON, _ := json.Marshal(manifest)
 
@@ -172,10 +192,10 @@ func (s *CloudflareService) CreatePagesDeployment(accountID, projectName, branch
 		_ = w.WriteField("pages_build_output_dir", pagesBuildOutputDir)
 	}
 
-	// multipart 中每个文件段的 name 为 manifest 中的 hash；filename 与 manifest 键一致。
-	for name, content := range normalized {
-		fieldName := manifest[name]
-		filename := name
+	// multipart 中每个文件段的 name 为 manifest 中的 hash（32 位 hex）；filename 为去掉前导 / 的路径。
+	for assetPath, content := range normalized {
+		fieldName := manifest[assetPath]
+		filename := strings.TrimPrefix(assetPath, "/")
 		if filename == "" || filename == "." {
 			filename = "index.html"
 		}
