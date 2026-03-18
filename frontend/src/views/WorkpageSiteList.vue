@@ -196,7 +196,12 @@
             placeholder="请先选择 CF 账号"
             style="width: 100%"
             filterable
+            remote
+            reserve-keyword
+            :remote-method="onZoneSearch"
+            :loading="zoneLoading"
             :disabled="!form.cf_account_id"
+            @visible-change="onZoneDropdownVisibleChange"
           >
             <el-option
               v-for="z in zoneList"
@@ -207,6 +212,20 @@
               <span>{{ z.name }}</span>
               <span style="color: #909399; margin-left: 8px; font-size: 12px">{{ z.id }}</span>
             </el-option>
+            <template #footer>
+              <div style="padding: 8px 12px; display: flex; justify-content: center;">
+                <el-button
+                  v-if="zoneHasMore"
+                  size="small"
+                  :loading="zoneLoadingMore"
+                  :disabled="zoneLoading"
+                  @click.stop="loadMoreZones"
+                >
+                  加载更多
+                </el-button>
+                <span v-else style="color: #909399; font-size: 12px;">没有更多了</span>
+              </div>
+            </template>
           </el-select>
         </el-form-item>
         <el-form-item v-if="editId" label="主域名">
@@ -309,6 +328,13 @@ export default {
     })
 
     const zoneList = ref([])
+    const zoneLoading = ref(false)
+    const zoneLoadingMore = ref(false)
+    const zoneSearchKeyword = ref('')
+    const zonePage = ref(1)
+    const zonePerPage = ref(50)
+    const zoneHasMore = ref(false)
+    let zoneSearchTimer = null
 
     const deployedHtmlDialogVisible = ref(false)
     const deployedHtmlLoading = ref(false)
@@ -356,17 +382,80 @@ export default {
       fetchList()
     }
 
+    const mergeZonesById = (base, extra) => {
+      const m = new Map()
+      ;(base || []).forEach((z) => m.set(z.id, z))
+      ;(extra || []).forEach((z) => m.set(z.id, z))
+      return Array.from(m.values())
+    }
+
+    const updateZoneHasMore = (resp, fetchedCount) => {
+      const total = resp?.pagination?.total
+      const page = resp?.pagination?.page
+      const perPage = resp?.pagination?.per_page
+      if (typeof total === 'number' && typeof page === 'number' && typeof perPage === 'number') {
+        zoneHasMore.value = page * perPage < total
+        return
+      }
+      zoneHasMore.value = (fetchedCount || 0) >= zonePerPage.value
+    }
+
+    const fetchZones = async ({ keyword, page, append } = {}) => {
+      if (!form.value.cf_account_id) return
+      const reqKeyword = keyword ?? zoneSearchKeyword.value ?? ''
+      const reqPage = page ?? zonePage.value ?? 1
+      if (append) zoneLoadingMore.value = true
+      else zoneLoading.value = true
+      try {
+        const res = await getCFAccountZones(form.value.cf_account_id, reqPage, zonePerPage.value, reqKeyword || '')
+        const zones = res?.zones || []
+        if (append) zoneList.value = mergeZonesById(zoneList.value, zones)
+        else zoneList.value = zones
+        updateZoneHasMore(res, zones.length)
+      } catch (e) {
+        if (!append) zoneList.value = []
+        zoneHasMore.value = false
+      } finally {
+        zoneLoading.value = false
+        zoneLoadingMore.value = false
+      }
+    }
+
     const onCfAccountChange = async () => {
       form.value.zone_id = ''
       form.value.main_domain = ''
       zoneList.value = []
+      zoneSearchKeyword.value = ''
+      zonePage.value = 1
+      zoneHasMore.value = false
       if (!form.value.cf_account_id) return
-      try {
-        const res = await getCFAccountZones(form.value.cf_account_id, 1, 50, '')
-        zoneList.value = res?.zones || []
-      } catch (e) {
-        zoneList.value = []
-      }
+      await fetchZones({ keyword: '', page: 1, append: false })
+    }
+
+    const onZoneSearch = (q) => {
+      const keyword = String(q || '').trim()
+      zoneSearchKeyword.value = keyword
+      if (!form.value.cf_account_id) return
+      zonePage.value = 1
+      if (zoneSearchTimer) clearTimeout(zoneSearchTimer)
+      zoneSearchTimer = setTimeout(() => {
+        fetchZones({ keyword: zoneSearchKeyword.value, page: 1, append: false })
+      }, 300)
+    }
+
+    const onZoneDropdownVisibleChange = (visible) => {
+      if (!visible) return
+      if (!form.value.cf_account_id) return
+      if (zoneList.value.length > 0) return
+      zonePage.value = 1
+      fetchZones({ keyword: zoneSearchKeyword.value, page: 1, append: false })
+    }
+
+    const loadMoreZones = () => {
+      if (zoneLoading.value || zoneLoadingMore.value) return
+      if (!zoneHasMore.value) return
+      zonePage.value += 1
+      fetchZones({ keyword: zoneSearchKeyword.value, page: zonePage.value, append: true })
     }
 
     const zoneNameById = (zoneId) => {
@@ -589,7 +678,13 @@ export default {
       submit,
       resetForm,
       zoneList,
+      zoneLoading,
+      zoneLoadingMore,
+      zoneHasMore,
       onCfAccountChange,
+      onZoneSearch,
+      onZoneDropdownVisibleChange,
+      loadMoreZones,
       zoneNameById,
       formatDate,
       statusText,

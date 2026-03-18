@@ -204,21 +204,23 @@ type ZonesResult struct {
 	TotalCount int                      `json:"total_count"`
 }
 
-// ListZones 获取账号下的 Zone（域名）列表，支持分页和名称搜索
-// page: 页码，从 1 开始
-// perPage: 每页数量，默认 20，最大 50
-// name: 可选的域名搜索参数，为空则获取所有域名
-// accountID: 可选的账户ID过滤参数，为空则获取所有账户的域名
-func (s *CloudflareService) ListZones(page, perPage int, name, accountID string) (*ZonesResult, error) {
-	log := logger.GetLogger()
+type cfZonesAPIResponse struct {
+	Success bool                     `json:"success"`
+	Result  []map[string]interface{} `json:"result"`
+	Errors  []struct {
+		Message string `json:"message"`
+	} `json:"errors"`
+	ResultInfo struct {
+		Page       int `json:"page"`
+		PerPage    int `json:"per_page"`
+		TotalPages int `json:"total_pages"`
+		Count      int `json:"count"`
+		TotalCount int `json:"total_count"`
+	} `json:"result_info"`
+}
 
-	// 参数校验
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 || perPage > 50 {
-		perPage = 20 // 默认每页 20 条
-	}
+func (s *CloudflareService) listZonesRaw(page, perPage int, name, accountID string) (*cfZonesAPIResponse, error) {
+	log := logger.GetLogger()
 
 	// 构建 URL 和查询参数
 	baseURL := "https://api.cloudflare.com/client/v4/zones"
@@ -227,7 +229,6 @@ func (s *CloudflareService) ListZones(page, perPage int, name, accountID string)
 		return nil, fmt.Errorf("创建请求失败: %w", err)
 	}
 
-	// 添加查询参数
 	q := req.URL.Query()
 	q.Add("page", fmt.Sprintf("%d", page))
 	q.Add("per_page", fmt.Sprintf("%d", perPage))
@@ -239,7 +240,6 @@ func (s *CloudflareService) ListZones(page, perPage int, name, accountID string)
 	}
 	req.URL.RawQuery = q.Encode()
 
-	// 设置认证头
 	for k, v := range s.getAuthHeaders() {
 		req.Header.Set(k, v)
 	}
@@ -267,21 +267,7 @@ func (s *CloudflareService) ListZones(page, perPage int, name, accountID string)
 		return nil, fmt.Errorf("API请求失败 (状态码: %d): %s", resp.StatusCode, string(body))
 	}
 
-	var result struct {
-		Success bool                     `json:"success"`
-		Result  []map[string]interface{} `json:"result"`
-		Errors  []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
-		ResultInfo struct {
-			Page       int `json:"page"`
-			PerPage    int `json:"per_page"`
-			TotalPages int `json:"total_pages"`
-			Count      int `json:"count"`
-			TotalCount int `json:"total_count"`
-		} `json:"result_info"`
-	}
-
+	var result cfZonesAPIResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("解析响应失败: %w", err)
 	}
@@ -293,20 +279,108 @@ func (s *CloudflareService) ListZones(page, perPage int, name, accountID string)
 		return nil, fmt.Errorf("获取 Zones 列表失败")
 	}
 
+	return &result, nil
+}
+
+// ListZones 获取账号下的 Zone（域名）列表，支持分页和名称搜索
+// page: 页码，从 1 开始
+// perPage: 每页数量，默认 20，最大 50
+// name: 可选的域名搜索参数，为空则获取所有域名
+// accountID: 可选的账户ID过滤参数，为空则获取所有账户的域名
+func (s *CloudflareService) ListZones(page, perPage int, name, accountID string) (*ZonesResult, error) {
+	log := logger.GetLogger()
+
+	// 参数校验
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 || perPage > 50 {
+		perPage = 20 // 默认每页 20 条
+	}
+
+	// 注意：Cloudflare 的 zones 列表接口 `name` 参数更像精确匹配；
+	// 为了支持前端输入关键字的“模糊搜索”，这里在服务端做 contains 过滤并重新分页。
+	search := strings.TrimSpace(strings.ToLower(name))
+	if search != "" {
+		const cfPerPage = 50
+		allMatched := make([]map[string]interface{}, 0, perPage)
+		cfPage := 1
+		for {
+			raw, err := s.listZonesRaw(cfPage, cfPerPage, "", accountID)
+			if err != nil {
+				return nil, err
+			}
+			if len(raw.Result) == 0 {
+				break
+			}
+
+			for _, z := range raw.Result {
+				zn, _ := z["name"].(string)
+				if strings.Contains(strings.ToLower(zn), search) {
+					allMatched = append(allMatched, z)
+				}
+			}
+
+			// 到底了：Cloudflare 返回的 total_pages 可用时优先使用
+			if raw.ResultInfo.TotalPages > 0 && cfPage >= raw.ResultInfo.TotalPages {
+				break
+			}
+			// 兜底：不到一页说明最后一页
+			if len(raw.Result) < cfPerPage {
+				break
+			}
+			cfPage++
+		}
+
+		totalCount := len(allMatched)
+		totalPages := 0
+		if totalCount > 0 {
+			totalPages = (totalCount + perPage - 1) / perPage
+		}
+
+		start := (page - 1) * perPage
+		if start >= totalCount {
+			return &ZonesResult{
+				Zones:      []map[string]interface{}{},
+				Page:       page,
+				PerPage:    perPage,
+				TotalPages: totalPages,
+				TotalCount: totalCount,
+			}, nil
+		}
+		end := start + perPage
+		if end > totalCount {
+			end = totalCount
+		}
+
+		return &ZonesResult{
+			Zones:      allMatched[start:end],
+			Page:       page,
+			PerPage:    perPage,
+			TotalPages: totalPages,
+			TotalCount: totalCount,
+		}, nil
+	}
+
+	raw, err := s.listZonesRaw(page, perPage, "", accountID)
+	if err != nil {
+		return nil, err
+	}
+
 	log.WithFields(map[string]interface{}{
-		"page":        result.ResultInfo.Page,
-		"per_page":    result.ResultInfo.PerPage,
-		"count":       result.ResultInfo.Count,
-		"total_pages": result.ResultInfo.TotalPages,
-		"total_count": result.ResultInfo.TotalCount,
+		"page":        raw.ResultInfo.Page,
+		"per_page":    raw.ResultInfo.PerPage,
+		"count":       raw.ResultInfo.Count,
+		"total_pages": raw.ResultInfo.TotalPages,
+		"total_count": raw.ResultInfo.TotalCount,
 	}).Info("获取 Zones 列表成功")
 
 	return &ZonesResult{
-		Zones:      result.Result,
-		Page:       result.ResultInfo.Page,
-		PerPage:    result.ResultInfo.PerPage,
-		TotalPages: result.ResultInfo.TotalPages,
-		TotalCount: result.ResultInfo.TotalCount,
+		Zones:      raw.Result,
+		Page:       raw.ResultInfo.Page,
+		PerPage:    raw.ResultInfo.PerPage,
+		TotalPages: raw.ResultInfo.TotalPages,
+		TotalCount: raw.ResultInfo.TotalCount,
 	}, nil
 }
 
