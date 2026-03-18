@@ -205,16 +205,9 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 	}
 
 	// 绑定自定义域名（主域名或子域名）
-	customDomain := strings.TrimSpace(site.CustomDomain)
-	if customDomain == "" {
-		customDomain = strings.TrimSpace(site.MainDomain)
-		if site.Subdomain != "" {
-			if strings.Contains(site.Subdomain, ".") {
-				customDomain = strings.TrimSpace(site.Subdomain)
-			} else {
-				customDomain = strings.TrimSpace(site.Subdomain) + "." + customDomain
-			}
-		}
+	customDomain := strings.TrimSpace(site.MainDomain)
+	if site.Subdomain != "" {
+		customDomain = strings.TrimSpace(site.Subdomain) + "." + customDomain
 	}
 	var domainBindErr error
 	if customDomain != "" {
@@ -253,6 +246,16 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 		return nil, err
 	}
 	return s.Get(id)
+}
+
+// PreviewHTML 生成部署前预览 HTML（不上传到 Pages）
+func (s *CFWorkpageSiteService) PreviewHTML(id uint) (string, error) {
+	site, err := s.Get(id)
+	if err != nil {
+		return "", err
+	}
+	rows, _ := s.templateService.ListRows(site.TemplateID)
+	return renderWorkpageHTML(site, rows), nil
 }
 
 func renderWorkpageHTML(site *models.CFWorkpageSite, rows []models.CFWorkpageTemplateRow) string {

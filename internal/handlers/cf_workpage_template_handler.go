@@ -179,3 +179,18 @@ func (h *CFWorkpageTemplateHandler) SaveRows(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, saved)
 }
+
+// Preview 模版预览（返回 HTML）
+func (h *CFWorkpageTemplateHandler) Preview(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.String(http.StatusBadRequest, "无效的模版 ID")
+		return
+	}
+	html, err := h.service.PreviewHTML(uint(id))
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+}

@@ -92,8 +92,11 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
+            <el-button type="info" link size="small" @click="handlePreview(row)">
+              预览
+            </el-button>
             <el-button
               type="success"
               link
@@ -417,6 +420,10 @@ export default {
       }
     }
 
+    const handlePreview = (row) => {
+      window.open(`/api/v1/cf-workpage-sites/${row.id}/preview`, '_blank')
+    }
+
     const handleDelete = async (row) => {
       try {
         await ElMessageBox.confirm(
@@ -450,6 +457,7 @@ export default {
       openCreateDialog,
       openEditDialog,
       handleDeploy,
+      handlePreview,
       handleDelete,
       dialogVisible,
       editId,

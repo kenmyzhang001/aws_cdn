@@ -348,6 +348,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 			cfWorkpageTemplates.GET("", cfWorkpageTemplateHandler.List)
 			cfWorkpageTemplates.GET("/:id/rows", cfWorkpageTemplateHandler.ListRows)
 			cfWorkpageTemplates.PUT("/:id/rows", cfWorkpageTemplateHandler.SaveRows)
+			cfWorkpageTemplates.GET("/:id/preview", cfWorkpageTemplateHandler.Preview)
 			cfWorkpageTemplates.GET("/:id", cfWorkpageTemplateHandler.Get)
 			cfWorkpageTemplates.POST("", cfWorkpageTemplateHandler.Create)
 			cfWorkpageTemplates.PUT("/:id", cfWorkpageTemplateHandler.Update)
@@ -359,6 +360,7 @@ func SetupRouter(db, db2, db3 *gorm.DB, cfg *config.Config, telegramService *ser
 		{
 			cfWorkpageSites.GET("", cfWorkpageSiteHandler.List)
 			cfWorkpageSites.POST("/:id/deploy", cfWorkpageSiteHandler.Deploy)
+			cfWorkpageSites.GET("/:id/preview", cfWorkpageSiteHandler.Preview)
 			cfWorkpageSites.GET("/:id", cfWorkpageSiteHandler.Get)
 			cfWorkpageSites.POST("", cfWorkpageSiteHandler.Create)
 			cfWorkpageSites.PUT("/:id", cfWorkpageSiteHandler.Update)

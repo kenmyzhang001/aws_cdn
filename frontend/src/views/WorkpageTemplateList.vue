@@ -47,8 +47,11 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
+            <el-button type="info" link size="small" @click="handlePreview(row)">
+              预览
+            </el-button>
             <el-button type="primary" link size="small" @click="openEditDialog(row)">
               编辑
             </el-button>
@@ -369,6 +372,10 @@ export default {
       }
     }
 
+    const handlePreview = (row) => {
+      window.open(`/api/v1/cf-workpage-templates/${row.id}/preview`, '_blank')
+    }
+
     onMounted(() => fetchList())
 
     return {
@@ -380,6 +387,7 @@ export default {
       openCreateDialog,
       openEditDialog,
       handleDelete,
+      handlePreview,
       dialogVisible,
       editId,
       formRef,

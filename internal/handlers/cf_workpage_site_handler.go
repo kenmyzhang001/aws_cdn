@@ -147,3 +147,18 @@ func (h *CFWorkpageSiteHandler) Deploy(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, site)
 }
+
+// Preview 部署前预览（返回 HTML）
+func (h *CFWorkpageSiteHandler) Preview(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.String(http.StatusBadRequest, "无效的 ID")
+		return
+	}
+	html, err := h.service.PreviewHTML(uint(id))
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+}
