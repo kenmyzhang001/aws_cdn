@@ -1,6 +1,7 @@
 package cloudflare
 
 import (
+	"aws_cdn/internal/logger"
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
@@ -489,6 +490,12 @@ func (s *CloudflareService) ListPagesDomains(accountID, projectName string) ([]P
 }
 
 func (s *CloudflareService) DeletePagesDomainByID(accountID, projectName, domainID string) error {
+	log := logger.GetLogger()
+	log.WithFields(map[string]any{
+		"account_id":   accountID,
+		"project_name": projectName,
+		"domain_id":    domainID,
+	}).Info("删除 Pages 域名")
 	domainID = strings.TrimSpace(domainID)
 	if domainID == "" {
 		return nil
@@ -513,11 +520,17 @@ func (s *CloudflareService) DeletePagesDomainByID(accountID, projectName, domain
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("删除 Pages 域名失败 (状态码: %d): %s", resp.StatusCode, string(body))
 	}
+	log.WithFields(map[string]any{
+		"account_id":   accountID,
+		"project_name": projectName,
+		"domain_id":    domainID,
+	}).Info("删除 Pages 域名成功")
 	return nil
 }
 
 // DeletePagesDomainByName 按域名解绑 Pages 自定义域名（不存在时返回 nil）。
 func (s *CloudflareService) DeletePagesDomainByName(accountID, projectName, domainName string) error {
+	log := logger.GetLogger()
 	domainName = strings.TrimSpace(strings.ToLower(domainName))
 	if domainName == "" {
 		return nil
@@ -527,6 +540,14 @@ func (s *CloudflareService) DeletePagesDomainByName(accountID, projectName, doma
 		return err
 	}
 	for _, d := range list {
+		log.WithFields(map[string]any{
+			"account_id":      accountID,
+			"project_name":    projectName,
+			"domain_name":     domainName,
+			"domain_id":       d.ID,
+			"old_domain_name": d.Name,
+			"status":          d.Status,
+		}).Info("查询 Pages 域名列表")
 		if strings.TrimSpace(strings.ToLower(d.Name)) == domainName {
 			return s.DeletePagesDomainByID(accountID, projectName, d.ID)
 		}
