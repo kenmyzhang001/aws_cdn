@@ -7,6 +7,7 @@ import (
 	cf "aws_cdn/internal/services/cloudflare"
 	"fmt"
 	"html"
+	"net/url"
 	"strings"
 	"time"
 
@@ -220,10 +221,17 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 		return nil, err
 	}
 
-	// 绑定自定义域名（主域名或子域名）
-	customDomain := strings.TrimSpace(site.MainDomain)
-	if site.Subdomain != "" {
-		customDomain = strings.TrimSpace(site.Subdomain) + "." + customDomain
+	// 绑定自定义域名（主域名或子域名），并在同 Zone 下自动创建 CNAME 到 Pages
+	customDomain := strings.TrimSpace(site.CustomDomain)
+	if customDomain == "" {
+		customDomain = strings.TrimSpace(site.MainDomain)
+		if site.Subdomain != "" {
+			if strings.Contains(site.Subdomain, ".") {
+				customDomain = strings.TrimSpace(site.Subdomain)
+			} else {
+				customDomain = strings.TrimSpace(site.Subdomain) + "." + customDomain
+			}
+		}
 	}
 	var domainBindErr error
 	if customDomain != "" {
@@ -235,6 +243,33 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 				"project_name": projectName,
 				"domain":       customDomain,
 			}).Warn("绑定 Pages 自定义域名失败")
+		} else {
+			// 绑定成功后，尝试在同 Zone 内自动创建 CNAME 记录指向 Pages 域名
+			if deploy.URL != "" {
+				if u, parseErr := url.Parse(deploy.URL); parseErr == nil && u.Host != "" {
+					if zoneName, znErr := cfSvc.GetZoneByID(site.ZoneID); znErr == nil {
+						zoneName = strings.TrimSuffix(strings.ToLower(zoneName), ".")
+						cd := strings.TrimSuffix(strings.ToLower(customDomain), ".")
+						host := ""
+						if cd == zoneName {
+							host = zoneName
+						} else if strings.HasSuffix(cd, "."+zoneName) {
+							host = cd
+						}
+						target := strings.TrimSuffix(strings.ToLower(u.Host), ".")
+						if host != "" && target != "" {
+							if err := cfSvc.CreateCNAMERecord(site.ZoneID, host, target, true); err != nil {
+								log.WithError(err).WithFields(map[string]any{
+									"site_id": site.ID,
+									"zone_id": site.ZoneID,
+									"name":    host,
+									"value":   target,
+								}).Warn("为 Pages 域名创建 CNAME 记录失败")
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 
