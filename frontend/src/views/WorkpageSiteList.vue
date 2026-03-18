@@ -81,10 +81,41 @@
         </el-table-column>
         <el-table-column label="访问地址" min-width="180">
           <template #default="{ row }">
-            <a v-if="row.deployment_url" :href="row.deployment_url" target="_blank" rel="noreferrer">
-              {{ row.deployment_url }}
-            </a>
-            <span v-else>-</span>
+            <div class="access-addresses">
+              <div v-if="row.deployment_url" class="access-address-row">
+                <a :href="row.deployment_url" target="_blank" rel="noreferrer">
+                  {{ row.deployment_url }}
+                </a>
+                <el-button
+                  type="primary"
+                  link
+                  size="small"
+                  class="copy-link-btn"
+                  title="复制"
+                  @click="copyText(row.deployment_url)"
+                >
+                  <el-icon><CopyDocument /></el-icon>
+                </el-button>
+              </div>
+
+              <div v-if="row.custom_domain" class="access-address-row">
+                <a :href="customDomainUrl(row.custom_domain)" target="_blank" rel="noreferrer">
+                  {{ row.custom_domain }}
+                </a>
+                <el-button
+                  type="primary"
+                  link
+                  size="small"
+                  class="copy-link-btn"
+                  title="复制"
+                  @click="copyText(row.custom_domain)"
+                >
+                  <el-icon><CopyDocument /></el-icon>
+                </el-button>
+              </div>
+
+              <span v-if="!row.deployment_url && !row.custom_domain">-</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="180">
@@ -242,7 +273,7 @@
 <script>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search } from '@element-plus/icons-vue'
+import { Plus, Search, CopyDocument } from '@element-plus/icons-vue'
 import { cfAccountApi } from '@/api/cf_account'
 import { getCFAccountZones } from '@/api/cf_zone'
 import { workpageTemplateApi } from '@/api/workpage_template'
@@ -251,7 +282,7 @@ import { openAuthPreview } from '@/utils/openAuthPreview'
 
 export default {
   name: 'WorkpageSiteList',
-  components: { Plus, Search },
+  components: { Plus, Search, CopyDocument },
   setup() {
     const loading = ref(false)
     const list = ref([])
@@ -490,6 +521,24 @@ export default {
       }
     }
 
+    const copyText = async (text) => {
+      if (!text) return
+      try {
+        await navigator.clipboard.writeText(String(text))
+        ElMessage.success('已复制到剪贴板')
+      } catch {
+        ElMessage.error('复制失败，请手动复制')
+      }
+    }
+
+    const customDomainUrl = (customDomain) => {
+      if (!customDomain) return ''
+      const trimmed = String(customDomain).trim()
+      if (!trimmed) return ''
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed
+      return `https://${trimmed}`
+    }
+
     const handleDelete = async (row) => {
       try {
         await ElMessageBox.confirm(
@@ -526,6 +575,8 @@ export default {
       handlePreview,
       handleViewDeployedHtml,
       copyDeployedHtml,
+      copyText,
+      customDomainUrl,
       deployedHtmlDialogVisible,
       deployedHtmlLoading,
       deployedHtmlContent,
@@ -559,6 +610,21 @@ export default {
 }
 .filter-section {
   margin-bottom: 20px;
+}
+.access-addresses {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.access-address-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+}
+.copy-link-btn {
+  padding: 0;
+  line-height: 1;
 }
 .deployed-html-textarea :deep(textarea) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
