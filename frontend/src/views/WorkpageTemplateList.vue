@@ -166,6 +166,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import { workpageTemplateApi } from '@/api/workpage_template'
+import { openAuthPreview } from '@/utils/openAuthPreview'
 
 export default {
   name: 'WorkpageTemplateList',
@@ -373,7 +374,7 @@ export default {
     }
 
     const handlePreview = (row) => {
-      window.open(`/api/v1/cf-workpage-templates/${row.id}/preview`, '_blank')
+      openAuthPreview(`/cf-workpage-templates/${row.id}/preview`)
     }
 
     onMounted(() => fetchList())

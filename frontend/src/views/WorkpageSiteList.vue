@@ -212,6 +212,7 @@ import { cfAccountApi } from '@/api/cf_account'
 import { getCFAccountZones } from '@/api/cf_zone'
 import { workpageTemplateApi } from '@/api/workpage_template'
 import { workpageSiteApi } from '@/api/workpage_site'
+import { openAuthPreview } from '@/utils/openAuthPreview'
 
 export default {
   name: 'WorkpageSiteList',
@@ -421,7 +422,7 @@ export default {
     }
 
     const handlePreview = (row) => {
-      window.open(`/api/v1/cf-workpage-sites/${row.id}/preview`, '_blank')
+      openAuthPreview(`/cf-workpage-sites/${row.id}/preview`)
     }
 
     const handleDelete = async (row) => {
