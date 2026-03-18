@@ -210,7 +210,8 @@ func (s *CFWorkpageSiteService) Deploy(id uint) (*models.CFWorkpageSite, error) 
 
 	rows, _ := s.templateService.ListRows(site.TemplateID)
 	htmlBytes := []byte(renderWorkpageHTML(site, rows))
-	deploy, err := cfSvc.CreatePagesDeployment(account.AccountID, projectName, "main", "", ".", map[string][]byte{
+	// 不传 pages_build_output_dir；manifest 使用 /index.html（与 Wrangler 一致），避免生产根路径 404
+	deploy, err := cfSvc.CreatePagesDeployment(account.AccountID, projectName, "main", "Deploy CF-WorkPage site", "", map[string][]byte{
 		"index.html": htmlBytes,
 	})
 	if err != nil {

@@ -129,14 +129,32 @@ func (s *CloudflareService) CreatePagesProject(accountID, projectName, productio
 	return &env.Result, nil
 }
 
-// CreatePagesDeployment 通过 Direct Upload 方式创建部署。
-// files: key 为相对路径（如 index.html），value 为文件内容字节。
-func (s *CloudflareService) CreatePagesDeployment(accountID, projectName, branch, commitMessage, pagesBuildOutputDir string, files map[string][]byte) (*PagesDeployment, error) {
-	if pagesBuildOutputDir == "" {
-		pagesBuildOutputDir = "."
+// pagesAssetManifestPath 将资源路径规范为与 Wrangler Direct Upload 一致的 manifest 键：必须以 / 开头。
+// 使用 "index.html" 等非斜杠开头路径时，生产环境常出现 *.pages.dev 根路径 404，而控制台上传「文件夹」正常。
+func pagesAssetManifestPath(rel string) string {
+	rel = strings.TrimSpace(rel)
+	rel = strings.TrimPrefix(rel, "./")
+	rel = strings.TrimPrefix(rel, "/")
+	if rel == "" {
+		return "/"
 	}
-	manifest := map[string]string{}
+	return "/" + path.Clean(rel)
+}
+
+// CreatePagesDeployment 通过 Direct Upload 方式创建部署。
+// files: key 为站点内路径（如 index.html、css/a.css），内部会转为 /index.html 写入 manifest。
+// pagesBuildOutputDir 非空时才会提交该字段；传空则与 Wrangler 纯静态部署行为一致（不强行写 "."）。
+func (s *CloudflareService) CreatePagesDeployment(accountID, projectName, branch, commitMessage, pagesBuildOutputDir string, files map[string][]byte) (*PagesDeployment, error) {
+	if len(files) == 0 {
+		return nil, fmt.Errorf("部署文件列表不能为空")
+	}
+	normalized := make(map[string][]byte, len(files))
 	for name, content := range files {
+		key := pagesAssetManifestPath(name)
+		normalized[key] = content
+	}
+	manifest := make(map[string]string, len(normalized))
+	for name, content := range normalized {
 		sum := sha1.Sum(content)
 		manifest[name] = hex.EncodeToString(sum[:])
 	}
@@ -149,12 +167,18 @@ func (s *CloudflareService) CreatePagesDeployment(accountID, projectName, branch
 	_ = w.WriteField("commit_hash", randomHex(12))
 	_ = w.WriteField("commit_message", commitMessage)
 	_ = w.WriteField("manifest", string(manifestJSON))
-	_ = w.WriteField("pages_build_output_dir", pagesBuildOutputDir)
+	if strings.TrimSpace(pagesBuildOutputDir) != "" {
+		_ = w.WriteField("pages_build_output_dir", pagesBuildOutputDir)
+	}
 
-	// Cloudflare Pages 部署 API 使用 manifest 的 hash 作为 file field name（与文档示例一致的 manifest 结构）。
-	for name, content := range files {
+	// multipart 中每个文件段的 name 为 manifest 中的 hash；filename 使用去掉前导 / 的路径便于服务端关联。
+	for name, content := range normalized {
 		fieldName := manifest[name]
-		fw, err := w.CreateFormFile(fieldName, name)
+		filename := strings.TrimPrefix(name, "/")
+		if filename == "" {
+			filename = "index.html"
+		}
+		fw, err := w.CreateFormFile(fieldName, filename)
 		if err != nil {
 			_ = w.Close()
 			return nil, fmt.Errorf("创建文件字段失败: %w", err)
