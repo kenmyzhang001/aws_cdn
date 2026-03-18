@@ -346,8 +346,11 @@ func renderWorkpageHTML(site *models.CFWorkpageSite, rows []models.CFWorkpageTem
 	var b strings.Builder
 	b.WriteString("<!doctype html><html><head><meta charset=\"utf-8\" />")
 	b.WriteString("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />")
+	b.WriteString("<meta http-equiv=\"Cache-Control\" content=\"no-cache, no-store, must-revalidate\" />")
+	b.WriteString("<meta http-equiv=\"Pragma\" content=\"no-cache\" />")
+	b.WriteString("<meta http-equiv=\"Expires\" content=\"0\" />")
 	b.WriteString("<title>Download</title>")
-	b.WriteString("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; padding:clamp(12px,4vw,24px); background:#f7f7fb;} .wrap{max-width:920px;margin:0 auto; overflow-x:auto; -webkit-overflow-scrolling:touch;} table{width:max-content; min-width:100%; border-collapse:collapse; background:#fff;} td{border:1px solid #e5e7eb; padding:clamp(10px,2.6vw,16px); text-align:center; font-size:clamp(14px,3.8vw,20px); white-space:nowrap;} a.btn{display:inline-block; padding:clamp(8px,2.4vw,10px) clamp(12px,3.2vw,18px); background:#2563eb; color:#fff; border-radius:10px; text-decoration:none; font-weight:600; white-space:nowrap;} a.btn:hover{background:#1d4ed8;} .hint{color:#6b7280; font-size:12px; margin-top:10px; white-space:nowrap;}</style>")
+	b.WriteString("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; padding:clamp(10px,3.4vw,20px); background:#f7f7fb;} .wrap{max-width:920px;margin:0 auto; overflow-x:hidden;} table{width:100%; border-collapse:collapse; background:#fff; table-layout:fixed;} td{border:1px solid #e5e7eb; padding:clamp(6px,2vw,12px); text-align:center; font-size:clamp(12px,3.4vw,18px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;} td:nth-child(1){width:34%;} td:nth-child(2){width:34%;} td:nth-child(3){width:32%;} a.btn{display:inline-block; max-width:100%; box-sizing:border-box; padding:clamp(6px,2vw,10px) clamp(8px,2.8vw,14px); background:#2563eb; color:#fff; border-radius:10px; text-decoration:none; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;} a.btn:hover{background:#1d4ed8;} .hint{color:#6b7280; font-size:12px; margin-top:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}</style>")
 	b.WriteString("</head><body><div class=\"wrap\">")
 	b.WriteString("<table>")
 	for _, r := range rows {
