@@ -518,7 +518,11 @@ func (s *CloudflareService) DeletePagesDomainByID(accountID, projectName, domain
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode == http.StatusNotFound {
-		log.Error("删除 Pages 域名失败：域名不存在")
+		log.WithFields(map[string]any{
+			"account_id":   accountID,
+			"project_name": projectName,
+			"domain_id":    domainID,
+		}).Info("删除 Pages 域名失败：域名不存在")
 		return nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
