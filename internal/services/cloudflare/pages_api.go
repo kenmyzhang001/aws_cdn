@@ -498,11 +498,13 @@ func (s *CloudflareService) DeletePagesDomainByID(accountID, projectName, domain
 	}).Info("删除 Pages 域名")
 	domainID = strings.TrimSpace(domainID)
 	if domainID == "" {
+		log.Error("删除 Pages 域名失败：domainID 不能为空")
 		return nil
 	}
 	url := s.pagesAPIURL(accountID, "pages", "projects", projectName, "domains", domainID)
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
+		log.WithError(err).Error("删除 Pages 域名失败：创建请求失败")
 		return err
 	}
 	for k, v := range s.getAuthHeaders() {
@@ -510,14 +512,17 @@ func (s *CloudflareService) DeletePagesDomainByID(accountID, projectName, domain
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
+		log.WithError(err).Error("删除 Pages 域名失败：请求失败")
 		return err
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode == http.StatusNotFound {
+		log.Error("删除 Pages 域名失败：域名不存在")
 		return nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.WithError(fmt.Errorf("删除 Pages 域名失败 (状态码: %d): %s", resp.StatusCode, string(body))).Error("删除 Pages 域名失败")
 		return fmt.Errorf("删除 Pages 域名失败 (状态码: %d): %s", resp.StatusCode, string(body))
 	}
 	log.WithFields(map[string]any{
@@ -549,7 +554,27 @@ func (s *CloudflareService) DeletePagesDomainByName(accountID, projectName, doma
 			"status":          d.Status,
 		}).Info("查询 Pages 域名列表")
 		if strings.TrimSpace(strings.ToLower(d.Name)) == domainName {
-			return s.DeletePagesDomainByID(accountID, projectName, d.ID)
+			log.WithFields(map[string]any{
+				"account_id":      accountID,
+				"project_name":    projectName,
+				"domain_name":     domainName,
+				"domain_id":       d.ID,
+				"old_domain_name": d.Name,
+				"status":          d.Status,
+			}).Info("删除 Pages 域名")
+			if err := s.DeletePagesDomainByID(accountID, projectName, d.ID); err != nil {
+				log.WithError(err).Error("删除 Pages 域名失败")
+				return err
+			}
+			log.WithFields(map[string]any{
+				"account_id":      accountID,
+				"project_name":    projectName,
+				"domain_name":     domainName,
+				"domain_id":       d.ID,
+				"new_domain_name": d.Name,
+				"status":          d.Status,
+			}).Info("删除 Pages 域名成功")
+			return nil
 		}
 	}
 	return nil
