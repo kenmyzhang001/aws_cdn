@@ -118,6 +118,22 @@ func (s *CFWorkpageSiteService) Update(id uint, subdomain *string) (*models.CFWo
 
 // Delete 删除
 func (s *CFWorkpageSiteService) Delete(id uint) error {
+	site, err := s.Get(id)
+	if err != nil {
+		return err
+	}
+	// 先尝试删除 Cloudflare Pages 项目（若存在）
+	if site.PagesProjectName != "" {
+		account, aErr := s.cfAccountService.GetCFAccount(site.CFAccountID)
+		if aErr == nil && account.AccountID != "" {
+			apiToken := s.cfAccountService.GetAPIToken(account)
+			if apiToken != "" {
+				if cfSvc, cErr := cf.NewCloudflareService(&config.CloudflareConfig{APIToken: apiToken}); cErr == nil {
+					_ = cfSvc.DeletePagesProject(account.AccountID, site.PagesProjectName)
+				}
+			}
+		}
+	}
 	return s.db.Delete(&models.CFWorkpageSite{}, id).Error
 }
 

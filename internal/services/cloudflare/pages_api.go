@@ -237,3 +237,28 @@ func (s *CloudflareService) AddPagesDomain(accountID, projectName, domainName st
 	return &env.Result, nil
 }
 
+func (s *CloudflareService) DeletePagesProject(accountID, projectName string) error {
+	url := s.pagesAPIURL(accountID, "pages", "projects", projectName)
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return err
+	}
+	for k, v := range s.getAuthHeaders() {
+		req.Header.Set(k, v)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("删除 Pages 项目失败 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+
