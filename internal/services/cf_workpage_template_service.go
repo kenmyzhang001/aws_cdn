@@ -211,7 +211,6 @@ func (s *CFWorkpageTemplateService) PreviewHTML(id uint) (string, error) {
 		b.WriteString("</tr>")
 	}
 	b.WriteString("</table>")
-	b.WriteString("<div class=\"hint\">默认语言: " + html.EscapeString(lang) + "</div>")
 	if autoURL != "" {
 		b.WriteString("<script>setTimeout(function(){try{window.location.href=")
 		b.WriteString("'" + strings.ReplaceAll(autoURL, "'", "\\'") + "'")
@@ -220,4 +219,3 @@ func (s *CFWorkpageTemplateService) PreviewHTML(id uint) (string, error) {
 	b.WriteString("</div></body></html>")
 	return b.String(), nil
 }
-
