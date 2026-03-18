@@ -129,20 +129,21 @@ func (s *CloudflareService) CreatePagesProject(accountID, projectName, productio
 	return &env.Result, nil
 }
 
-// pagesAssetManifestPath 将资源路径规范为与 Wrangler Direct Upload 一致的 manifest 键：必须以 / 开头。
-// 使用 "index.html" 等非斜杠开头路径时，生产环境常出现 *.pages.dev 根路径 404，而控制台上传「文件夹」正常。
-func pagesAssetManifestPath(rel string) string {
+// pagesAssetManifestKey 与 Cloudflare REST API 文档一致：manifest 键为无前导斜杠的站点路径。
+// 文档示例：manifest='{"index.html":"...","style.css":"..."}'。
+// 若写成 "/index.html"，部署接口常仍返回 success，但资源未正确映射，*.pages.dev 根路径会 404。
+func pagesAssetManifestKey(rel string) string {
 	rel = strings.TrimSpace(rel)
 	rel = strings.TrimPrefix(rel, "./")
 	rel = strings.TrimPrefix(rel, "/")
 	if rel == "" {
-		return "/"
+		return "index.html"
 	}
-	return "/" + path.Clean(rel)
+	return path.Clean(rel)
 }
 
 // CreatePagesDeployment 通过 Direct Upload 方式创建部署。
-// files: key 为站点内路径（如 index.html、css/a.css），内部会转为 /index.html 写入 manifest。
+// files: key 为站点内路径（如 index.html、css/a.css），manifest 中为同名规范键。
 // pagesBuildOutputDir 非空时才会提交该字段；传空则与 Wrangler 纯静态部署行为一致（不强行写 "."）。
 func (s *CloudflareService) CreatePagesDeployment(accountID, projectName, branch, commitMessage, pagesBuildOutputDir string, files map[string][]byte) (*PagesDeployment, error) {
 	if len(files) == 0 {
@@ -150,7 +151,7 @@ func (s *CloudflareService) CreatePagesDeployment(accountID, projectName, branch
 	}
 	normalized := make(map[string][]byte, len(files))
 	for name, content := range files {
-		key := pagesAssetManifestPath(name)
+		key := pagesAssetManifestKey(name)
 		normalized[key] = content
 	}
 	manifest := make(map[string]string, len(normalized))
@@ -171,11 +172,11 @@ func (s *CloudflareService) CreatePagesDeployment(accountID, projectName, branch
 		_ = w.WriteField("pages_build_output_dir", pagesBuildOutputDir)
 	}
 
-	// multipart 中每个文件段的 name 为 manifest 中的 hash；filename 使用去掉前导 / 的路径便于服务端关联。
+	// multipart 中每个文件段的 name 为 manifest 中的 hash；filename 与 manifest 键一致。
 	for name, content := range normalized {
 		fieldName := manifest[name]
-		filename := strings.TrimPrefix(name, "/")
-		if filename == "" {
+		filename := name
+		if filename == "" || filename == "." {
 			filename = "index.html"
 		}
 		fw, err := w.CreateFormFile(fieldName, filename)
