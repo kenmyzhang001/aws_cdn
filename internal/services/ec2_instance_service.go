@@ -193,16 +193,22 @@ func (s *Ec2InstanceService) List(page, pageSize int, region string) ([]*models.
 	for r, insts := range byRegion {
 		client, err := aws.NewEC2Client(s.cfg, r)
 		if err != nil {
+			fmt.Println("aws new ec2 client error,", err)
 			continue
 		}
+		
+		fmt.Println("aws new ec2 client success")
+	        	
 		ids := make([]string, 0, len(insts))
 		for _, i := range insts {
 			ids = append(ids, i.AWSInstanceID)
 		}
 		ipMap, err := aws.GetInstancesPublicIPs(client, ids)
 		if err != nil {
+			fmt.Println("get public ip error,",err)
 			continue
 		}
+		fmt.Println("get public ip success")
 		for _, i := range insts {
 			if ip, ok := ipMap[i.AWSInstanceID]; ok {
 				i.PublicIP = ip
