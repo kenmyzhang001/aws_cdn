@@ -181,7 +181,7 @@ func (s *Ec2InstanceService) List(page, pageSize int, region string) ([]*models.
 	if offset < 0 {
 		offset = 0
 	}
-	if err := q.Order("updated_at DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
+	if err := q.Order("note ASC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
 	// 按 region 分组，批量查 AWS 公网 IP 并填充
@@ -197,16 +197,16 @@ func (s *Ec2InstanceService) List(page, pageSize int, region string) ([]*models.
 			fmt.Println("aws new ec2 client error,", err)
 			continue
 		}
-		
+
 		fmt.Println("aws new ec2 client success")
-	        	
+
 		ids := make([]string, 0, len(insts))
 		for _, i := range insts {
 			ids = append(ids, i.AWSInstanceID)
 		}
 		ipMap, err := aws.GetInstancesPublicIPs(client, ids)
 		if err != nil {
-			fmt.Println("get public ip error,",err)
+			fmt.Println("get public ip error,", err)
 			continue
 		}
 		fmt.Println("get public ip success")
