@@ -63,12 +63,12 @@
             </el-table-column-->
             <el-table-column label="使用时长(小时)" width="120">
               <template #default="{ row }">
-                {{ formatLifetimeHours(row.created_at) }}
+                {{ formatLifetimeHours(effectiveLifetimeStart(row)) }}
               </template>
             </el-table-column>
             <el-table-column prop="note" label="备注" min-width="120" show-overflow-tooltip />
-            <el-table-column label="创建时间" width="170">
-              <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+            <el-table-column label="更新时间" width="170">
+              <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
             </el-table-column>
             <el-table-column label="操作" width="200" fixed="right">
               <template #default="{ row }">
@@ -308,10 +308,22 @@ function formatDate(v) {
   return isNaN(d.getTime()) ? v : d.toLocaleString()
 }
 
-/** 根据创建时间计算当前已运行时长（小时） */
-function formatLifetimeHours(createdAt) {
-  if (!createdAt) return '-'
-  const d = new Date(createdAt)
+/**
+ * 使用时长起点：有 updated_at 时一律以 updated_at 为准（无论与 created_at 先后）；
+ * 否则用 created_at。
+ */
+function effectiveLifetimeStart(row) {
+  if (row.updated_at < row.created_at) {
+    return row.updated_at
+  } else {
+    return row.created_at
+  }
+}
+
+/** 根据起点时间计算当前已运行时长（小时） */
+function formatLifetimeHours(startAt) {
+  if (!startAt) return '-'
+  const d = new Date(startAt)
   if (isNaN(d.getTime())) return '-'
   const hours = (Date.now() - d.getTime()) / (1000 * 60 * 60)
   return hours >= 0 ? hours.toFixed(2) : '-'
