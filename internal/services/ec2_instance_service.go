@@ -16,7 +16,7 @@ var RegionToAMI = map[string]string{
 }
 
 var RegionToSecurityGroup = map[string]string{
-	"ap-east-1": "sg-0b6fa9e47ec4886dd",
+	"ap-east-1": "sg-00f14a9d250a3b6ec",
 }
 
 const DefaultInstanceType = "t3.nano"
@@ -77,7 +77,8 @@ func (s *Ec2InstanceService) ReplaceInstance(id uint) (*models.Ec2Instance, erro
 	// 终止原实例（如果存在）
 	if inst.AWSInstanceID != "" {
 		if err := aws.TerminateInstance(client, inst.AWSInstanceID); err != nil {
-			return nil, fmt.Errorf("终止原实例失败: %w", err)
+			fmt.Printf("终止原实例失败: ", err)
+			//return nil, fmt.Errorf("终止原实例失败: %w", err)
 		}
 	}
 
@@ -193,16 +194,22 @@ func (s *Ec2InstanceService) List(page, pageSize int, region string) ([]*models.
 	for r, insts := range byRegion {
 		client, err := aws.NewEC2Client(s.cfg, r)
 		if err != nil {
+			fmt.Println("aws new ec2 client error,", err)
 			continue
 		}
+		
+		fmt.Println("aws new ec2 client success")
+	        	
 		ids := make([]string, 0, len(insts))
 		for _, i := range insts {
 			ids = append(ids, i.AWSInstanceID)
 		}
 		ipMap, err := aws.GetInstancesPublicIPs(client, ids)
 		if err != nil {
+			fmt.Println("get public ip error,",err)
 			continue
 		}
+		fmt.Println("get public ip success")
 		for _, i := range insts {
 			if ip, ok := ipMap[i.AWSInstanceID]; ok {
 				i.PublicIP = ip
