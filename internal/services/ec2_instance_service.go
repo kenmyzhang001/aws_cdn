@@ -116,7 +116,7 @@ func (s *Ec2InstanceService) ReplaceInstance(id uint) (*models.Ec2Instance, erro
 		"aws_instance_id": newInstanceID,
 		"state":           "pending",
 		"public_ip":       "",
-		"created_at":      now,
+		"updated_at":      now,
 		"lifetime_hours":  nil,
 	}
 	if err := s.db.Model(&inst).Updates(updates).Error; err != nil {
