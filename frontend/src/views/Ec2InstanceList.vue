@@ -63,7 +63,7 @@
             </el-table-column-->
             <el-table-column label="使用时长(小时)" width="120">
               <template #default="{ row }">
-                {{ formatLifetimeHours(row.created_at) }}
+                {{ formatLifetimeHours(effectiveLifetimeStart(row)) }}
               </template>
             </el-table-column>
             <el-table-column prop="note" label="备注" min-width="120" show-overflow-tooltip />
