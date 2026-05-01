@@ -61,14 +61,14 @@
                 </el-tag>
               </template>
             </el-table-column-->
-            <el-table-column label="使用时长(小时)" width="120">
+            <!--el-table-column label="使用时长(小时)" width="120">
               <template #default="{ row }">
                 {{ formatLifetimeHours(effectiveLifetimeStart(row)) }}
               </template>
-            </el-table-column>
+            </el-table-column-->
             <el-table-column prop="note" label="备注" min-width="120" show-overflow-tooltip />
             <el-table-column label="更新时间" width="170">
-              <template #default="{ row }">{{ formatDate(row.updated_at) }}</template>
+              <template #default="{ row }">{{ formatDate(effectiveLifetimeStart(row)) }}</template>
             </el-table-column>
             <el-table-column label="操作" width="200" fixed="right">
               <template #default="{ row }">
