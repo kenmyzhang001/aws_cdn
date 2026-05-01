@@ -180,7 +180,7 @@ func (s *Ec2InstanceService) List(page, pageSize int, region string) ([]*models.
 	if offset < 0 {
 		offset = 0
 	}
-	if err := q.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
+	if err := q.Order("updated_at DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
 		return nil, 0, err
 	}
 	// 按 region 分组，批量查 AWS 公网 IP 并填充
